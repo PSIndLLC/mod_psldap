@@ -2005,6 +2005,12 @@ static char * get_ldap_val_bound(request_rec *r, LDAP *ldap,
         
         ldap_query = construct_ldap_query(r, conf, query_by, query_for,
                                           user);
+        if (NULL != otherParams) {
+	    char opStr[4] = "(&(";
+	    if ('\0' != paramOp) { opStr[1] = paramOp; }
+	    ldap_query = ap_pstrcat(r->pool, opStr, ldap_query,")(",
+				    otherParams, "))", NULL);
+	}
         ldap_base = construct_ldap_base(r, conf, ldap_query);
         
         retval = get_ldvalues_from_connection(r, conf, ldap, ldap_base,

@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.74"
+#define PSLDAP_VERSION_LABEL "0.75"
 
 #include "httpd.h"
 #include "http_conf_globals.h"
@@ -1053,6 +1053,23 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, n, psldap_grp_mbr_attr);
     set_cfg_str_if_n_set(p, result, n, psldap_grp_nm_attr);
     set_cfg_str_if_n_set(p, result, n, psldap_cookiedomain);
+    set_cfg_int_if_n_set(result, n, psldap_auth_enabled, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, n, psldap_searchscope, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, n, psldap_bindmethod, LDAP_AUTH_NONE,
+                         LDAP_AUTH_NONE);
+    set_cfg_int_if_n_set(result, n, psldap_authoritative, INT_UNSET,
+                         INT_UNSET);
+    set_cfg_int_if_n_set(result, n, psldap_cryptpasswords, INT_UNSET,
+                         INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_authsimple, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_authexternal, INT_UNSET,
+                         INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_schemeprefix, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_use_ldap_groups, INT_UNSET,
+                         INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET,
+                         INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, INT_UNSET);
 
     if (NULL == b) return result;
     
@@ -1087,10 +1104,10 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_use_ldap_groups, INT_UNSET, 0);
     /* Cookie is secure by default */
     set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET, 1);
-    /* Set the URI for the form to capture credentials */
-    set_cfg_str_if_n_set(p, result, b, psldap_credential_uri);
     /* Auth does not use cache by default */
     set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, 0);
+    /* Set the URI for the form to capture credentials */
+    set_cfg_str_if_n_set(p, result, b, psldap_credential_uri);
 
     return result;
 }

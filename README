@@ -111,7 +111,12 @@ Apache also provides a mechanism to build the module as a DSO compatible with
 a precompiled apache server. To compile the module independently, use the apxs
 utility:
 
+   (with Apache 1.3...)
    % apxs -o mod_psldap.so -c mod_psldap.c -lldap -llber
+
+   (... or Apache 2.0 ...)
+   % apxs -c mod_psldap.c -lldap -llber
+   % apxs -i -a -n psldap mod_psldap.la
 
 
 Summary Description of Configuration Parameters

@@ -33,6 +33,8 @@
 
 #define INT_UNSET -1
 #define STR_UNSET NULL
+#define LDAP_KEY_PREFIX "psldap-"
+#define LDAP_KEY_PREFIX_LEN 7
 
 /*
   conf->psldap_use_ldap_groups - boolean value to indicate if ldap group
@@ -68,7 +70,12 @@ typedef struct  {
 
 } psldap_config_rec;
 
-void *create_ldap_auth_dir_config (pool *p, char *d)
+static void module_init(server_rec *s, pool *p)
+{
+    ap_add_version_component("mod_psldap/0.70");
+}
+
+static void *create_ldap_auth_dir_config (pool *p, char *d)
 {
     psldap_config_rec *sec
         = (psldap_config_rec *)ap_pcalloc (p, sizeof(psldap_config_rec));
@@ -309,6 +316,13 @@ command_rec ldap_auth_cmds[] = {
 
 module psldap_module;
 
+typedef struct
+{
+    request_rec *rr;
+    LDAP *ldap;
+    psldap_config_rec *conf;
+} psldap_status;
+
 static char * get_user_dn(request_rec *r, const char *user, const char *pass,
                           psldap_config_rec *conf)
 {
@@ -389,6 +403,84 @@ static char * get_user_dn(request_rec *r, const char *user, const char *pass,
     return user_dn;
 }
 
+static int set_bind_params(request_rec *r, psldap_config_rec *conf,
+                           const char **user, char const **password)
+{
+    int result = TRUE;
+
+    if(conf->psldap_authsimple)
+    {
+        *user = conf->psldap_binddn;
+        *password = conf->psldap_bindpassword;
+    }
+    else if (conf->psldap_authexternal)
+    {
+        /* Should we really check for empty passwords? What if the password in
+           the LDAP server is blank, like for a guest account? Also note that
+           this implementation requires the username to be the first segment of
+           the dn and for this record to be located directly under the BaseDN
+        */
+        if ((NULL == *password) || (0 == strcmp(*password,"")))
+        {
+            ap_log_reason("ldap_bind: no password given (AuthSimple enabled)!",
+                          NULL, r);
+            result = FALSE;
+        }
+        else
+        {
+            *user = get_user_dn(r, *user, *password, conf);
+        }
+    }
+
+    return result;
+}
+
+static char* construct_ldap_query(request_rec *r, psldap_config_rec *conf,
+                                  const char *query_by, const char *query_for,
+                                  const char *user)
+{
+    /* If no attribute to query_by is passed, or no value to query_for is
+       passed - assume this is a query of an attribute within the user's
+       record */
+  
+    char *result = NULL;
+    if ((NULL == query_by) || (NULL == query_for))
+    {
+        result = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user,
+                                NULL);
+    }
+    else
+    {
+        result = ap_pstrcat(r->pool, query_by, "=", query_for,
+                                NULL);
+    }
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server,
+                 "User = <%s = %s> : ldap_query = <%s>",
+                 conf->psldap_userkey, user, result);
+
+    return result;
+}
+
+static char* construct_ldap_base(request_rec *r, psldap_config_rec *conf,
+                                 const char *ldap_query)
+{
+    char *result = NULL;
+    /* check for search scope */
+    if(LDAP_SCOPE_BASE == conf->psldap_searchscope)
+    {
+        result = ap_pstrdup(r->pool, ldap_query);
+    }
+    else
+    {
+        result = ap_pstrdup(r->pool, conf->psldap_basedn);
+    }
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server, "ldap_base = <%s>",
+                 result);
+
+    return result;
+}
+
 /** Iterate through all values and concatenate them into a separator
  *  delimited string. This will not function properly if an attribute has
  *  embedded separator characters.
@@ -418,104 +510,21 @@ static char * build_string_list(request_rec *r, char * const *values,
     return result;
 }
 
-static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
-                           psldap_config_rec *conf,
-                           const char *query_by, const char *query_for,
-                           const char *attr, const char *separator) {
-    const char *bindas = NULL, *bindpass = NULL;
-    LDAP *ldap = NULL;
-    LDAPMessage *ld_result = NULL, *ld_entry = NULL;
-    char *ldap_query = NULL;
-    char *ldap_base = NULL;
-    const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
-    char **ld_values = NULL;
-    char *retval = NULL;
-    int  ldap_scope;
-    int  err_code;
-    char *user_dn;
-
-    user_dn = get_user_dn(r, user, pass, conf);
-
-    /* ldap_open is deprecated in future releases, ldap_init is recommended */
-    if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
-    { 
-        ap_log_error(APLOG_MARK, APLOG_ERR, r->server, "ldap_init failed <%s>",
-                     conf->psldap_hosts);
-        goto GET_LDAP_VAL_RETURN;
-    }
-
-    /* If no attribute to query_by is passed, or no value to query_for is
-       passed - assume this is a query of an attribute within the user's
-       record */
-    if ((NULL == query_by) || (NULL == query_for))
-    {
-        ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user,
-                                NULL);
-    }
-    else
-    {
-        ldap_query = ap_pstrcat(r->pool, query_by, "=", query_for,
-                                NULL);
-    }
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server,
-                 "User = <%s = %s> : ldap_query = <%s>",
-                 conf->psldap_userkey, user, ldap_query);
-
-    if(conf->psldap_authsimple)
-    {
-        bindas = conf->psldap_binddn;
-        bindpass = conf->psldap_bindpassword;
-    }
-    else if (conf->psldap_authexternal)
-    {
-        /* Should we really check for empty passwords? What if the password in
-           the LDAP server is blank, like for a guest account? Also note that
-           this implementation requires the username to be the first segment of
-           the dn and for this record to be located directly under the BaseDN
-        */
-        if ((NULL == pass) || (0 == strcmp(pass,"")))
-        {
-            ap_log_reason("ldap_bind: no password given (AuthSimple enabled)!",
-                          NULL, r);
-            goto GET_LDAP_VAL_RETURN;
-        }
-        bindas = user_dn;
-        bindpass = pass;
-    }
-
-    if(NULL == attr)
-    {
-        retval = "bind";
-        goto GET_LDAP_VAL_RETURN;
-    }
-
-    if(ldap_bind_s(ldap, bindas, bindpass, conf->psldap_bindmethod))
-    {
-        ap_log_error(APLOG_MARK, APLOG_WARNING, r->server,
-                     "ldap_bind as user <%s> failed", bindas);
-        goto GET_LDAP_VAL_RETURN;
-    }
-
-    ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
-                 "ldap_bind as user <%s:%s> succeeded", bindas, bindpass);
-
-    /* check for search scope */
-    if(LDAP_SCOPE_BASE == conf->psldap_searchscope)
-    {
-        ldap_base = ap_pstrdup(r->pool, ldap_query);
-    }
-    else
-    {
-        ldap_base = ap_pstrdup(r->pool, conf->psldap_basedn);
-    }
-
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server, "ldap_base = <%s>",
-                 ldap_base);
-
+static char * get_ldvalues_from_connection(
+                           request_rec *r, psldap_config_rec *conf, LDAP *ldap,
+                           char *ldap_base, char *ldap_query, const char *user,
+                           const char *attr, const char *separator)
+{
     /* Set the attribute list to return to include only the requested value.
        This is done to avoid false errors caused when querying more secure
        LDAP servers that protect information within the records.
     */
+    LDAPMessage *ld_result = NULL, *ld_entry = NULL;
+    const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
+    char **ld_values = NULL;
+    char *result = NULL;
+    int  err_code;
+
     ldap_attrs[0] = attr;
     if(LDAP_SUCCESS !=
        (err_code = ldap_search_s(ldap, ldap_base, conf->psldap_searchscope,
@@ -524,25 +533,25 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE, r->server,
                      "ldap_search failed: %s", ldap_err2string(err_code));
-        goto GET_LDAP_VAL_RETURN;
+        goto GET_LDVALUES_RETURN;
     }
 
     if(!(ld_entry = ldap_first_entry(ldap, ld_result)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE, r->server,
                      "user <%s> not found", user);
-        goto GET_LDAP_VAL_RETURN;
+        goto GET_LDVALUES_RETURN;
     }
     if(!(ld_values = ldap_get_values(ldap, ld_entry, attr)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE, r->server,
                      "ldap_get_values <%s> failed", attr);
-        goto GET_LDAP_VAL_RETURN;
+        goto GET_LDVALUES_RETURN;
     }
-    
-    retval = build_string_list(r, ld_values, separator);
 
- GET_LDAP_VAL_RETURN:
+    result = build_string_list(r, ld_values, separator);
+
+ GET_LDVALUES_RETURN:
     if (NULL != ld_values)
     {
         ldap_value_free(ld_values);
@@ -551,16 +560,58 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
     {
         ldap_msgfree(ld_result);
     }
-    if (NULL != ldap)
-    {
-        ldap_unbind_s(ldap);
+    return result;
+}
+
+static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
+                           psldap_config_rec *conf,
+                           const char *query_by, const char *query_for,
+                           const char *attr, const char *separator) {
+    const char *bindas = user, *bindpass = pass;
+    LDAP *ldap = NULL;
+    char *retval = NULL;
+
+    /* ldap_open is deprecated in future releases, ldap_init is recommended */
+    if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
+    { 
+        ap_log_error(APLOG_MARK, APLOG_ERR, r->server, "ldap_init failed <%s>",
+                     conf->psldap_hosts);
+        return retval;
     }
+
+    if(NULL == attr) retval = "bind";
+    if((NULL != attr) && set_bind_params(r, conf, &bindas, &bindpass))
+    {
+        if(ldap_bind_s(ldap, bindas, bindpass, conf->psldap_bindmethod))
+        {
+            ap_log_error(APLOG_MARK, APLOG_WARNING, r->server,
+                         "ldap_bind as user <%s> failed", bindas);
+        }
+        else
+        {
+            char *ldap_query = NULL, *ldap_base = NULL;
+
+            ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
+                         "ldap_bind as user <%s> succeeded", bindas);
+        
+            ldap_query = construct_ldap_query(r, conf, query_by, query_for,
+                                              user);
+            ldap_base = construct_ldap_base(r, conf, ldap_query);
+            
+            retval = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
+                                                  ldap_query, user, attr,
+                                                  separator);
+        }
+    }
+
+    if (NULL != ldap) { ldap_unbind_s(ldap); }
     
     return retval; 
 }
 
 static char * get_groups_containing_grouped_attr(request_rec *r,
-                                                 char *user, char *pass,
+                                                 const char *user,
+                                                 const char *pass,
                                                  psldap_config_rec *conf)
 {
     char *retval = NULL;
@@ -593,7 +644,7 @@ static char * get_groups_containing_grouped_attr(request_rec *r,
     return retval;
 }
 
-static char * get_ldap_grp(request_rec *r, char *user, char *pass,
+static char * get_ldap_grp(request_rec *r, const char *user, const char *pass,
                            psldap_config_rec *conf)
 {
     if (conf->psldap_use_ldap_groups)
@@ -723,39 +774,186 @@ static int authenticate_via_query (request_rec *r, psldap_config_rec *sec,
     return AUTH_REQUIRED;
 }
 
-static int get_provided_password(request_rec *r, const char **sent_pw)
+static int translate_handler(request_rec *r)
 {
+    return DECLINED;
+}
+
+static int util_read(request_rec *r, char **buf)
+{
+    int rc = !OK;
+    if((rc = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR))!= OK)
+    {
+        return rc;
+    }
+
+    if (ap_should_client_block(r)) {
+        int rsize, len_read, rpos=0;
+        long length = r->remaining;
+        char *argsbuf = (char*)*buf = ap_pcalloc(r->pool, length + 2);
+
+        ap_hard_timeout("util_read", r);
+	
+        ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
+                     "psldap reading client response of (%d) bytes", length);
+        while ((length > rpos) &&
+               (rpos += ap_get_client_block(r, argsbuf, length - rpos)) > 0)
+        {
+            argsbuf = (char*)*buf + rpos;
+            ap_reset_timeout(r);
+        }
+        if(rpos <= length) buf[rpos] = '\0';
+        else ap_log_error(APLOG_MARK, APLOG_ERR, r->server,
+                          "Buffer overflow reading page response %s",
+                          r->unparsed_uri);
+        ap_kill_timeout(r);
+    }
+    else rc = !OK;
+    return rc;
+}
+
+static int read_post(request_rec *r, table **tab)
+{
+    const char *tmp;
+    char *data, *key, *val;
+    int rc = OK;
+
+    if (r->method_number != M_POST)
+    {
+        return rc;
+    }
+    tmp = ap_table_get(r->headers_in, "Content-Type");
+    if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded"))
+    {
+        return DECLINED;
+    }
+
+    /* Ensure values are available for later processing */
+    if (NULL == (*tab = r->subprocess_env) )
+    {
+        *tab = r->subprocess_env = ap_make_table(r->pool, 8);
+    }
+    if ((rc = util_read(r, &data)) != OK) return rc;
+    
+    while (('\0' != *data) && (val = ap_getword_nc(r->pool, &data, '&')))
+    {
+        char *vptr = ap_getword_nc(r->pool, &val, '=');
+        key = ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
+                         ap_getword_nc(r->pool, &vptr, '-'),
+                         NULL);
+        /* Spaces remain as '+' if submitted in a form */
+        vptr = val;
+        ap_unescape_url(val);
+        while('\0' != *vptr)
+        {
+            if(*vptr == '+') *vptr = ' ';
+            vptr++;
+        }
+        if (NULL != (tmp = ap_table_get(*tab, key)) )
+        {
+            ap_table_setn(*tab, key,
+                          ap_pstrcat(r->pool, tmp, ";" , val, NULL));
+        }
+        else
+        {
+            ap_table_add(*tab, key, val);
+        }
+    }
+
+    return OK;
+}
+
+static int get_form_fieldvalue(request_rec *r, const char* fieldname,
+                               const char **sent_value)
+{
+    int result = 0;
+    const char *tmp;
+    table *tab = NULL;
+    psldap_config_rec *conf = (psldap_config_rec *)ap_get_module_config(
+                                         r->per_dir_config, &psldap_module);
+
+    read_post(r, &tab);
+    tmp = ap_table_get(tab,
+                       ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
+                                  fieldname, NULL)
+                       );
+    if(NULL != tmp)
+    {
+        *sent_value = ap_getword(r->pool, &tmp, ';');
+        result = 1;
+    }
+    else 
+    {
+        ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
+                     "value for %s in form was empty",
+                     fieldname);
+    }
+    return result;
+}
+
+/** Provide the requested auth value
+ * @param r the apache request record
+ * @param field the value to acquire, either "user" (user name) or
+ *              "pass" (password). Any value other than "user" gets
+ *              the password
+ * @param sent_value the memory location in which to write the
+ *                   resultant string. This value is allocated in the
+ *                   pool of r
+ * @return 
+ */
+static int get_provided_authvalue(request_rec *r, const char* field,
+                                  const char **sent_value)
+{
+    psldap_config_rec *sec =
+        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                   &psldap_module);
+    /* Get the key for the requested login value, if field is not "user"
+       assume the password is requested */
+    const char* fieldKey = (0 == strcmp("user", field)) ?
+        sec->psldap_userkey : sec->psldap_passkey;
+    
     if (NULL != ap_auth_type(r))
     {
         char *authType = ap_pstrdup(r->pool, ap_auth_type(r));
         ap_str_tolower(authType);
-        if (0 == strcmp("basic", authType))
+
+        if ((0 == strcmp("basic", authType))   ||
+            (0 == strcmp("digest", authType))  ||
+            (0 == strcmp("ssl-cert", authType)) )
         {
-            return ap_get_basic_auth_pw (r, sent_pw);
-        }
-        else if (0 == strcmp("digest", authType))
-        {
+            if (fieldKey == sec->psldap_userkey) {
+                *sent_value = r->connection->user;
+                return OK;
+            }
+            if (fieldKey == sec->psldap_passkey) {
+                ap_get_basic_auth_pw(r, sent_value);
+                return OK;
+            }
             return AUTH_REQUIRED;
         }
         else if (0 == strcmp("form", authType))
         {
-            return AUTH_REQUIRED;
-        }
-        else if (0 == strcmp("ssl-cert", authType))
-        {
-            return AUTH_REQUIRED;
+            return get_form_fieldvalue(r, fieldKey, sent_value) ? OK:
+                AUTH_REQUIRED;
         }
     }
     else
     {
         table *env = r->subprocess_env;
-        psldap_config_rec *sec =
-            (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
-                                                       &psldap_module);
-        *sent_pw = ap_pstrdup(r->pool, ap_table_get(env, sec->psldap_passkey));
-        if (NULL != *sent_pw) return OK;
+        *sent_value = ap_pstrdup(r->pool, ap_table_get(env, fieldKey) );
+        if (NULL != *sent_value) return OK;
     }
     return DECLINED;
+}
+
+static int get_provided_password(request_rec *r, const char **sent_pw)
+{
+    return get_provided_authvalue(r, "pass", sent_pw);
+}
+
+static int get_provided_username(request_rec *r, const char **sent_user)
+{
+    return get_provided_authvalue(r, "user", sent_user);
 }
 
 static int ldap_authenticate_user (request_rec *r)
@@ -764,26 +962,28 @@ static int ldap_authenticate_user (request_rec *r)
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
                                                    &psldap_module);
     conn_rec *c = r->connection;
-    char *sent_pw;
+    char *sent_pw = NULL;
+    char *sent_user = NULL;
     int res = 0;
 
-    if (OK != (res = get_provided_password (r, (const char **)&sent_pw)))
+    if(!sec->psldap_userkey) return DECLINED;
+    
+    if ((OK != (res = get_provided_password (r, (const char **)&sent_pw))) ||
+        (OK != (res = get_provided_username (r, (const char **)&sent_user))) )
     {
         return res;
     }
 
-    if(!sec->psldap_userkey) return DECLINED;
-    
     if(sec->psldap_authexternal)
     {
-        return authenticate_via_bind (r, sec, c->user, sent_pw);
+        return authenticate_via_bind (r, sec, sent_user, sent_pw);
     }
     if (sec->psldap_authsimple)
     {
-        return authenticate_via_query (r, sec, c->user, sent_pw);
+        return authenticate_via_query (r, sec, sent_user, sent_pw);
     }
 
-    return authenticate_via_query (r, sec, c->user, sent_pw);
+    return authenticate_via_query (r, sec, sent_user, sent_pw);
 }
     
 /* Checking ID */
@@ -793,7 +993,6 @@ static int ldap_check_auth(request_rec *r)
     psldap_config_rec *sec =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
                                                    &psldap_module);
-    char *user = r->connection->user;
     long methodMask = 1 << r->method_number;
     char *errstr = NULL;
     
@@ -802,14 +1001,17 @@ static int ldap_check_auth(request_rec *r)
 
     register int x;
     const char *t;
-    char *w, *sent_pw;
+    const char *w, *sent_pw, *user;
     const char *orig_groups = NULL;
     int groupRequirementExists = 0;
 
-    if (!reqs_arr || ap_get_basic_auth_pw (r, (const char **)&sent_pw) )
+    if (!reqs_arr ||
+        (OK != get_provided_password(r, &sent_pw)) ||
+        (OK != get_provided_username(r, &user)) )
     {
         return DECLINED;
     }
+    
 
     /* Check the membership in any required groups.*/
     for(x=0; x < reqs_arr->nelts; x++)
@@ -866,87 +1068,50 @@ static int ldap_check_auth(request_rec *r)
 static int update_dn_attributes_in_ldap(void *data, const char *key,
                                         const char *val)
 {
-    request_rec *r = (request_rec*)data;
-    /* Use ldap_modify_s here to directly modify the entries. Possibly add
-       the LDAPMod to an array passed in the data. */
-    ap_rprintf(r, " Attribute %s -> %s</br>\n", key, val);
-    return TRUE;
-}
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    LDAP *ldap = ps->ldap;
+    psldap_config_rec *conf = ps->conf;
+    char *oldValue = NULL;
+    const char *user;
 
-static int util_read(request_rec *r, const char **buf)
-{
-    int rc;
-    if((rc = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR))!= OK)
+    get_provided_username(r, &user);
+    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
     {
-        return rc;
+        char *ldap_query = NULL, *ldap_base = NULL;
+        
+        ldap_query = construct_ldap_query(r, conf, NULL, NULL, user);
+        ldap_base = construct_ldap_base(r, conf, ldap_query);
+        
+        oldValue = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
+                                                ldap_query, user,
+                                                key + LDAP_KEY_PREFIX_LEN,
+                                                ";");
     }
 
-    if (ap_should_client_block(r)) {
-        char argsbuffer[HUGE_STRING_LEN];
-        int rsize, len_read, rpos=0;
-        long length = r->remaining;
-        *buf = ap_pcalloc(r->pool, length + 1);
-
-        ap_hard_timeout("util_read", r);
-	
-        while ((len_read =
-                ap_get_client_block(r, argsbuffer, sizeof(argsbuffer))) > 0)
+    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    {
+        /* Use ldap_modify_s here to directly modify the entries. Possibly add
+           the LDAPMod to an array passed in the data. */
+        ap_rprintf(r, " Attribute %s -> %s", key + LDAP_KEY_PREFIX_LEN, val);
+        
+        if(NULL == oldValue)
         {
-            ap_reset_timeout(r);
-            rsize = ((rpos + len_read) > length) ? (length - rpos) : len_read;
-            memcpy((char*)*buf + rpos, argsbuffer, rsize);
-            rpos += rsize;
+            ap_rprintf(r, "&lt; no old value &gt; </br>\n");
         }
-        ap_kill_timeout(r);
+        else
+        {
+            ap_rprintf(r, " &lt; oldValue = <em>%s</em> &gt; </br>\n",
+                       oldValue);
+        }
     }
-    return rc;
-}
-
-static int read_post(request_rec *r, table **tab)
-{
-    const char *data, *type;
-    char *key;
-    char *val;
-    int rc = OK;
-
-    if (r->method_number != M_POST)
-    {
-        return rc;
-    }
-    type = ap_table_get(r->headers_in, "Content-Type");
-    if (0 != strcasecmp(type, "application/x-www-form-urlencoded"))
-    {
-        return DECLINED;
-    }
-    if ((rc = util_read(r, &data)) != OK)
-    {
-        return rc;
-    }
-
-    if (NULL != *tab)
-    {
-        ap_clear_table(*tab);
-    }
-    else
-    {
-        *tab = ap_make_table(r->pool, 8);
-    }
-
-    while (*data && (val = ap_getword(r->pool, &data, '&')))
-    {
-        key = ap_getword(r->pool, &val, '=');
-        ap_unescape_url(key);
-        ap_unescape_url(val);
-        ap_table_add(*tab, key, val);
-    }
-
-    return OK;
+    return TRUE;
 }
 
 static int ldap_update_handler(request_rec *r)
 {
     char *password = NULL;
-    const char *user = r->connection->user;
+    const char *user = NULL;
     char *bindas = NULL;
     table *t_env = NULL;
     int res;
@@ -954,9 +1119,20 @@ static int ldap_update_handler(request_rec *r)
     psldap_config_rec *conf =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
                                                    &psldap_module);
+    if (r->method_number == M_OPTIONS) {
+        r->allowed |= (1 << M_GET) | (1 << M_POST);
+        ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
+                     "User <%s> ldap update declined",
+                     (NULL == user) ? "" : user);
+        return DECLINED;
+    }
 
-    if (OK != (res = get_provided_password(r, (const char **)&password)))
+    if ((OK != (res = get_provided_password(r, (const char **)&password))) ||
+        (OK != (res = get_provided_username(r, (const char **)&user))) )
     {
+        ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
+                     "User <%s> ldap update rejected - missing auth info",
+                     (NULL == user) ? "null" : user);
         return res;
     }
 
@@ -964,12 +1140,16 @@ static int ldap_update_handler(request_rec *r)
     
     if ((NULL == user) && (NULL != t_env))
     {
+        ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
+                     "Getting user <%s> from the environment",
+                     (NULL == user) ? "" : user);
         user = ap_table_get(t_env, conf->psldap_userkey);
     }
 
     ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
-                 "User <%s> request ldap update", user);
-
+                 "User <%s> request ldap update",
+                 (NULL == user) ? "" : user);
+    
     if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
     { 
         ap_log_error(APLOG_MARK, APLOG_INFO, r->server,
@@ -994,15 +1174,22 @@ static int ldap_update_handler(request_rec *r)
             /* Process the requested update here. Send response - ideally
                this will be an XSL transform */
             r->content_type = "text/html";
+            ap_soft_timeout("update ldap data", r);
             ap_send_http_header(r);
             ap_rvputs(r,
                       "<body>\n"
-                      "<h1>Updates were not performed as ", user,
-                      ", functionality is disabled</h1>\n",
+                      "<h2>Updates were not performed as ", user,
+                      ", functionality is disabled</h2>\n",
                       NULL);
             if (NULL != t_env)
             {
-                ap_table_do(update_dn_attributes_in_ldap, (void*)r, t_env,
+                /* Add ldap connection pointer to the request and process the
+                   table entries corresponding to the ldap attributes */
+                psldap_status ps;
+                ps.rr = r;
+                ps.ldap = ldap;
+                ps.conf = conf;
+                ap_table_do(update_dn_attributes_in_ldap, (void*)&ps, t_env,
                             NULL);
             }
             ap_rputs("</body>", r);
@@ -1011,6 +1198,7 @@ static int ldap_update_handler(request_rec *r)
                          "ldap_bind as user <%s:%s> succeeded: %s", bindas,
                          password, ldap_err2string(err_code));
             ldap_unbind_s(ldap);
+            ap_kill_timeout(r);
         }
     }
 
@@ -1021,22 +1209,23 @@ handler_rec ldap_handlers [] =
 {
     {"ldap-update", ldap_update_handler},
     {"application/x-ldap-update", ldap_update_handler},
+    {"application/x-httpd-psldap", ldap_update_handler},
     {NULL}
 };
 
 module MODULE_VAR_EXPORT psldap_module =
 {
     STANDARD_MODULE_STUFF,
-    NULL,			/* initializer                        */
+    module_init,	/* initializer                        */
     create_ldap_auth_dir_config,/* per-directory config creator       */
     merge_ldap_auth_dir_config,	/* dir config merger                  */
     NULL,			/* server config creator              */
     NULL,			/* server config merger               */
-    ldap_auth_cmds,		/* config directive table             */
-    ldap_handlers,		/* [9]  content handlers              */
-    NULL,			/* [2]  URI-to-filename translation   */
-    ldap_authenticate_user,	/* [5]  check/validate user_id        */
-    ldap_check_auth,		/* [6]  check user_id is valid *here* */
+    ldap_auth_cmds,	/* config directive table             */
+    ldap_handlers,	/* [9]  content handlers              */
+    translate_handler,			/* [2]  URI-to-filename translation   */
+    ldap_authenticate_user,		/* [5]  check/validate user_id        */
+    ldap_check_auth,/* [6]  check user_id is valid *here* */
     NULL,			/* [4]  check access by host address  */
     NULL,			/* [7]  MIME type checker/setter      */
     NULL,			/* [8]  fixups                        */

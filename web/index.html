@@ -39,22 +39,98 @@
             window.defaultStatus = "Getting LDAP records for filter = " + strQuery;
             return true;
         }
+        function encodeChar() {
+            alert("Encoding of char " + document.encodeForm.encChar.value + " is " +
+                  encodeURI(document.encodeForm.encChar.value));
+            alert("decoded uri is : " + String('/ldapupdate?FormAction=Search&search=(objectClass=*)&dn=cn=Kris%20Canekaratne,%20ou=eRUNWAY,%20dc=psind,%20dc=com&BinaryData=jpegPhoto&BinaryType=image/jpeg') );
+        }
+        function setLDAPBase(objBaseDN) {
+            var searchBase = document.queryForm.dn;
+            searchBase.value = objBaseDN;
+        }
+        function setFormBaseDN() {
+            alert("Loaded window - new dn is ");
+        }
+        function loadDNInitializationFormUrl(objUrl) {
+            var objWindow = loadRecordUrl(objUrl + "?dn=" +
+                                          document.queryForm.dn.value);
+            objWindow.onload='setFormBaseDN';
+        }
+        function resizeResultIframe() {
+            var objIframe = document.getElementById("resultSet");
+            var winHeight = getWindowHeight(window);
+            var ifHeight = 1600;
+            if (null != objIframe) {
+                objIframe.style.height = ifHeight + "px";
+            }
+            if (document.body.scrollHeight > winHeight) {
+                ifHeight -= document.body.scrollHeight - winHeight + 25;
+                objIframe.style.height = ifHeight + "px";
+            }
+        }
+        function setInternalTarget(bChecked) {
+            document.queryForm.target = (bChecked) ? "resultSet" : "_blank";
+        }
     </script>
 
 </head>
 
-<body>
+<body onload="resizeResultIframe() onresize="resizeResultIframe()">
 
 <!-- Add body of page here -->
-<h2>LDAP Manager</h2>
-<h3>Search for a Record</h3>
-<p>Enter the LDAP query string in the <em>Search For</em> field, select the <em>Directory</em> in which you wish to search, and then select <em>Submit</em> - the style sheets should be fine as they are.</p>
-<div>
-<form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/ldapupdate">
-    <table>
+<table width="100%">
+  <tr width="100%">
+    <td align="left" width="*">
+      <h2>Manage Directory 
+        <select size="1" name="dn" style="font-size: 14px; font-weight: bold; margin-left: 6px; " onchange="setLDAPBase(this.value)">
+          <option selected value="dc=some, dc=com">Some .com</option>
+          <option value="dc=another, dc=com">Another .com</option>
+        </select>
+      </h2>
+    </td>
+    <td align="right" width="5px">
+      <fieldset>
+        <legend>Create a New ...</legend>
+        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(this.value); this.value='';">
+          <option selected value="">Select One ...</option>
+          <option value="DSML_new_o.xml">Organization</option>
+          <option value="DSML_new_ou.xml">Organizational Unit</option>
+          <option value="DSML_new_group.xml">Group</option>
+          <option value="DSML_new_person.xml">Person</option>
+          <option value="DSML_new_user.xml">User</option>
+        </select>
+      </fieldset>
+    </td>
+  </tr>
+</table>
+
+<fieldset style="margin-bottom: 6px; ">
+  <legend>Search for a Record</legend>
+  <label><input type="checkbox" name="resultsInFrame" style="margin-right: 5px; " checked onchange="setInternalTarget(this.checked)" />Show results on this page (use new window if unchecked)</label>
+  <div style="margin-top: 6px;" >
+  <form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/ldapupdate" target="resultSet">
+    <input type="hidden" name="dn" value="dc=psind, dc=com" >
+    <table width="100%">
+        <tr>
+          <td align="left"><label>Style results as
+	    <select size="1" name="xsl1" style="margin-right: 3px;">
+                <option selected value="/psldap/DSML_cards.xsl">Card View</option>
+                <option value="/psldap/DSML_table.xsl">Table View</option>
+                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+            </select>
+            or alternatively as 
+	    <select size="1" name="xsl2" style="margin-right: 3px;">
+                <option value="/psldap/DSML_cards.xsl">Card View</option>
+                <option selected value="/psldap/DSML_table.xsl">Table View</option>
+                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+            </select>
+            <hr />
+          </td>
+        </tr>
         <tr><td align="left"><label><span style="margin-right: 18px; margin-left : 50px; ">Search For</span>
- 	    <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" ></label>
-	    <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" ></label>
+	    <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" >
+	    <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" ></label>
+
 	    <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;">
                 <option selected value="mail">eMail</option>
                 <option value="givenName">First Name</option>
@@ -72,54 +148,21 @@
             </select>
 	    <input type="text" name="searchvalue" size="32" maxlength="128" value="@" >
         </td></tr>
-        <tr><td align="left"><label><span style="margin-right: 25px; margin-left : 50px; ">Directory</span>
-	    <select size="1" name="dn" >
-                <option selected value="dc=psind,dc=com">PSInd, LLC</option>
-                <option value="dc=picard,dc=us">Picard Family</option>
-            </select>
-        </td></tr>
-        <tr>
-          <td align="left"><label><span style="margin-right: 5px; margin-left : 50px; ">Primary Style</span>
-	    <select size="1" name="xsl1" style="margin-right: 3px;">
-                <option selected value="/psldap/DSML_cards.xsl">Card View</option>
-                <option value="/psldap/DSML_table.xsl">Table View</option>
-                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
-            </select>
-            &nbsp;<label>Secondary Style
-	    <select size="1" name="xsl2" style="margin-right: 3px;">
-                <option value="/psldap/DSML_cards.xsl">Card View</option>
-                <option selected value="/psldap/DSML_table.xsl">Table View</option>
-                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
-            </select>
-          </td>
-        </tr>
-        <tr><td align="left"><label>Request Domain
-	    <select size="1" name="dn" >
-                <option selected value="dc=some,dc=com">Some .COM</option>
-                <option value="dc=another,dc=com">Another .COM</option>
-            </select>
-        </td></tr>
-        <tr>
+
+        <tr style="padding-top: 6px;" >
 	    <td align="CENTER">
-                <input type="submit" name="FormAction" value="Search"> &nbsp; &nbsp;
-                <input type="reset">
+              <hr />
+              <input type="submit" name="FormAction" value="Search"> &nbsp; &nbsp;
+              <input type="reset">
             </td>
 	</tr>
     </table>
 </form>
 </div>
-<hr>
-<h3>Create a New...
-  <select size="1" name="newRecordSelect" style="margin-right: 3px;" onclick="loadRecordUrl(this.value)">
-    <option selected value="">Select One ...</option>
-    <option value="DSML_new_o.xml">Organization</option>
-    <option value="DSML_new_ou.xml">Organizational Unit</option>
-    <option value="DSML_new_group.xml">Group</option>
-    <option value="DSML_new_person.xml">Person</option>
-    <option value="DSML_new_user.xml">User</option>
-  </select>
-</h3>
+</fieldset>
+
+
+<iframe id="resultSet" name="resultSet" src="" style="height: 0px; width: 100%; border-width: 0px;" ></iframe>
 
 </body>
-
 </html>

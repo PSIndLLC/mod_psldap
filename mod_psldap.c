@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.82"
+#define PSLDAP_VERSION_LABEL "0.83"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -93,13 +93,11 @@
  #define ap_kill_timeout(r)
  #define ap_soft_timeout(n, r)
  #define add_version_component(p,v)	ap_add_version_component(p, v)
- #define sub_req_lookup_uri(uri, r, p) ap_sub_req_lookup_uri(uri, r, p)
  static apr_uid_t ap_user_id;
  static apr_gid_t ap_group_id;
  extern module MODULE_VAR_EXPORT psldap_module;
 #else
  #define add_version_component(p,v)	ap_add_version_component(v)
- #define sub_req_lookup_uri(uri, r, p) ap_sub_req_lookup_uri(uri, r)
  typedef const char *(*cmd_func) (cmd_parms*, void*, const char*);
  typedef int apr_status_t;
  typedef AP_MM psldap_shm_mgr;
@@ -164,6 +162,7 @@ typedef struct  {
     char *psldap_cookiedomain;
     char *psldap_credential_uri;
     int   psldap_cache_auth;
+    int   psldap_ldap_version;
 } psldap_config_rec;
 
 typedef struct {
@@ -921,6 +920,15 @@ static void psldap_cache_item_free(void *a_item)
     }
 }
 
+static LDAP* ps_ldap_init(psldap_config_rec *conf, LDAP_CONST char *host,
+			  int port)
+{
+    int connectVersion = 3;
+    LDAP *ld = ldap_init(host, port);
+    ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &connectVersion);
+    return ld;
+}
+
 static int set_bind_params(request_rec *r, LDAP **ldap,
                            psldap_config_rec *conf,
                            const char **user, char const **password);
@@ -947,7 +955,8 @@ static psldap_cache_item* psldap_cache_item_create(request_rec *r,
             psldap_config_rec *conf =
                 (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
                                                            &psldap_module);
-            if (NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
+            if (NULL == (ldap = ps_ldap_init(conf, conf->psldap_hosts,
+					     LDAP_PORT)))
             { 
                 ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
                              "ldap_init failed <%s>", conf->psldap_hosts);
@@ -1151,6 +1160,7 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_cookiedomain = STR_UNSET;
     sec->psldap_credential_uri = STR_UNSET;
     sec->psldap_cache_auth = INT_UNSET;
+    sec->psldap_ldap_version = INT_UNSET;
 
     return sec;
 }
@@ -1223,6 +1233,7 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET,
                          INT_UNSET);
     set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_ldap_version, INT_UNSET, INT_UNSET);
 
     if (NULL == b) return result;
     
@@ -1258,6 +1269,8 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET, 1);
     /* Auth does not use cache by default */
     set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, 0);
+    /*  */
+    set_cfg_int_if_n_set(result, b, psldap_ldap_version, INT_UNSET, 2);
     /* Set the URI for the form to capture credentials */
     set_cfg_str_if_n_set(p, result, b, psldap_credential_uri);
 
@@ -1306,16 +1319,39 @@ static const char* set_ldap_search_scope(cmd_parms *parms, void *mconfig,
     return NULL;
 }
 
+static const char* set_connect_version_int_value(cmd_parms *parms,
+						 void *mconfig,
+						 const char *to) {
+    psldap_config_rec *lac = (psldap_config_rec*)mconfig;
+    if(NULL != to)
+    {
+        lac->psldap_ldap_version = atoi(to);
+    }
+    else
+    {
+        lac->psldap_ldap_version = 2;
+    }
+    return NULL;
+}
+
 static const char* set_ldap_slot(cmd_parms *parms, void *mconfig,
                                  const char *to) {
     psldap_config_rec *lac = (psldap_config_rec*)mconfig;
-    if((NULL != to) && (0 == strcasecmp("krbv41", to)) )
+    if((NULL != to) && (0 == strcasecmp("krbv4", to)) )
+    {
+        lac->psldap_bindmethod = LDAP_AUTH_KRBV4;
+    }
+    else if((NULL != to) && (0 == strcasecmp("krbv41", to)) )
     {
         lac->psldap_bindmethod = LDAP_AUTH_KRBV41;
     }
     else if((NULL != to) && (0 == strcasecmp("krbv42", to)) )
     {
         lac->psldap_bindmethod = LDAP_AUTH_KRBV42;
+    }
+    else if((NULL != to) && (0 == strcasecmp("sasl", to)) )
+    {
+        lac->psldap_bindmethod = LDAP_AUTH_SASL;
     }
     else
     {
@@ -1490,6 +1526,11 @@ command_rec ldap_auth_cmds[] = {
       "The maximum time in seconds to hold a record in the cache. Default"
       " value is " MAX_INACTIVE_TIME_STR
     },
+    { "PsLDAPConnectVersion", (cmd_func)set_connect_version_int_value,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_ldap_version),
+      OR_AUTHCFG, TAKE1, 
+      "The connection version for the ldap server. Default value is 2"
+    },
     { NULL }
 };
 
@@ -1519,13 +1560,19 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
 
     if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap, conf->psldap_binddn,
                                                conf->psldap_bindpassword,
-                                               conf->psldap_bindmethod))
+                                               (NULL != conf->psldap_binddn) ?
+					       conf->psldap_bindmethod :
+					       LDAP_AUTH_NONE) )
        )
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_bind as user <%s> failed: %s", conf->psldap_binddn,
+                     "ldap_bind as user <%s> to get username for <%s> failed:"
+		     " %s", conf->psldap_binddn, user,
                      ldap_err2string(err_code));
-        goto AbortDNAcquisition;
+        /* Don't abort - try to get the username anyway if anonymous access is
+	   available ***
+	   goto AbortDNAcquisition;
+	 */
     }
     
     ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user, NULL);
@@ -1573,7 +1620,7 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
         ldap_msgfree(ld_result);
     }
     ldap_unbind_s(*ldap);
-    *ldap = ldap_init(conf->psldap_hosts, LDAP_PORT);
+    *ldap = ps_ldap_init(conf, conf->psldap_hosts, LDAP_PORT);
 
  AbortDNAcquisition:
     return user_dn;
@@ -1898,7 +1945,7 @@ static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
     if (NULL == *ldap) freeLdap = 1;
 
     /* ldap_open is deprecated in future releases, ldap_init is recommended */
-    if (NULL == (*ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
+    if (NULL == (*ldap = ps_ldap_init(conf, conf->psldap_hosts, LDAP_PORT)))
     { 
         ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
                      "ldap_init failed <%s>", conf->psldap_hosts);
@@ -1907,10 +1954,13 @@ static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
     
     if(set_bind_params(r, ldap, conf, &bindas, &bindpass))
     {
-        if(ldap_bind_s(*ldap, bindas, bindpass, conf->psldap_bindmethod))
+        int err_code;
+        if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap, bindas, bindpass,
+						   conf->psldap_bindmethod)))
         {
             ap_log_error(APLOG_MARK, APLOG_WARNING DEBUG_ERRNO, r->server,
-                         "ldap_bind as user <%s> failed", bindas);
+                         "ldap_bind as user <%s> failed: %s", bindas,
+			 ldap_err2string(err_code));
             if(freeLdap) ldap_unbind_s(*ldap);
             *ldap = NULL;
         }
@@ -1976,7 +2026,7 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
 
     /* ldap_open is deprecated in future releases, ldap_init is recommended */
     if((NULL == ldap) &&
-       (NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT))) )
+       (NULL == (ldap = ps_ldap_init(conf, conf->psldap_hosts, LDAP_PORT))) )
     { 
         ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
                      "ldap_init failed <%s>", conf->psldap_hosts);
@@ -2185,7 +2235,8 @@ static size_t get_psldap_file_magic_buffer_size(request_rec *r,
 /** Finds an instance of the needle string literal within the binary data
  *  in the haystack.
  **/
-static const char* psldap_findmatch(char *haystack, char *needle, int strawCount)
+static const char* psldap_findmatch(char *haystack, const char *needle,
+                                    int strawCount)
 {
     const char *result = haystack;
     int needleSz = (NULL == needle) ? 0 : strlen(needle);
@@ -2228,7 +2279,8 @@ static int isLdapField(const char *fieldName)
  *  @param tab a reference to the table pointer to be populated with the
  *             key value pairs parsed from the data string
  **/
-static int parse_multipart_data(request_rec *r, char **theData, table **tab)
+static int parse_multipart_data(request_rec *r, const char *boundary,
+                                char **theData, table **tab)
 {
     /* This routine will NOT handle binary files - strstr will choke.
        Recommend the use of memcmp / memchr and construction of an algorithm
@@ -2237,8 +2289,8 @@ static int parse_multipart_data(request_rec *r, char **theData, table **tab)
     const char *tmp;
     char *val, *key, *filename;
     const char *data = *theData;
-    int boundary_len = strlen(r->boundary);
     int rc = OK;
+    int boundary_len = strlen(boundary);
 
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO,
                  r->server,
@@ -2246,7 +2298,7 @@ static int parse_multipart_data(request_rec *r, char **theData, table **tab)
                  r->content_type, r->clength);
 
     /* return DECLINED; */
-    for (data = strstr(data, r->boundary),
+    for (data = strstr(data, boundary),
              tmp = data = strstr(data + boundary_len, "Content-");
          NULL != data;
          tmp = ((NULL == data) ? NULL : (data + boundary_len)),
@@ -2261,8 +2313,8 @@ static int parse_multipart_data(request_rec *r, char **theData, table **tab)
 
         /* Value is string after double crlf */
         val = strstr(val + 1, "\r\n\r\n") + 4;
-        if (NULL == (data = strstr(val, r->boundary)) ) {
-            data = psldap_findmatch(val, r->boundary,
+        if (NULL == (data = strstr(val, boundary)) ) {
+            data = psldap_findmatch(val, boundary,
                                     r->clength - (val - *theData) );
             ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
                          r->server, "... data size of value for key %s = %d",
@@ -2470,13 +2522,13 @@ static int read_post(request_rec *r, table **tab)
     tmp = ap_table_get(r->headers_in, "Content-Type");
     if (0 != strstr(tmp, "multipart/form-data") ) 
     {
-        r->boundary = ap_pstrdup(r->pool, strstr(tmp, "boundary=") + 9);
+        char *boundary = ap_pstrdup(r->pool, strstr(tmp, "boundary=") + 9);
         r->content_type = ap_pstrdup(r->pool, "multipart/form-data");
 
         if ((rc = util_read(r, &data)) != OK) {
             return rc;
         }
-        rc = parse_multipart_data(r, &data, tab);
+        rc = parse_multipart_data(r, boundary, &data, tab);
         return rc;
     } else if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded")) {
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO, r->server,
@@ -3895,7 +3947,8 @@ static int ldap_update_handler(request_rec *r)
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                      "User <%s> ldap update rejected - missing auth info",
                      (NULL == user) ? "null" : user);
-    } else if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT))) { 
+    } else if(NULL == (ldap = ps_ldap_init(conf, conf->psldap_hosts,
+					   LDAP_PORT))) { 
         ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
                      "ldap_init failed on ldap update <%s>",
                      conf->psldap_hosts);

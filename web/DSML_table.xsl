@@ -15,6 +15,8 @@
     </head>
     <body>
       <form action="CreateGroup" method="post">
+        <input type="button" value=" Print Table " onclick="window.print();" />
+        <br />
         <table id="directoryTable" border="1" cellpadding="2" width="100%">
           <tr>
             <th>Edit</th>
@@ -29,6 +31,8 @@
           <xsl:for-each select="dsml/batchResponse/searchResponse/searchResultEntry">
             <xsl:sort select="attr[@name='sn']/value" />
             <xsl:sort select="attr[@name='givenName']/value" />
+            <xsl:sort select="attr[@name='o']/value" />
+            <xsl:sort select="attr[@name='ou']/value" />
             <tr>
               <td>
                 <xsl:element name="a">
@@ -47,10 +51,23 @@
                   <xsl:when test="(attr[@name='sn'])" >
                     <xsl:apply-templates select="attr[@name='sn']" />, <xsl:apply-templates select="attr[@name='givenName']" />
                   </xsl:when>
+                  <xsl:when test="(attr[@name='ou'])" >
+                    <xsl:apply-templates select="attr[@name='ou']" />
+                  </xsl:when>
+                  <xsl:when test="(attr[@name='o'])" >
+                    <xsl:apply-templates select="attr[@name='o']" />
+                  </xsl:when>
                 </xsl:choose>
               </td>
               <td>
-                <xsl:apply-templates select="attr[@name='homePostalAddress']" />
+                <xsl:choose>
+                  <xsl:when test="(attr[@name='homePostalAddress'])" >
+                    <xsl:apply-templates select="attr[@name='homePostalAddress']" />
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:apply-templates select="attr[@name='postalAddress']" />
+                  </xsl:otherwise>
+                </xsl:choose>
               </td>
               <td>
                 <xsl:apply-templates select="attr[@name='mail']" />

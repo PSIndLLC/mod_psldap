@@ -1001,7 +1001,7 @@
 
 <xsl:template match="searchResultEntry" mode="recordHead">
   <xsl:param name="oClass" select="attr[@name='objectClass']/value[(position()=1)]" />
-  <table width='100%' cellspacing='0'><tr>
+  <table class="menubar"><tr>
     <td class="menubar_left" />
     <td class="menubar">
       <table width='100%'><tr>
@@ -1012,26 +1012,23 @@
               <xsl:value-of select="attr[@name='labeledURI']/value"/>
             </xsl:attribute>
             </xsl:if>
-            <xsl:element name='font'>
-              <xsl:attribute name='class'>menubar</xsl:attribute>
-              <xsl:choose>
-                <xsl:when test="($oClass = 'organization')" >
-                  <xsl:value-of select="attr[@name='o']/value"/>
-                </xsl:when>
-                <xsl:when test="($oClass = 'organizationalUnit')" >
-                  <xsl:value-of select="attr[@name='ou']/value"/>
-                </xsl:when>
-                <xsl:when test="($oClass = 'organizationalPerson')" >
-                  <xsl:value-of select="attr[@name='givenName']/value"/>
-                  <xsl:text> </xsl:text>
-                  <xsl:value-of select="attr[@name='sn']/value"/>
-                </xsl:when>
-                <xsl:otherwise>
-                  <xsl:value-of select="$oClass" />
-                  <xsl:value-of select="attr[@name='cn']/value"/>,
-                </xsl:otherwise>
-              </xsl:choose>
-            </xsl:element>
+            <xsl:choose>
+              <xsl:when test="($oClass = 'organization')" >
+                <xsl:value-of select="attr[@name='o']/value"/>
+              </xsl:when>
+              <xsl:when test="($oClass = 'organizationalUnit')" >
+                <xsl:value-of select="attr[@name='ou']/value"/>
+              </xsl:when>
+              <xsl:when test="($oClass = 'organizationalPerson')" >
+                <xsl:value-of select="attr[@name='givenName']/value"/>
+                <xsl:text> </xsl:text>
+                <xsl:value-of select="attr[@name='sn']/value"/>
+              </xsl:when>
+              <xsl:otherwise>
+                <xsl:value-of select="$oClass" />
+                <xsl:value-of select="attr[@name='cn']/value"/>,
+              </xsl:otherwise>
+            </xsl:choose>
           </xsl:element>
         </td>
         <td width="16">

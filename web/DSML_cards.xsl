@@ -3,7 +3,7 @@
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/REC-html40'>
 
-<xsl:key name="searchEntry" match="searchResultEntry" use="@dn" />
+<xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
 
 <xsl:template match="/">
   <html>
@@ -17,22 +17,9 @@
    </head>
    <body onload="initializeCards(32)">
     <form action="CreateGroup" method="post">
-      <table id='cardTable'><tr>
-        <xsl:apply-templates select="//searchResponse" />
-      </tr></table>
-      <hr />
-      <table>
+      <table id='cardTable'>
         <tr>
-          <td>
-            Group Name:
-            <input type="text" size="20" name="GroupName"/>
-          </td>
-          <td>
-            <input type="submit" value="Submit"/>
-          </td>
-          <td>
-            <input type="reset" value="Reset"/>
-          </td>
+          <xsl:apply-templates select="//searchResponse" />
         </tr>
       </table>
     </form>
@@ -102,10 +89,10 @@
       <xsl:for-each select='child::value'>
         <xsl:sort select='self::node()' />
 	<xsl:variable name="myDN" select="self::node()/text()" />
-        <span><xsl:value-of select="ancestor::searchResponse/searchResultEntry[attribute::dn=$myDN]/attr[@name='cn']/value" /> </span>
-        <span><xsl:value-of select="key('searchEntry','$myDN')/attr[@name='cn']/value" /> </span>
+        <span><xsl:for-each select="key('searchEntryLookup',$myDN)"><xsl:value-of select="attr[@name='cn']/value" /></xsl:for-each></span>
         <br />
-        <xsl:for-each select="ancestor::searchResponse/searchResultEntry[attribute::dn=$myDN]/attr[@name='mail']/value[contains(text(),'@')]" >
+        <xsl:for-each select="key('searchEntryLookup',$myDN)" >
+        <xsl:for-each select="attr[@name='mail']/value[contains(text(),'@')]" >
           <xsl:sort select='.' />
           <xsl:if test="(position() = 1)">
             <xsl:element name="a">
@@ -114,6 +101,7 @@
             </xsl:element>
             <br />
           </xsl:if>
+        </xsl:for-each>
         </xsl:for-each>
       </xsl:for-each>
     </td>
@@ -141,6 +129,27 @@
   </tr>
 </xsl:template>
 
+<xsl:template match="searchResultEntry" mode="searchResultEntryTitle">
+  <xsl:choose>
+    <xsl:when test="(attr[@name='sn']/value) and (attr[@name='givenName']/value)" >
+      <xsl:value-of select="attr[@name='sn']/value"/>,
+      <xsl:value-of select="attr[@name='givenName']/value"/>
+    </xsl:when>
+    <xsl:when test="(attr[@name='cn']/value)" >
+      <xsl:value-of select="attr[@name='cn']/value"/>
+    </xsl:when>
+    <xsl:when test="(attr[@name='ou']/value)" >
+      <xsl:for-each select="attr[@name='ou']/value">
+        <xsl:if test="(not (position() = 1))"> - </xsl:if>
+        <xsl:value-of select="."/>
+      </xsl:for-each>
+    </xsl:when>
+    <xsl:when test="(attr[@name='o']/value)" >
+      <xsl:value-of select="attr[@name='o']/value"/>
+    </xsl:when>
+  </xsl:choose>
+</xsl:template>
+
 <xsl:template match="searchResultEntry">
   <xsl:param name="heading" select="attr[@name='objectClass' and position() = 1]" />
   <xsl:if test="(not ($heading = '')) and (position() = 1)">
@@ -148,37 +157,27 @@
   </xsl:if>
   <table name='cardInstance' width='100%' border='0' cellspacing='0'>
     <tr><td noWrap="true" >
-      <table width='100%' cellspacing='0'><tr>
-        <td class="menubar_left" />
+      <table class="menubar"><tr>
+        <td class="menubar_left" ><img src="images/left_header.gif" /></td>
         <td class="menubar" noWrap="true" >
           <table width="100%"><tr>
             <td noWrap="true" >
-              <xsl:element name="a">
-                <xsl:if test="./attr[@name='labeledURI']">
-                <xsl:attribute name="target">_blank</xsl:attribute>
-                <xsl:attribute name="href">
-                  <xsl:value-of select="attr[@name='labeledURI']/value"/>
-                </xsl:attribute>
-                </xsl:if>
-                <xsl:element name='font'>
-                  <xsl:attribute name='class'>menubar</xsl:attribute>
-                  <xsl:choose>
-                    <xsl:when test="(attr[@name='sn']/value) and (attr[@name='givenName']/value)" >
-                      <xsl:value-of select="attr[@name='sn']/value"/>,
-                      <xsl:value-of select="attr[@name='givenName']/value"/>
-                    </xsl:when>
-                    <xsl:when test="(attr[@name='cn']/value)" >
-                      <xsl:value-of select="attr[@name='cn']/value"/>
-                    </xsl:when>
-                    <xsl:when test="(attr[@name='ou']/value)" >
-                      <xsl:value-of select="attr[@name='ou']/value"/>
-                    </xsl:when>
-                    <xsl:when test="(attr[@name='o']/value)" >
-                      <xsl:value-of select="attr[@name='o']/value"/>
-                    </xsl:when>
-                  </xsl:choose>
-                </xsl:element>
-              </xsl:element>
+              <xsl:choose>
+                <xsl:when test="./attr[@name='labeledURI']">
+                  <xsl:element name="a">
+                    <xsl:attribute name="target">_blank</xsl:attribute>
+                    <xsl:attribute name="href">
+                      <xsl:value-of select="attr[@name='labeledURI']/value"/>
+                    </xsl:attribute>
+                    <xsl:apply-templates select="." mode="searchResultEntryTitle">
+                    </xsl:apply-templates>
+                  </xsl:element>
+                </xsl:when>
+                <xsl:otherwise>
+                  <xsl:apply-templates select="." mode="searchResultEntryTitle">
+                  </xsl:apply-templates>
+                </xsl:otherwise>
+              </xsl:choose>
             </td>
             <td width="34" noWrap="true" >
               <xsl:element name="a">
@@ -196,7 +195,7 @@
             </td>
           </tr></table>
         </td>
-        <td class="menubar_right" />
+        <td class="menubar_right" ><img src="images/right_header.gif" /></td>
       </tr></table>
     </td></tr>
     <tr><td>

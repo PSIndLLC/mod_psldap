@@ -1,3 +1,15 @@
+Revision 0.83
+===================
+Fixed compilation error in Apache 2
+
+Addition of switch to connect to LDAP server using V3 protocol through the introduction of the PsLDAPConnectVersion parameter.
+
+Altered UI for creation of new records to pull the default LDAP server from the new index screen.
+
+Fixed menubar styling in the UI
+
+
+	
 Revision 0.82
 ===================
 Implemented handling of multipart/form-data in post responses.

@@ -218,6 +218,16 @@ function psldapImportNode(objNode, bDeep)
     return result;
 }
 
+function getBaseDNFromMyUrl() {
+    var result = document.URL.indexOf("dn=");
+    if (-1 != result) {
+        result = unescape(document.URL.substring(result+3));
+    } else {
+        result = "";
+    }
+    return result;
+}
+
 /** Copies the visible form into an iframe labeled as "processWindow" in the
  *  current document and submits the cloned item, capturing the result in the
  *  iframe and maintaining the integrity of the pending form.
@@ -240,7 +250,11 @@ function submitVisibleRecord(action) {
 	    objForm.elements["ou-1"];
         var objCNElement = (objForm.elements["cn"]) ? objForm.elements["cn"] :
 	    objForm.elements["cn-1"];
-        objForm.dn.value = prompt("Enter the base DN to contain this record");
+
+        objForm.dn.value = getBaseDNFromMyUrl();
+        if ("" == objForm.dn.value) {
+            objForm.dn.value = prompt("Enter the base DN to contain this record");
+        }
 
         if (objOrgElement && (objOrgElement.value != "")) {
             objForm.dn.value = "o=" + objOrgElement.value + ", " + objForm.dn.value;
@@ -357,7 +371,11 @@ function showRecord(current) {
         pvt_setRecordDisplay(objForm, currentRecord, "inline");
     }
     if (objForm.length > 1) {
-        recordNbrElmt.value = currentRecord;
+        if (null == recordNbrElmt) {
+            alert("Please wait. The results are not yet completely loaded.");
+        } else {
+            recordNbrElmt.value = currentRecord;
+        }
     }
 }
 
@@ -370,9 +388,11 @@ function showPrevRecord() {
 }
 
 function loadRecordUrl(sel) {
+    var objWindow = null;
     if (sel != "") {
-        window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=739, width=669");
+        objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=739, width=669");
     }
+    return objWindow;
 }
 
 function setNodeHideAttrs(objElmt, bHide, bHideChildren, strNamePrefix) {

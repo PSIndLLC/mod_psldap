@@ -84,6 +84,17 @@
                 </xsl:element>
               </xsl:element>
 
+              <xsl:element name="span">
+                <xsl:element name="a">
+                  <xsl:attribute name="href">javascript: void toggleClassInfo()</xsl:attribute>
+                  <xsl:attribute name="title">Change record classification</xsl:attribute>
+                  <xsl:element name="img">
+                    <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/showClass.gif</xsl:attribute>
+                  </xsl:element>
+                </xsl:element>
+              </xsl:element>
+
+
               <xsl:if test="$recordCount &gt; 1">
                 <xsl:element name="span">
                   <xsl:element name="a">
@@ -1201,6 +1212,44 @@
 	<xsl:attribute name="accept">image/jpeg,image/jpg</xsl:attribute>
       </xsl:element>
       <xsl:if test="(contains(attr[@name='jpegPhoto']/value,'BinaryData'))">
+        <xsl:element name="br" />
+        <xsl:element name="button">
+          <xsl:attribute name="type">button</xsl:attribute>
+          <xsl:attribute name="style">margin-top: 10px</xsl:attribute>
+          <xsl:attribute name="onclick">showPreviousSiblingAndHide(this, true, "SPAN")</xsl:attribute>
+          Cancel
+        </xsl:element>
+      </xsl:if>
+    </xsl:element>
+</xsl:template>
+
+<xsl:template match="searchResultEntry" mode="userCertificate">
+  <xsl:choose>
+    <xsl:when test="(attr[@name='userCertificate']/value)">
+      <xsl:element name="img">
+        <xsl:attribute name="onclick">showNextSiblingAndHide(this,true)</xsl:attribute>
+        <xsl:attribute name="name">encUserCertificate</xsl:attribute>
+        <xsl:attribute name="width">24</xsl:attribute>
+        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/certPresent.gif</xsl:attribute>
+      </xsl:element>
+    </xsl:when>
+    <xsl:otherwise>
+      <xsl:element name="br" />
+    </xsl:otherwise>
+  </xsl:choose>
+    <xsl:element name="span">
+      <xsl:attribute name="style">vertical-align: center</xsl:attribute>
+      <xsl:if test="(attr[@name='userCertificate']/value)">
+        <xsl:attribute name="style">display:none</xsl:attribute>
+      </xsl:if>
+      <xsl:element name="input">
+	<xsl:attribute name="style">margin-top:10px</xsl:attribute>
+	<xsl:attribute name="type">file</xsl:attribute>
+        <xsl:attribute name="name"><xsl:if test="(attr[@name='userCertificate']/value)">hidden_</xsl:if>userCertificate<xsl:number value="1" format="-1" /></xsl:attribute>
+	<xsl:attribute name="size">4</xsl:attribute>
+	<xsl:attribute name="accept">file/text,file/text</xsl:attribute>
+      </xsl:element>
+      <xsl:if test="(contains(attr[@name='userCertificate']/value,'BinaryData'))">
         <xsl:element name="br" />
         <xsl:element name="button">
           <xsl:attribute name="type">button</xsl:attribute>

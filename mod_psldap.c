@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.83"
+#define PSLDAP_VERSION_LABEL "0.84"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -163,6 +163,8 @@ typedef struct  {
     char *psldap_credential_uri;
     int   psldap_cache_auth;
     int   psldap_ldap_version;
+    char *psldap_auth_filter;
+    int   psldap_authz_enabled;
 } psldap_config_rec;
 
 typedef struct {
@@ -1148,6 +1150,7 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_grp_nm_attr = STR_UNSET;
 
     sec->psldap_auth_enabled = INT_UNSET;
+    sec->psldap_authz_enabled = INT_UNSET;
     sec->psldap_searchscope = INT_UNSET;
     sec->psldap_authoritative = INT_UNSET;
     sec->psldap_cryptpasswords = INT_UNSET; 
@@ -1216,7 +1219,9 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, n, psldap_grp_mbr_attr);
     set_cfg_str_if_n_set(p, result, n, psldap_grp_nm_attr);
     set_cfg_str_if_n_set(p, result, n, psldap_cookiedomain);
+    set_cfg_str_if_n_set(p, result, n, psldap_auth_filter);
     set_cfg_int_if_n_set(result, n, psldap_auth_enabled, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, n, psldap_authz_enabled, INT_UNSET, INT_UNSET);
     set_cfg_int_if_n_set(result, n, psldap_searchscope, INT_UNSET, INT_UNSET);
     set_cfg_int_if_n_set(result, n, psldap_bindmethod, LDAP_AUTH_NONE,
                          LDAP_AUTH_NONE);
@@ -1248,7 +1253,9 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, b, psldap_grp_mbr_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_grp_nm_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_cookiedomain);
+    set_cfg_str_if_n_set(p, result, b, psldap_auth_filter);
     set_cfg_int_if_n_set(result, b, psldap_auth_enabled, INT_UNSET, 1);
+    set_cfg_int_if_n_set(result, b, psldap_authz_enabled, INT_UNSET, 1);
     set_cfg_int_if_n_set(result, b, psldap_searchscope, INT_UNSET,
                          LDAP_SCOPE_BASE);
     /* by default, we use simple binding to ldap, never use auth_none */
@@ -1364,7 +1371,12 @@ command_rec ldap_auth_cmds[] = {
     { "PsLDAPEnableAuth", (cmd_func)ap_set_flag_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_auth_enabled),
       OR_AUTHCFG, FLAG, 
-      "Flag to enable / disable A&A. Default value is 'on'"
+      "Flag to enable / disable authentication. Default value is 'on'"
+    },
+    { "PsLDAPEnableAuthz", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_authz_enabled),
+      OR_AUTHCFG, FLAG, 
+      "Flag to enable / disable authorization. Default value is 'on'"
     },
     { "PsLDAPHosts", (cmd_func)ap_set_string_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_hosts),
@@ -1405,6 +1417,12 @@ command_rec ldap_auth_cmds[] = {
       OR_AUTHCFG, TAKE1, 
       "The key in the directory whose value contains the groups in which the"
       " user maintains membership"
+    },
+    { "PsLDAPAuthFilter", (cmd_func)ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_auth_filter),
+      OR_AUTHCFG, TAKE1, 
+      "Additional LDAP filters to be applied when identifying the user for"
+      " authentication."
     },
     { "PsLDAPUserGroupAttr", (cmd_func)ap_set_string_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_user_grp_attr),
@@ -1976,7 +1994,8 @@ static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
 static char * get_ldap_val_bound(request_rec *r, LDAP *ldap,
                                  psldap_config_rec *conf,  const char *user,
                                  const char *query_by, const char *query_for,
-                                 const char *attr, const char *separator) {
+                                 const char *attr, const char *separator,
+				 const char *otherParams, const char paramOp) {
     char *retval = NULL;
 
     if(NULL == attr) retval = "bind";
@@ -1999,7 +2018,8 @@ static char * get_ldap_val_bound(request_rec *r, LDAP *ldap,
 static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
                            psldap_config_rec *conf,
                            const char *query_by, const char *query_for,
-                           const char *attr, const char *separator) {
+                           const char *attr, const char *separator,
+			   const char *otherParams, const char paramOp) {
     const char *bindas = user, *bindpass = pass;
     char *retval = NULL;
     LDAP *ldap = NULL;
@@ -2007,7 +2027,7 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
     if(NULL == attr) retval = "bind";
     if((NULL != attr) && (NULL != ps_bind_ldap(r, &ldap, user, pass, conf)) ) {
         retval = get_ldap_val_bound(r, ldap, conf, user, query_by,
-                                    query_for, attr, separator);
+                                    query_for, attr, separator, NULL, '\0');
         ldap_unbind_s(ldap);
     }
     
@@ -2036,7 +2056,7 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
     if (NULL != ps_bind_ldap(r, &ldap, user, pass, conf) ) {
         groupkey = (NULL == conf->psldap_user_grp_attr) ? NULL :
             get_ldap_val_bound(r, ldap, conf, user, NULL, NULL,
-                               conf->psldap_user_grp_attr, ":");
+                               conf->psldap_user_grp_attr, ":", NULL, '\0');
         if (NULL != groupkey)
         {
             while(groupkey[0])
@@ -2045,7 +2065,8 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
                 char *groups = (NULL == conf->psldap_grp_mbr_attr) ? NULL :
                     get_ldap_val_bound(r, ldap, conf, user,
                                        conf->psldap_grp_mbr_attr,
-                                       v, conf->psldap_grp_nm_attr, delim);
+                                       v, conf->psldap_grp_nm_attr, delim,
+				       NULL, '\0');
                 if(NULL != groups)
                 {
                     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG
@@ -2097,7 +2118,7 @@ static char * get_ldap_grp(request_rec *r, const char *user,
         {
             result = (NULL == conf->psldap_groupkey) ? NULL :
                 get_ldap_val(r, user, pass, conf, NULL, NULL,
-                             conf->psldap_groupkey, ",");
+                             conf->psldap_groupkey, ",", NULL, '\0');
         }
     }
     return result;
@@ -2168,12 +2189,17 @@ static int password_matches(const psldap_config_rec *sec, request_rec *r,
 static int authenticate_via_bind (request_rec *r, psldap_config_rec *sec,
                                   const char *user, const char *sent_pw)
 {
+    char *auth_filter = sec->psldap_auth_filter;
+    char filter_logical_op = ((NULL != auth_filter) &&
+			      ('\0' != auth_filter[0])) ? '&' : '\0';
+
     /* Get the userkey to avoid any security issues regarding password
        protection on the server. You can pretty much guarantee that a user
        will be able to read their own userkey
     */
     if(NULL != get_ldap_val(r, user, sent_pw, sec, NULL, NULL,
-                            sec->psldap_userkey, ",") )
+                            sec->psldap_userkey, ",",
+			    auth_filter, filter_logical_op) )
     {
         return OK;
     }
@@ -2187,9 +2213,13 @@ static int authenticate_via_query (request_rec *r, psldap_config_rec *sec,
        restrictions. This is not necessarily a good assumption.
     */
     char *real_pw;
+    char *auth_filter = sec->psldap_auth_filter;
+    char filter_logical_op = ((NULL != auth_filter) &&
+			      ('\0' != auth_filter[0])) ? '&' : '\0';
 
     if(NULL != (real_pw = get_ldap_val(r, user, sent_pw, sec, NULL,
-                                       NULL, sec->psldap_passkey, ",")))
+                                       NULL, sec->psldap_passkey, ",",
+				       auth_filter, filter_logical_op)))
     {
         if(password_matches(sec, r, real_pw, sent_pw))
         {
@@ -2771,7 +2801,8 @@ static int get_provided_credentials(request_rec *r, psldap_config_rec *sec,
     char *authType = (char*)ap_auth_type(r);
 
     if ((OK == (result = get_provided_password(r, sent_pw)) ) &&
-        (OK == (result = get_provided_username(r, sent_user)) ) )
+        (!sec->psldap_auth_enabled ||
+	 (OK == (result = get_provided_username(r, sent_user)) ) ) )
     {
         if (NULL != authType)
         {
@@ -3009,7 +3040,7 @@ ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
 
 /* Checking ID */
     
-static int ldap_check_auth(request_rec *r)
+static int ldap_check_authz(request_rec *r)
 {
     psldap_config_rec *sec =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
@@ -3026,7 +3057,7 @@ static int ldap_check_auth(request_rec *r)
     const char *orig_groups = NULL;
     int groupRequirementExists = 0;
 
-    if (!sec->psldap_userkey || !sec->psldap_auth_enabled)
+    if (!sec->psldap_userkey || !sec->psldap_authz_enabled)
     {
         return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
     }
@@ -4068,7 +4099,7 @@ static void register_hooks(pool *p)
     /* [5]  check/validate user_id        */
     ap_hook_check_user_id(ldap_authenticate_user, NULL, NULL, APR_HOOK_LAST);
     /* [6]  check user_id is valid *here* */
-    ap_hook_auth_checker(ldap_check_auth, NULL, NULL, APR_HOOK_LAST);
+    ap_hook_auth_checker(ldap_check_authz, NULL, NULL, APR_HOOK_LAST);
 }
 
 module MODULE_VAR_EXPORT psldap_module =
@@ -4103,7 +4134,7 @@ module MODULE_VAR_EXPORT psldap_module =
     ldap_handlers,		/* [9]  content handlers              */
     translate_handler,		/* [2]  URI-to-filename translation   */
     ldap_authenticate_user,	/* [5]  check/validate user_id        */
-    ldap_check_auth,/* [6]  check user_id is valid *here* */
+    ldap_check_authz,		/* [6]  check user_id is valid *here* */
     NULL,			/* [4]  check access by host address  */
     NULL,			/* [7]  MIME type checker/setter      */
     NULL,			/* [8]  fixups                        */

@@ -328,6 +328,10 @@ function resetVisibleRecord() {
     objForm[currentRecord-1].reset();
 }
 
+function toggleClassInfo() {
+    alert("Class info modification not yet supported");
+}
+
 function getMyRow(objElement) {
     var myRow = objElement;
     while ((null != myRow) && (myRow.nodeType != 3) && /* not a text node */

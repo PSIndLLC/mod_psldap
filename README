@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.83
+Version 0.84
 by David Picard
 
 This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
@@ -370,6 +370,16 @@ through the settings indicated by PsLDAPAuthoritative - 'off' indicates yes -
     ...
 
 
+Additional Filtering on Authentication
+========================================
+
+The administrator may also pose some additional constraints on users through use of the PsLDAPAuthFilter parameter. For example, if the administrator choses to require the account not be disabled and the user have a last name of 'Picard' in order to allow authentication to proceed, they might add the following value line in their config:
+
+    ...
+    PsLDAPAuthFilter "(&(!(accountDisabled=1))(sn=Picard))"
+    ...
+
+
 Specifying the LDAP Server
 ============================
 
@@ -541,10 +551,10 @@ before you close the Location with
 Disabling Authentication and Authorization Functions
 ====================================================
 To disable authentication and authorization checking by the module, simply set
-the configuration variable PsLDAPEnableAuth to a value of 'off'. Alternatively,
-do not set the PsLDAPUserKey in the htaccess or anywhere in the path to the
-disabled directory. A failure to set the user key will also disable the modules
-A&A functionality.
+the configuration variable PsLDAPEnableAuth and PsLDAPEnableAuthz respectively
+to a value of 'off'. Alternatively, do not set the PsLDAPUserKey in the
+htaccess or anywhere in the path to the disabled directory. A failure to set
+the user key will also disable the modules A&A functionality.
 
 
 

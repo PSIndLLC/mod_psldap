@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.7
+Version 0.73
 by David Picard
 
 This module is based on Alexander Mayrhofer's mod_auth_ldap, version 0.5.
@@ -37,6 +37,8 @@ Authentication Features:
 6.  Allow for group identification based on an attribute in the user's record.
     This functionality will not preclude authentication should no group be 
     identified.
+7.  Allow for caching of LDAP authentication information to reduce server
+    traffic and improve performance.
 
 
 Maintenance Features: (F=Future, I=Implemented)
@@ -168,11 +170,17 @@ PsLDAPAuthSimple   - Set to 'on' if authentication is to be performed by
 PsLDAPAuthExternal - Set to 'on' if authentication is to be performed by
       binding with the user provided credentials
 
+PsLDAPAuthUseCache - Set to 'on' if authentication will check the cache prior
+      to querying the LDAP server
+
 PsLDAPBindMethod   - Set to 'simple', 'krbv41', or 'krbv42' to determine
       binding to server
 
 PsLDAPSecureAuthCookie - Set to 'off' if cookies are allowed to be sent
       across an unsecure connection
+
+PsLDAPAuthCookieDomain - Set to a domain string if cookies are allowed to be
+      used across servers in a domain
 
 PsLDAPCryptPasswords - Set to 'on' if the LDAP server maintains crypted
       password strings
@@ -223,7 +231,10 @@ is no mechanism for altering the expiration of the cookie on the client. The
 cookie may be sent across an unsecure connection by specifying 
 PsLDAPSecureAuthCookie to be set to 'off'. The username and password are
 captured through a url containing a form that is specified in the 
-PsLDAPCredentialForm parameter. 
+PsLDAPCredentialForm parameter. In addition, if the credentials are to be used
+across different sites within the same domain, the administrator may set the
+domain of the cookie by specifying the domain in the PsLDAPAuthCookieDomain
+parameter.
 
 Alternatively, the administrator may use the Apache ErrorDocument directive
 to cause a form to be provided for the user to enter her credentials when she
@@ -476,6 +487,18 @@ or
 before you close the Location with
 
 </Location>
+
+
+
+Enabling Caching
+================
+Enabling the cache is relatively straightforward, simply add and set the
+PsLDAPAuthUseCache parameter in the configuration to 'on'. Caching is off by
+default as it is currently experimental. The cache size is hardcoded at 1000
+records and purges every fifteen minutes, removing any records from cache
+that are older than 15 minutes. Future versions of this module will allow
+for some configurability of this behavior.
+
 
 
 Setting Up Forms

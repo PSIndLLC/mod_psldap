@@ -20,46 +20,71 @@
  * MODULE-DEFINITION-END
  */
 
+#define PSLDAP_VERSION_LABEL "0.73"
+
 #include "httpd.h"
+#include "http_conf_globals.h"
 #include "http_config.h"
 #include "http_core.h"
 #include "http_log.h"
 #include "http_protocol.h"
 #include "http_request.h"
 #include "ap_compat.h"
+#include "ap_mm.h"
+
+#if 0
+/* Semaphores will not work on Linux, process sharing semaphores are not
+   implemented */
+ #define CACHE_USE_SEMAPHORE 1
+#endif
 
 #ifdef MPM20_MODULE_STUFF
-  #define APACHE_V2
-  #include "apr_compat.h"
-  #include "apr_errno.h"
-  #include "apr_general.h"
-  #include "apr_hooks.h"
-  #include "apr_pools.h"
-  #include "apr_sha1.h"
-  #include "apr_strings.h"
-  #define XtOffsetOf APR_OFFSETOF
-  #define DEBUG_ERRNO ,APR_SUCCESS
-  #define ap_log_reason(a,b,c)
-  #define ap_sha1_base64 apr_sha1_base64
-  typedef apr_pool_t pool;
-  typedef apr_table_t table;
-  typedef apr_array_header_t array_header;
+ #define APACHE_V2
+ #include "apr_compat.h"
+ #include "apr_errno.h"
+ #include "apr_general.h"
+ #include "apr_hooks.h"
+ #include "apr_pools.h"
+ #include "apr_sha1.h"
+ #include "apr_strings.h"
+ #define XtOffsetOf APR_OFFSETOF
+ #define DEBUG_ERRNO ,APR_SUCCESS
+ #define ap_log_reason(a,b,c)
+ #define ap_sha1_base64 apr_sha1_base64
+ typedef apr_pool_t pool;
+ typedef apr_table_t table;
+ typedef apr_array_header_t array_header;
+ #define ap_hard_timeout(n, r)
+ #define ap_reset_timeout(r)
+ #define ap_kill_timeout(r)
+ #define ap_soft_timeout(n, r)
+ #define add_version_component(p,v)	ap_add_version_component(p, v)
+ #define sub_req_lookup_uri(uri, r, p) ap_sub_req_lookup_uri(uri, r, p)
+ extern module MODULE_VAR_EXPORT psldap_module;
 #else
-  typedef const char *(*cmd_func) (cmd_parms*, void*, const char*);
-  #include "ap_sha1.h"
-  #define DEBUG_ERRNO 
+ #define add_version_component(p,v)	ap_add_version_component(v)
+ #define sub_req_lookup_uri(uri, r, p) ap_sub_req_lookup_uri(uri, r)
+ typedef const char *(*cmd_func) (cmd_parms*, void*, const char*);
+ #include "ap_sha1.h"
+ #define DEBUG_ERRNO 
+ module MODULE_VAR_EXPORT psldap_module;
 #endif
 
 #include <lber.h>
 #include <ldap.h>
+#include <time.h>
 #include <unistd.h>
+
+#ifdef CACHE_USE_SEMAPHORE
+ #include <semaphore.h>
+#endif
 
 #define SHA1_DIGEST_LENGTH 29 /* sha1 digest length including null character */
 
 #define INT_UNSET -1
 #define STR_UNSET NULL
 
-#define FORM_ACTION	"FormAction"
+#define FORM_ACTION		"FormAction"
 #define LOGIN_ACTION	"Login"
 #define MODIFY_ACTION	"Modify"
 #define CREATE_ACTION	"Create"
@@ -68,7 +93,6 @@
 
 #define LDAP_KEY_PREFIX "psldap-"
 #define LDAP_KEY_PREFIX_LEN 7
-
 
 typedef struct  {
     char *psldap_hosts;
@@ -90,16 +114,863 @@ typedef struct  {
     int   psldap_schemeprefix;
     int   psldap_use_ldap_groups;
     int   psldap_secure_auth_cookie;
+    char *psldap_cookiedomain;
     char *psldap_credential_uri;
+    int   psldap_cache_auth;
 } psldap_config_rec;
+
+typedef struct {
+    char *psldap_sm_file;
+    int psldap_sm_size;
+    int psldap_max_records;
+    int psldap_purge_interval;
+} psldap_server_rec;
+
+/* -------------------------------------------------------------*/
+/* --------------------- Caching code --------------------------*/
+/* -------------------------------------------------------------*/
+
+#define MAX_RECORDS			1000
+#define MAX_RECORDS_STR		"1000"
+#define MAX_RECORD_SZ		1000
+#define MAX_INACTIVE_TIME	900	/* 15 minutes */
+#define MAX_INACTIVE_TIME_STR "900"	/* 15 minutes */
+#define PSLDAP_SHARED_MEM_FILE	"/var/run/apache_psldap.cache"
+#define PSLDAP_SHM_SIZE		81920
+#define PSLDAP_SHM_SIZE_STR	"81920"
+#define PSCACHE_ITEM_FIELDS()	time_t last_access
+
+typedef struct psldap_array_struct psldap_array;
+
+typedef struct psldap_cache_item_struct {
+    PSCACHE_ITEM_FIELDS();
+} pscache_item;
+
+#ifdef CACHE_USE_SEMAPHORE
+ typedef sem_t psldap_guard;
+ #define psldap_guard_init(g,pshr,max)	sem_init(g,pshr,max)
+ #define psldap_guard_destroy(g)		sem_destroy(g)
+#else
+ typedef AP_MM* psldap_guard;
+ #define psldap_guard_init(g,pshr,max)	*(g) = dataview.mem_mgr
+ #define psldap_guard_destroy(g)		*(g) = NULL
+#endif
+
+struct psldap_array_struct
+{
+    int item_count;			/* The number of items in the node */
+    int max_items;			/* The maximum number of items this node
+                               may hold */
+    psldap_guard ro_guard;	/* Semaphor / object to guard readonly access */
+    psldap_guard wr_guard;	/* Semaphor / object to guard write access */
+    const pscache_item **items;		/* The allocated array to hold the items */
+};
+
+typedef struct
+{
+    int cache_width;
+    psldap_array **multi_cache;
+    long max_inactive_time;
+    time_t last_purge_t;
+} psldap_shared_data;
+
+
+typedef struct {
+    server_rec *s;
+    AP_MM *mem_mgr;
+    int count;
+    psldap_shared_data *collection;
+    int (***psldap_compares_item)(const void *item1, const void *item2);
+    void (**cached_item_free)(void *item);
+} psldap_shared_dataview;
+
+
+static psldap_shared_dataview dataview = {NULL, NULL, 0, NULL, NULL, NULL};
+
+/** Lock the specified array for read requests, concurrent read operations
+    are allowed up to the specified limit on the number of servers. If a
+    write operation / lock is pending, the read lock is queued behind the
+    pending write lock / operation.
+ **/
+static void psldap_array_read_lock(psldap_array *array)
+{
+#ifdef CACHE_USE_SEMAPHORE
+    /* If a write lock is pending, don't allow the read until the
+       write is performed */
+    sem_wait(&(array->wr_guard));
+    sem_wait(&(array->ro_guard));
+    sem_post(&(array->wr_guard));
+#else
+    ap_mm_lock(array->ro_guard, AP_MM_LOCK_RD);
+#endif
+}
+
+/** Release the lock on the read requests against the specified array.
+ **/
+static void psldap_array_read_unlock(psldap_array* array)
+{
+#ifdef CACHE_USE_SEMAPHORE
+    int roCount = 0;
+    sem_post(&(array->ro_guard));
+    sem_getvalue(&(array->ro_guard),&roCount);
+    if (roCount == HARD_SERVER_LIMIT) {
+        /* If a write lock is pending, it is double locked. Remove one
+           of the locks to unlock it. If it wasn't locked, unlock it
+           after attempting the lock */
+        sem_trywait(&(array->wr_guard));
+        sem_post(&(array->wr_guard));
+    }
+#else
+    ap_mm_unlock(array->ro_guard);
+#endif
+}
+
+/** Lock the specified array for write requests, concurrent write operations
+    are not allowed, and the lock will block while all current read operations
+    complete.
+ **/
+static void psldap_array_write_lock(psldap_array* array)
+{
+#ifdef CACHE_USE_SEMAPHORE
+    int roCount = 0;
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 dataview.s,
+                 "Acquiring write lock on array");
+    sem_wait(&(array->wr_guard));
+    /* If the write lock succeeds, wait for the reads to complete
+       prior to allowing the write operations */
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 dataview.s,
+                 "Getting ro count from semaphore");
+    sem_getvalue(&(array->ro_guard),&roCount);
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 dataview.s,
+                 "RO count from semaphore is %d", roCount);
+    if (roCount != HARD_SERVER_LIMIT) {
+        sem_wait(&(array->wr_guard));
+    }
+#else
+    ap_mm_lock(array->ro_guard, AP_MM_LOCK_RW);
+#endif
+}
+
+/** Remove the lock against write operation on the specified array.
+ **/
+static void psldap_array_write_unlock(psldap_array* array)
+{
+#ifdef CACHE_USE_SEMAPHORE
+    sem_post(&(array->wr_guard));
+#else
+    ap_mm_unlock(array->ro_guard);
+#endif
+}
+
+/** Free all shared memory associated / referenced by this array node and
+ *  set the reference to the memory to NULL
+ *  @param a_array - the reference to the psldap_array reference that is
+ *                   to be freed.
+ **/
+static void psldap_array_free(psldap_array **a_array)
+{
+    psldap_array *array = *a_array;
+    
+    if (NULL != array) {
+        psldap_array_write_lock(array);
+        if (NULL != array->items) {
+            ap_mm_free(dataview.mem_mgr, array->items);
+        }
+        psldap_guard_destroy(&(array->ro_guard));
+        psldap_array_write_unlock(array);
+
+        psldap_guard_destroy(&(array->wr_guard));
+        ap_mm_free(dataview.mem_mgr, array);
+        *a_array = NULL;
+    }
+}
+
+/** Create and initialize the psldap_array instance with the maximum node
+ *  width specified.
+ *  @param max_node_size - the maximum number of items that may be contained
+ *                         in a node instance.
+ *  @return the reference to the newly allocated and initialized psldap_array
+ *          object instance
+ **/
+static psldap_array* psldap_array_create(const int max_record_count)
+{
+    int i;
+    psldap_array *result = ap_mm_calloc(dataview.mem_mgr, 1,
+                                        sizeof(psldap_array));
+    if (NULL != result) {
+        /* Create a guard allowing interprocess access and initialized to a
+           value of unlocked */
+        psldap_guard_init(&(result->ro_guard), 1, HARD_SERVER_LIMIT);
+        psldap_guard_init(&(result->wr_guard), 1, 1);
+        result->item_count = 0;
+        result->max_items = max_record_count;
+        result->items = ap_mm_calloc(dataview.mem_mgr, result->max_items,
+                                     sizeof(void*));
+        memset(result->items, 0, result->max_items * sizeof(void*));
+        if (NULL == result->items) {
+            psldap_array_free(&result);
+        }
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     dataview.s,
+                     "PSLDAP array created: <%d:%d>", result->ro_guard,
+                     result->wr_guard);
+    } else {
+      	ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, dataview.s,
+                     "Error creating array node");
+    }
+    return result;
+}
+
+/** Free all the items maintained within the passed psldap_array reference
+ *  @param array - the tree containing the items to free.
+ **/
+static void free_array_items(psldap_array* array, int collectionNumber)
+{
+    int i;
+
+    psldap_array_write_lock(array);
+    for (i = 0; i < array->item_count; i++)
+    {
+        dataview.cached_item_free[collectionNumber]((void*)(array->items[i]));
+        array->items[i] = NULL;
+    }
+    psldap_array_write_unlock(array);
+}
+
+static const pscache_item* array_find_item(psldap_array *a_array,
+                                        int (*compare_item)(const void *item1,
+                                                            const void *item2),
+                                        const void *key)
+{
+    pscache_item *const *result = NULL;
+    if (NULL != a_array) {
+        psldap_array_read_lock(a_array);
+        result = (pscache_item**)bsearch(&key, a_array->items,
+                                          a_array->item_count,
+                                          sizeof(void*), compare_item);
+        psldap_array_read_unlock(a_array);
+    }
+    return (NULL != result) ? *result : NULL;
+}
+
+static int compare_access_t(const void *a_item1, const void *a_item2)
+{
+    int result = 0;
+    pscache_item *item1 = *((pscache_item**)a_item1);
+    pscache_item *item2 = *((pscache_item**)a_item2);
+
+    if (item1->last_access < item2->last_access) result = -1;
+    else if (item1->last_access > item2->last_access) result = 1;
+
+    return result;
+}
+
+static short int cache_size_exceeds_pct(psldap_shared_data *data, int pct)
+{
+    short int result = 0;
+    /* Every cache array has the same size */
+    psldap_array *cache = (NULL == data->multi_cache) ? NULL :
+        data->multi_cache[0];
+    if (NULL != cache) {
+        result = (((cache->item_count * 100) / cache->max_items) > pct);
+    }
+    return result;
+}
+
+static void purge_stale_cache_items(request_rec *r, psldap_shared_dataview *dv)
+{
+    int i, j, k;
+    for (i = 0; i < dv->count; i++) { 
+        psldap_shared_data *data = &(dv->collection[i]);
+        /* For now assume the purge interval is the same as the max inactive
+           time. Also, if the data cache is more than 95% full, activate the
+           purge */
+        time_t expires = data->max_inactive_time + data->last_purge_t;
+        if ((expires <= time(NULL)) || (cache_size_exceeds_pct(data, 90))) {
+            expires = data->max_inactive_time + time(NULL);
+            for ( j = data->cache_width - 1; j >= 0; j--) {
+                psldap_array *cache = data->multi_cache[j];
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                             r->server,
+                             "Purging cache dimension: <%d:%d=%d>",
+                             i, j, cache->item_count);
+                qsort(cache->items, cache->item_count, sizeof(void*),
+                      compare_access_t);
+                for (k = 0; (k < cache->item_count) &&
+                       (cache->items[k]->last_access < expires);
+                     k++) {
+                    if (j == 0) {
+                        dv->cached_item_free[i]((void*)(cache->items[k]));
+                    }
+                }
+                if (k < cache->item_count) {
+                    memmove(&cache->items[0], &cache->items[k],
+                            (cache->item_count - k) * sizeof(void*));
+                }
+                cache->item_count -= k;
+                qsort(cache->items, cache->item_count, sizeof(void*),
+                      dv->psldap_compares_item[i][j]);
+                data->last_purge_t = time(NULL);
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                             r->server,
+                             "Cache dimension <%d:%d=%d> purge completed",
+                             i, j, cache->item_count);
+            }
+        }
+    }
+    return;
+}
+
+static pscache_item* find_cache_item(request_rec *r, int collectionIndex,
+                                     int searchBy, const void *key)
+{
+    pscache_item *result = NULL;
+    if( (NULL != dataview.collection) && (dataview.count > collectionIndex) ) {
+        psldap_shared_data *data = &(dataview.collection[collectionIndex]);
+        if (data->cache_width > searchBy) {
+            int (*compare_item)(const void *item1, const void *item2);
+            psldap_array *array = data->multi_cache[searchBy];
+            compare_item = dataview.psldap_compares_item[collectionIndex][searchBy];
+            result = (pscache_item*)array_find_item(array, compare_item, key);
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server,
+                         "Found cache item in dimension: <%d:%d> = %p",
+                         collectionIndex, searchBy, result);
+        }
+    }
+    if (NULL != result) {
+        result->last_access = time(NULL);
+        purge_stale_cache_items(r, &dataview);
+    }
+
+    return result;
+}
+
+static int array_insert_item(const void* item, psldap_array* array,
+                             int (*compare)(const void* arg1, const void* arg2),
+                             int allowDupes)
+{
+    register int result = -1;
+    
+    if(NULL != compare) {
+        result = 0;
+
+        psldap_array_write_lock(array);
+
+        if(array->item_count == 0) {
+            array->item_count++;
+        } else if(array->item_count < array->max_items) {
+            register int cv;
+            register int i = 0, j = array->item_count - 1;
+            
+            do {
+                result = (j + i) / 2;
+                cv = compare(&item, &array->items[result]);
+                if (0 <= cv) i = result + 1;
+                if (0 >= cv) j = result - ((result>i) ? 1 : (i-result));
+                if((0 == cv) && (i > j)) j = result; 
+            } while(j != result);
+            
+            if(0 <= cv) result++;
+            if((0 != allowDupes) || (0 != cv)) {
+                array->item_count++;
+                memmove(&array->items[result+1], &array->items[result],
+                        (array->item_count - result) * sizeof(void*));
+            }
+            else result = -1;
+        } else {
+            result = -1;
+        }
+        if(result >= 0) array->items[result] = (void*) item;
+
+        psldap_array_write_unlock(array);
+    }
+    
+    return result;
+}
+
+static void insert_cache_item(request_rec *r, int collectionIndex,
+                              int insertBy, const void *item)
+{
+    if( (NULL != dataview.collection) && (dataview.count > collectionIndex) ) {
+        psldap_shared_data *data = &(dataview.collection[collectionIndex]);
+        if (data->cache_width > insertBy) {
+            int (*compare_item)(const void *item1, const void *item2);
+            psldap_array *array = data->multi_cache[insertBy];
+            compare_item = dataview.psldap_compares_item[collectionIndex][insertBy];
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server,
+                         "Current array size on dimension %d:%d =  %d",
+                         collectionIndex, insertBy, array->item_count);
+            if (0 > array_insert_item(item, array, compare_item, 0)) {
+                ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO,
+                             r->server, "Error inserting cache item <%d:%d>!! new size is %d",
+                             collectionIndex, insertBy, array->item_count);
+            } else {
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                             r->server,
+                             "Cache item inserted in dimension %d:%d - new size is %d",
+                             collectionIndex, insertBy, array->item_count);
+            }
+        }
+    }
+}
+
+static int array_remove_item(const void* item, psldap_array* array,
+                             int (*compare)(const void* arg1, const void* arg2) )
+{
+    register int result = -1;
+    
+    if(NULL != compare) {
+        result = 0;
+
+        psldap_array_write_lock(array);
+        if(0 != array->item_count) {
+            register int cv;
+            register int i = 0, j = array->item_count - 1;
+            
+            do {
+                result = (j + i) / 2;
+                cv = compare(&item, &array->items[result]);
+                if (0 <= cv) i = result + 1;
+                if (0 >= cv) j = result - ((result>i) ? 1 : (i-result));
+                if((0 == cv) && (i > j)) j = result; 
+            } while(j != result);
+            
+            if(0 != cv) result = -1;
+            else memmove(&array->items[result], &array->items[result+1],
+                         (array->item_count - result - 1) * sizeof(void*));
+        }
+        psldap_array_write_unlock(array);
+
+    }
+    
+    return result;
+}
+
+/** Assume 1000 cached records of 1000 bytes * width with an
+ *  additional premium of (((max - min node width + 2) / 2) + 6)
+ *  * (1000 cached records * 2) / (max - min node width))
+ *  @param s - the apache server record
+ *  @param width - the maximum number of records to hold
+ *  @return the size of the shared memory chunk to hold the records
+ **/
+static int get_shared_size(server_rec *s, int width)
+{
+    psldap_server_rec *sec =
+        (psldap_server_rec *)ap_get_module_config(s->module_config,
+                                                  &psldap_module);
+    int result = sec->psldap_max_records;
+    result *= (MAX_RECORD_SZ + (width * sizeof(void*)) );
+    result += sizeof(psldap_shared_data);
+
+    result = sec->psldap_sm_size;
+    return result;
+}
+
+/** Get the name of the file to contain the stored memory store
+ *  @param s - the apache server record
+ *  @return the name of the file to use for the shared memory store
+ **/
+static char* get_shared_filename(server_rec *s)
+{
+    psldap_server_rec *sec =
+        (psldap_server_rec *)ap_get_module_config(s->module_config,
+                                                  &psldap_module);
+    return (NULL == sec->psldap_sm_file) ? PSLDAP_SHARED_MEM_FILE :
+        sec->psldap_sm_file;
+}
+
+/** Get the mode to set against the shared memory store file.
+ *  @param s - the apache server record
+ *  @return the access mode to set against the shared memory mode file
+ **/
+static int get_file_mode(server_rec *s)
+{
+#ifndef WIN32
+    return (S_IRUSR|S_IWUSR);
+#else
+    return (_S_IREAD|_S_IWRITE);
+#endif
+}
+
+/** Free the passed memory associated with the passed object from the
+ *  shared memory store, checks for NULL values on the passed argument.
+ *  This method will also free all the items within the tree as it frees
+ *  the first dimension of the tree.
+ *  @param data - the allocated instance of the shared data object
+ **/
+static void free_shared_data(psldap_shared_data *data, int collectionNumber)
+{
+    if (NULL != data) {
+        int i;
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     dataview.s,
+                     "Freeing psldap shared data in collection: <%d>",
+                     collectionNumber);
+        if (data->multi_cache) {
+            int items_freed = 0;
+            for (i = 0; i < data->cache_width; i++) {
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                             dataview.s,
+                             "Freeing psldap cache dimenstion: <%d>", i);
+                if (!items_freed) {
+                    free_array_items(data->multi_cache[i], collectionNumber);
+                    items_freed = 1;
+                }
+                if (NULL != data->multi_cache[i]) {
+                    psldap_array_free(&(data->multi_cache[i]));
+                }
+            }
+            ap_mm_free(dataview.mem_mgr, data->multi_cache);
+        }
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     dataview.s,
+                     "PSLdap shared data in collection freed: <%d>",
+                     collectionNumber);
+    }
+}
+
+/** Initialize the passed block of memory with the specified width, ensuring
+ *  all members are synchronized with the proper width
+ *  @param data - the allocated instance of the shared data object
+ *  @param width - the number of parallel trees to maintain
+ *  @return nothing
+ **/
+static void init_shared_data(server_rec *s, psldap_shared_data *data,
+                             const int width)
+{
+    if (NULL != data) {
+        psldap_server_rec *sec =
+            (psldap_server_rec *)ap_get_module_config(s->module_config,
+                                                      &psldap_module);
+        int i = 0;
+        data->max_inactive_time = MAX_INACTIVE_TIME;
+        data->last_purge_t = time(NULL);
+        data->cache_width = width;
+
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     dataview.s,
+                     "Creating multi-cache array: <%d>", width);
+        data->multi_cache = ap_mm_calloc(dataview.mem_mgr,
+                                         data->cache_width,
+                                         sizeof(psldap_array*));
+        if (NULL != data->multi_cache) {
+            for (i = 0; i < data->cache_width; i++) {
+                data->multi_cache[i] =
+                    psldap_array_create(sec->psldap_max_records);
+                if (NULL == data->multi_cache[i]) {
+                    i = 0;
+                    break;
+                }
+            }
+        }
+        if (0 == i) { free_shared_data(data, dataview.count - 1); }
+
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     dataview.s,
+                     "Multi-cache array created: <%d>", width);
+    }
+}
+
+/** Allocate the shared memory for a specific cache and set local memory
+ *  structure as needed to manage the comparison and item free functions.
+ *  @param s - apache server record structure
+ *  @param p - apache pool object for memory allocation
+ *  @param a_free_item - the method to use to free an item in the cache
+ *  @param a_compares_item - the array of comparison methods to apply to each
+ *                           tree
+ *  @param width - number of parallel trees to maintain
+ *  @return the memory management object used to create the pool.
+ **/
+static AP_MM* alloc_shared_data(server_rec *s, pool *p,
+                                void (*a_free_item)(void* item),
+                                int (**a_compares_item)(const void *item1,
+                                                        const void *item2),
+                                int width)
+{
+    psldap_shared_data *result = NULL;
+    dataview.s = s;
+    dataview.mem_mgr = ap_mm_create(get_shared_size(s, width),
+                                    get_shared_filename(s)); 
+   if (NULL == dataview.mem_mgr) {
+        /* log error */
+        char *strError = ap_mm_error();
+        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
+                     "Error creating cache memory manager <%s:%d> : <%s>",
+                     get_shared_filename(s), get_shared_size(s, width),
+                     (NULL != strError) ? strError : "NO_ERR_STRING");
+    } else if (ap_mm_permission(dataview.mem_mgr, get_file_mode(s),
+                                ap_user_id, -1) ) {
+        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
+                     "Error setting mode on file <%s:%d>",
+                     get_shared_filename(s), get_file_mode(s));
+    } else {
+        dataview.count++;
+        if (dataview.collection == NULL) {
+            dataview.collection = ap_mm_calloc(dataview.mem_mgr,
+                                               dataview.count,
+                                               sizeof(psldap_shared_data));
+        } else {
+            dataview.collection = ap_mm_realloc(dataview.mem_mgr,
+                                                dataview.collection,
+                                                dataview.count *
+                                                sizeof(psldap_shared_data));
+        }
+        dataview.psldap_compares_item =
+            realloc(dataview.psldap_compares_item,
+                    dataview.count * sizeof(a_compares_item));
+        dataview.psldap_compares_item[dataview.count-1] = a_compares_item;
+	
+        dataview.cached_item_free =
+            realloc(dataview.cached_item_free,
+                    dataview.count * sizeof(a_free_item));
+        dataview.cached_item_free[dataview.count-1] = a_free_item;
+	
+        result = &(dataview.collection[dataview.count-1]);
+        init_shared_data(s, result, width);
+    }
+    return (NULL != result) ? dataview.mem_mgr : NULL;
+}
+
+/** Cleans up the entire cache and removes the shared file prior to exiting
+ *  the apache server process.
+ *  @param server - the server instance
+ **/
+static void psldap_server_cleanup(void *server)
+{
+    int j;
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 dataview.s,
+                 "Cleaning up shared memory on server: <%d>",
+                 dataview.count);
+    if ( 0 < dataview.count) {
+        for (j = 0; j < dataview.count; j++) {
+            free_shared_data(&(dataview.collection[j]), j);
+        }
+        ap_mm_free(dataview.mem_mgr, dataview.collection);
+        ap_mm_destroy(dataview.mem_mgr);
+        dataview.count = 0;
+    }
+}
+
+static void psldap_child_cleanup(void *server)
+{
+    /* Nothing to do here */
+    return;
+}
+
+void psldap_cache_add_item(request_rec *r, int collectionIndex, void *item)
+{
+    if (dataview.count > collectionIndex) {
+        psldap_shared_data *data = &(dataview.collection[collectionIndex]);
+        int i;
+        for (i = 0; i < data->cache_width; i++) {
+            insert_cache_item(r, collectionIndex, i, item);
+        }
+    }
+}
+
+/** Starts tracking a cache of data within the server. Initializes the
+ *  cache internals on the first call, thereafter expanding the cache as
+ *  required. The initial file settings for the shared memory store must
+ *  allow for the final required memory size for all caches.
+ *  @param s
+ *  @param p
+ *  @param a_free_item - method to invoke to free items in the new cache
+ *                       collection
+ *  @param a_compares_item - array of methods to use in comparing items in
+ *                           each dimension of the cache collection.
+ *  @param cache_width - number of dimensions of the cache collection to
+ *                       create.
+ *  @return an instance to the apache memory manager used to create the
+ *          requested cache collection.
+ **/
+static AP_MM* psldap_cache_start(server_rec *s, pool *p,
+                                 void (*a_free_item)(void* item),
+                                 int (**a_compares_item)(const void *item1,
+                                                         const void *item2),
+                                 int cache_width)
+{
+    ap_register_cleanup(s->ctx->cr_pool, s, psldap_server_cleanup,
+                        psldap_child_cleanup);
+    return alloc_shared_data(s, p, a_free_item, a_compares_item,
+                             cache_width);
+}
+
+/* -------------------------------------------------------------*/
+/* ----------------- End Caching code --------------------------*/
+/* -------------------------------------------------------------*/
+
+typedef enum
+{
+    CACHE_KEY = 0,
+    CACHE_DN,
+    CACHE_WIDTH
+} cache_search_type;
+
+typedef struct
+{
+    PSCACHE_ITEM_FIELDS();
+    char *lhost;	/* The name of the ldap server hoolding the record */
+    char *key;		/* The value of the configured key field */
+    char *dn;		/* The distinguished name of the LDAP record*/
+    char *passwd;	/* The password passed by the user for the
+                       last successful authentication */
+    char *groups;	/* The groups for the user in a ',' delmited
+                       string */
+} psldap_cache_item;
+
+static AP_MM *cache_mem_mgr = NULL;
+
+static void psldap_cache_item_free(void *a_item)
+{
+    psldap_cache_item *item = a_item;
+    if (NULL != item) {
+        if (NULL != item->lhost) ap_mm_free(cache_mem_mgr, item->lhost);
+        if (NULL != item->key) ap_mm_free(cache_mem_mgr, item->key);
+        if (NULL != item->dn) ap_mm_free(cache_mem_mgr, item->dn);
+        if (NULL != item->passwd) ap_mm_free(cache_mem_mgr,
+                                             item->passwd);
+        if (NULL != item->groups) ap_mm_free(cache_mem_mgr,
+                                             item->groups);
+        ap_mm_free(cache_mem_mgr, item);
+    }
+}
+
+static int set_bind_params(request_rec *r, LDAP **ldap,
+                           psldap_config_rec *conf,
+                           const char **user, char const **password);
+static char * get_ldap_grp(request_rec *r, const char *user,
+                           const char *pass, psldap_config_rec *conf);
+static psldap_cache_item* psldap_cache_item_create(request_rec *r,
+                                                   const char *lhost,
+                                                   const char *key,
+                                                   const char *a_dn,
+                                                   const char *passwd,
+                                                   const char *a_groups)
+{
+    server_rec *s = r->server;
+    const char *dn = a_dn;
+    const char *groups = a_groups;
+    psldap_cache_item *result = ap_mm_calloc(cache_mem_mgr, 1,
+                                             sizeof(psldap_cache_item));
+    if (NULL != result) {
+
+        /* Insert the values retrieved from LDAP into the cache */
+        if ((NULL == dn) || (NULL == groups))
+        { /* Set the dn and group if either was not passed */
+            LDAP* ldap = NULL;
+            psldap_config_rec *conf =
+                (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                           &psldap_module);
+            if (NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
+            { 
+                ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
+                             "ldap_init failed <%s>", conf->psldap_hosts);
+            }
+            if (NULL == dn)
+            {
+                dn = ap_pstrdup(r->pool, key);
+                set_bind_params(r, &ldap, conf, &dn, &passwd);
+            }
+            if (NULL == groups)
+            {
+                groups = get_ldap_grp(r, key, passwd, conf);
+            }
+        }
+        result->lhost = ap_mm_strdup(cache_mem_mgr, lhost);
+        result->key = ap_mm_strdup(cache_mem_mgr, key);
+        result->dn = ap_mm_strdup(cache_mem_mgr, dn);
+        result->passwd = ap_mm_strdup(cache_mem_mgr, passwd);
+        result->groups = (NULL == groups) ? NULL :
+            ap_mm_strdup(cache_mem_mgr, groups);
+        if ((NULL == result->key) || (NULL == result->dn) ||
+            (NULL == result->passwd) ||
+            ((NULL == result->groups) && (NULL != groups)) ) {
+            psldap_cache_item_free(result);
+            result = NULL;
+            ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
+                         "Freeing incomplete cache item <%s:%s>",
+                         lhost, key);
+        } else {
+            psldap_cache_add_item(r, 0, result);
+        }
+    } else {
+      	ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
+                     "Error creating cache item <%s:%s>",
+                     (NULL == dn) ? "NULL" : dn,
+                     (NULL == groups) ? "NULL" : groups);
+    }
+
+    return result;
+}
+
+static const psldap_cache_item* psldap_cache_item_find(request_rec *r,
+                                                       const char *lhost,
+                                                       const char *keyvalue,
+                                                       const char *dn,
+                                                       const char *passwd,
+                                                       cache_search_type st)
+{
+    psldap_cache_item key;
+    psldap_cache_item *result = NULL;
+
+    key.lhost = (char*)lhost;
+    key.key = (char*)keyvalue;
+    key.dn = (char*)dn;
+    key.passwd = (char*)passwd;
+    
+    result = (psldap_cache_item*)find_cache_item(r, 0, st, &key);
+
+    return result;
+}
+
+typedef struct
+{
+    request_rec *rr;
+    LDAP *ldap;
+    psldap_config_rec *conf;
+} psldap_status;
+
+static int compare_key(const void *a_item1, const void *a_item2)
+{
+    int result = 0;
+    psldap_cache_item *item1 = *((psldap_cache_item**)a_item1); 
+    psldap_cache_item *item2 = *((psldap_cache_item**)a_item2); 
+
+    if (0 == (result = strcmp(item1->lhost, item2->lhost))) {
+        if (0 == (result = strcmp(item1->key, item2->key))) {
+            result = strcmp(item1->passwd, item2->passwd);;
+        }
+    }
+    return result;
+}
+
+static int compare_dn(const void *a_item1, const void *a_item2)
+{
+    int result = 0;
+    psldap_cache_item *item1 = *((psldap_cache_item**)a_item1);
+    psldap_cache_item *item2 = *((psldap_cache_item**)a_item2);
+
+    if (0 == (result = strcmp(item1->lhost, item2->lhost))) {
+        result = strcmp(item1->dn, item2->dn);
+    }
+    return result;
+}
+
+int (*psldap_compares_item[CACHE_WIDTH])(const void *item1, const void *item2) = {
+    compare_key, compare_dn
+};
 
 static void module_init(server_rec *s, pool *p)
 {
-#ifdef APACHE_V2
-    ap_add_version_component(p, "mod_psldap/0.71");
-#else
-    ap_add_version_component("mod_psldap/0.71");
-#endif
+    add_version_component(p, "mod_psldap/" PSLDAP_VERSION_LABEL);
+    cache_mem_mgr = psldap_cache_start(s, p, psldap_cache_item_free,
+                                       psldap_compares_item, CACHE_WIDTH);
 }
 
 static void *create_ldap_auth_dir_config (pool *p, char *d)
@@ -124,7 +995,27 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_schemeprefix = INT_UNSET;
     sec->psldap_use_ldap_groups = INT_UNSET;
     sec->psldap_secure_auth_cookie = INT_UNSET;
+    sec->psldap_cookiedomain = STR_UNSET;
     sec->psldap_credential_uri = STR_UNSET;
+    sec->psldap_cache_auth = INT_UNSET;
+    return sec;
+}
+
+static void *create_ldap_auth_srv_config (pool *p, server_rec *s)
+{
+    psldap_server_rec *sec
+        = (psldap_server_rec *)ap_pcalloc (p, sizeof(psldap_server_rec));
+    
+    sec->psldap_sm_file = STR_UNSET;
+    sec->psldap_sm_size = INT_UNSET;
+    sec->psldap_max_records = INT_UNSET;
+    sec->psldap_purge_interval = INT_UNSET;
+
+    /* TODO - remove these defaults after into values are set from config */
+    sec->psldap_sm_size = PSLDAP_SHM_SIZE;
+    sec->psldap_max_records = MAX_RECORDS;
+    sec->psldap_purge_interval = MAX_INACTIVE_TIME;
+
     return sec;
 }
 
@@ -161,6 +1052,7 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, n, psldap_user_grp_attr);
     set_cfg_str_if_n_set(p, result, n, psldap_grp_mbr_attr);
     set_cfg_str_if_n_set(p, result, n, psldap_grp_nm_attr);
+    set_cfg_str_if_n_set(p, result, n, psldap_cookiedomain);
 
     if (NULL == b) return result;
     
@@ -174,6 +1066,7 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, b, psldap_user_grp_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_grp_mbr_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_grp_nm_attr);
+    set_cfg_str_if_n_set(p, result, b, psldap_cookiedomain);
 
     set_cfg_int_if_n_set(result, b, psldap_searchscope, INT_UNSET,
                          LDAP_SCOPE_BASE);
@@ -195,6 +1088,33 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET, 1);
     /* Set the URI for the form to capture credentials */
     set_cfg_str_if_n_set(p, result, b, psldap_credential_uri);
+    /* Auth does not use cache by default */
+    set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, 0);
+
+    return result;
+}
+
+void *merge_ldap_auth_srv_config (pool *p, void *base_conf, void *new_conf)
+{
+    psldap_server_rec *result
+        = (psldap_server_rec *)ap_pcalloc (p, sizeof(psldap_server_rec));
+    psldap_server_rec *b = (psldap_server_rec *)base_conf;
+    psldap_server_rec *n = (psldap_server_rec *)new_conf;
+
+    *result = *n;
+
+    set_cfg_str_if_n_set(p, result, n, psldap_sm_file);
+
+    if (NULL == b) return result;
+    
+    set_cfg_str_if_n_set(p, result, b, psldap_sm_file);
+
+    set_cfg_int_if_n_set(result, b, psldap_sm_size, INT_UNSET,
+                         PSLDAP_SHM_SIZE);
+    set_cfg_int_if_n_set(result, b, psldap_max_records, INT_UNSET,
+                         MAX_RECORDS);
+    set_cfg_int_if_n_set(result, b, psldap_purge_interval, INT_UNSET,
+                         MAX_INACTIVE_TIME);
 
     return result;
 }
@@ -218,7 +1138,7 @@ static const char* set_ldap_search_scope(cmd_parms *parms, void *mconfig,
 }
 
 static const char* set_ldap_slot(cmd_parms *parms, void *mconfig,
-				 const char *to) {
+                                 const char *to) {
     psldap_config_rec *lac = (psldap_config_rec*)mconfig;
     if((NULL != to) && (0 == strcasecmp("krbv41", to)) )
     {
@@ -326,6 +1246,12 @@ command_rec ldap_auth_cmds[] = {
       "Set to 'on' if authentication is to be performed by binding with the"
       " user provided credentials"
     },
+    { "PsLDAPAuthUseCache", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_cache_auth),
+      OR_AUTHCFG, FLAG, 
+      "Set to 'on' if authentication will check the cache prior to querying "
+      " the LDAP server"
+    },
     /* Connection security */
     { "PsLDAPBindMethod", (cmd_func)set_ldap_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_bindmethod),
@@ -337,6 +1263,12 @@ command_rec ldap_auth_cmds[] = {
       OR_AUTHCFG, FLAG, 
       "Set to 'off' if cookies are allowed to be sent across an unsecure"
       "    connection"
+    },
+    { "PsLDAPAuthCookieDomain", (cmd_func)ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_cookiedomain),
+      OR_AUTHCFG, TAKE1, 
+      "Set to a domain string if cookies are allowed to be used across "
+      "    servers in a domain"
     },
     /* Password management */
     { "PsLDAPCryptPasswords", (cmd_func)ap_set_flag_slot,
@@ -355,21 +1287,36 @@ command_rec ldap_auth_cmds[] = {
       OR_AUTHCFG, TAKE1, 
       "The URI containing the form to capture the user's credentials."
     },
+    /* Cache management */
+    { "PsLDAPCacheFile", (cmd_func)ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_server_rec, psldap_sm_file),
+      OR_AUTHCFG, TAKE1, 
+      "The full path name for the file to use to manage shared memory. Default"
+      " value is " PSLDAP_SHARED_MEM_FILE
+    },
+#if 0
+    /* TODO - How do we set the int values ... ? */
+#endif
+    { "PsLDAPCacheAllocation", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_server_rec, psldap_sm_size),
+      OR_AUTHCFG, TAKE1, 
+      "The file size to allocate for shared memory. The default size is "
+      PSLDAP_SHM_SIZE_STR " bytes."
+    },
+    { "PsLDAPCacheMaxSize", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_server_rec, psldap_max_records),
+      OR_AUTHCFG, TAKE1, 
+      "The maximum number of records to hold in the cache. Default"
+      " value is " MAX_RECORDS_STR
+    },
+    { "PsLDAPCachePurgeInterval", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_server_rec, psldap_purge_interval),
+      OR_AUTHCFG, TAKE1, 
+      "The maximum time in seconds to hold a record in the cache. Default"
+      " value is " MAX_INACTIVE_TIME_STR
+    },
     { NULL }
 };
-
-#ifdef APACHE_V2
-extern module MODULE_VAR_EXPORT psldap_module;
-#else
-module MODULE_VAR_EXPORT psldap_module;
-#endif
-
-typedef struct
-{
-    request_rec *rr;
-    LDAP *ldap;
-    psldap_config_rec *conf;
-} psldap_status;
 
 static char * get_user_name(request_rec *r)
 {
@@ -380,24 +1327,22 @@ static char * get_user_name(request_rec *r)
 #endif
 }
 
-static char * get_user_dn(request_rec *r, const char *user, const char *pass,
-                          psldap_config_rec *conf)
+static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
+                          const char *pass, psldap_config_rec *conf)
 {
     int err_code;
-    LDAP *ldap = NULL;
     LDAPMessage *ld_result = NULL, *ld_entry = NULL;
     const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
     char *ldap_query = NULL, *ldap_base = NULL, *user_dn = NULL;
     
-    /* ldap_open is deprecated in future releases, ldap_init is recommended */
-    if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
-    {
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-		     "ldap_init failed <%s>", conf->psldap_hosts);
+    /* If the user dn is set as the user name, parse out the value and
+       return it ... */
+    if (0 == strncmp("dn=", user, 3)) {
+        user_dn = ap_pstrdup(r->pool, &user[3]);
         goto AbortDNAcquisition;
     }
 
-    if(LDAP_SUCCESS != (err_code = ldap_bind_s(ldap, conf->psldap_binddn,
+    if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap, conf->psldap_binddn,
                                                conf->psldap_bindpassword,
                                                conf->psldap_bindmethod))
        )
@@ -428,39 +1373,39 @@ static char * get_user_dn(request_rec *r, const char *user, const char *pass,
     */
     ldap_attrs[0] = "dn"/*conf->psldap_userkey*/;
     if(LDAP_SUCCESS !=
-       (err_code = ldap_search_s(ldap, ldap_base, conf->psldap_searchscope,
+       (err_code = ldap_search_s(*ldap, ldap_base, conf->psldap_searchscope,
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_search failed: %s", ldap_err2string(err_code));
-        goto AbortDNAcquisition;
+        goto CleanAbortDNAcquisition;
     }
     
-    if(NULL == (ld_entry = ldap_first_entry(ldap, ld_result)))
+    if(NULL == (ld_entry = ldap_first_entry(*ldap, ld_result)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "attr <%s> for user <%s> not found in <%s>",
                      ldap_attrs[0], ldap_query, ldap_base);
-        goto AbortDNAcquisition;
+        goto CleanAbortDNAcquisition;
     }
 
-    user_dn = ap_pstrdup(r->pool, ldap_get_dn(ldap, ld_entry) );
+    user_dn = ap_pstrdup(r->pool, ldap_get_dn(*ldap, ld_entry) );
 
+ CleanAbortDNAcquisition:
     if (NULL != ld_result)
     {
         ldap_msgfree(ld_result);
     }
-    if (NULL != ldap)
-    {
-        ldap_unbind_s(ldap);
-    }
+    ldap_unbind_s(*ldap);
+    *ldap = ldap_init(conf->psldap_hosts, LDAP_PORT);
 
  AbortDNAcquisition:
     return user_dn;
 }
 
-static int set_bind_params(request_rec *r, psldap_config_rec *conf,
+static int set_bind_params(request_rec *r, LDAP **ldap,
+                           psldap_config_rec *conf,
                            const char **user, char const **password)
 {
     int result = TRUE;
@@ -485,7 +1430,7 @@ static int set_bind_params(request_rec *r, psldap_config_rec *conf,
         }
         else
         {
-            *user = get_user_dn(r, *user, *password, conf);
+            *user = get_user_dn(r, ldap, *user, *password, conf);
         }
     }
 
@@ -568,9 +1513,9 @@ static char * build_string_list(request_rec *r, char * const *values,
 }
 
 static char * get_ldvalues_from_connection(
-                           request_rec *r, psldap_config_rec *conf, LDAP *ldap,
-                           char *ldap_base, char *ldap_query, const char *user,
-                           const char *attr, const char *separator)
+                                           request_rec *r, psldap_config_rec *conf, LDAP *ldap,
+                                           char *ldap_base, char *ldap_query, const char *user,
+                                           const char *attr, const char *separator)
 {
     /* Set the attribute list to return to include only the requested value.
        This is done to avoid false errors caused when querying more secure
@@ -590,34 +1535,85 @@ static char * get_ldvalues_from_connection(
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_search failed: %s", ldap_err2string(err_code));
-        goto GET_LDVALUES_RETURN;
     }
-
-    if(!(ld_entry = ldap_first_entry(ldap, ld_result)))
+    else if(!(ld_entry = ldap_first_entry(ldap, ld_result)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "user <%s> not found", user);
-        goto GET_LDVALUES_RETURN;
     }
-    if(!(ld_values = ldap_get_values(ldap, ld_entry, attr)))
+    else if(!(ld_values = ldap_get_values(ldap, ld_entry, attr)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_get_values <%s> failed", attr);
-        goto GET_LDVALUES_RETURN;
+    }
+    else
+    {
+        result = build_string_list(r, ld_values, separator);
     }
 
-    result = build_string_list(r, ld_values, separator);
+    if (NULL != ld_values) { ldap_value_free(ld_values); }
+    if (NULL != ld_result) { ldap_msgfree(ld_result);    }
 
- GET_LDVALUES_RETURN:
-    if (NULL != ld_values)
-    {
-        ldap_value_free(ld_values);
-    }
-    if (NULL != ld_result)
-    {
-        ldap_msgfree(ld_result);
-    }
     return result;
+}
+
+static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
+                          const char *user, const char *pass,
+                          psldap_config_rec *conf
+                          )
+{
+    const char *bindas = user, *bindpass = pass;
+    int freeLdap = 0;
+    
+    if (NULL == *ldap) freeLdap = 1;
+
+    /* ldap_open is deprecated in future releases, ldap_init is recommended */
+    if (NULL == (*ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
+    { 
+        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
+                     "ldap_init failed <%s>", conf->psldap_hosts);
+        return *ldap;
+    }
+    
+    if(set_bind_params(r, ldap, conf, &bindas, &bindpass))
+    {
+        if(ldap_bind_s(*ldap, bindas, bindpass, conf->psldap_bindmethod))
+        {
+            ap_log_error(APLOG_MARK, APLOG_WARNING DEBUG_ERRNO, r->server,
+                         "ldap_bind as user <%s> failed", bindas);
+            if(freeLdap) ldap_unbind_s(*ldap);
+            *ldap = NULL;
+        }
+        else
+        {
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
+                         "ldap_bind as user <%s> succeeded", bindas);
+        }
+    }
+    return *ldap;
+}
+
+static char * get_ldap_val_bound(request_rec *r, LDAP *ldap,
+                                 psldap_config_rec *conf,  const char *user,
+                                 const char *query_by, const char *query_for,
+                                 const char *attr, const char *separator) {
+    char *retval = NULL;
+
+    if(NULL == attr) retval = "bind";
+    else
+    {
+        char *ldap_query = NULL, *ldap_base = NULL;
+        
+        ldap_query = construct_ldap_query(r, conf, query_by, query_for,
+                                          user);
+        ldap_base = construct_ldap_base(r, conf, ldap_query);
+        
+        retval = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
+                                              ldap_query, user, attr,
+                                              separator);
+    }
+
+    return retval; 
 }
 
 static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
@@ -625,98 +1621,105 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
                            const char *query_by, const char *query_for,
                            const char *attr, const char *separator) {
     const char *bindas = user, *bindpass = pass;
-    LDAP *ldap = NULL;
     char *retval = NULL;
-
-    /* ldap_open is deprecated in future releases, ldap_init is recommended */
-    if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
-    { 
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server, "ldap_init failed <%s>",
-                     conf->psldap_hosts);
-        return retval;
-    }
-
+    LDAP *ldap = NULL;
+    
     if(NULL == attr) retval = "bind";
-    if((NULL != attr) && set_bind_params(r, conf, &bindas, &bindpass))
-    {
-        if(ldap_bind_s(ldap, bindas, bindpass, conf->psldap_bindmethod))
-        {
-            ap_log_error(APLOG_MARK, APLOG_WARNING DEBUG_ERRNO, r->server,
-                         "ldap_bind as user <%s> failed", bindas);
-        }
-        else
-        {
-            char *ldap_query = NULL, *ldap_base = NULL;
-
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                         "ldap_bind as user <%s> succeeded", bindas);
-        
-            ldap_query = construct_ldap_query(r, conf, query_by, query_for,
-                                              user);
-            ldap_base = construct_ldap_base(r, conf, ldap_query);
-            
-            retval = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
-                                                  ldap_query, user, attr,
-                                                  separator);
-        }
+    if((NULL != attr) && (NULL != ps_bind_ldap(r, &ldap, user, pass, conf)) ) {
+        retval = get_ldap_val_bound(r, ldap, conf, user, query_by,
+                                    query_for, attr, separator);
+        ldap_unbind_s(ldap);
     }
-
-    if (NULL != ldap) { ldap_unbind_s(ldap); }
     
     return retval; 
 }
 
-static char * get_groups_containing_grouped_attr(request_rec *r,
+static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
                                                  const char *user,
                                                  const char *pass,
                                                  psldap_config_rec *conf)
 {
     char *retval = NULL;
-    const char *groupkey = (NULL == conf->psldap_user_grp_attr) ? NULL :
-        get_ldap_val(r, user, pass, conf, NULL, NULL,
-                     conf->psldap_user_grp_attr, ":");
-    if (NULL != groupkey)
-    {
-        while(groupkey[0])
+    const char *groupkey;
+    LDAP *ldap = aldap;
+
+    /* ldap_open is deprecated in future releases, ldap_init is recommended */
+    if((NULL == ldap) &&
+       (NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT))) )
+    { 
+        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
+                     "ldap_init failed <%s>", conf->psldap_hosts);
+        return retval;
+    }
+
+    if (NULL != ps_bind_ldap(r, &ldap, user, pass, conf) ) {
+        groupkey = (NULL == conf->psldap_user_grp_attr) ? NULL :
+            get_ldap_val_bound(r, ldap, conf, user, NULL, NULL,
+                               conf->psldap_user_grp_attr, ":");
+        if (NULL != groupkey)
         {
-            char *v = ap_getword(r->pool, &groupkey,':');
-            char *groups = (NULL == conf->psldap_grp_mbr_attr) ? NULL :
-                get_ldap_val(r, user, pass, conf, conf->psldap_grp_mbr_attr,
-                             v, conf->psldap_grp_nm_attr, ",");
-            if(NULL != groups)
+            while(groupkey[0])
             {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                             "Found LDAP Groups <%s>", groups);
-                retval = (NULL == retval) ? groups :
-                    ap_pstrcat(r->pool, retval, ",", groups, NULL);
+                char *v = ap_getword(r->pool, &groupkey,':');
+                char *groups = (NULL == conf->psldap_grp_mbr_attr) ? NULL :
+                    get_ldap_val_bound(r, ldap, conf, user,
+                                       conf->psldap_grp_mbr_attr,
+                                       v, conf->psldap_grp_nm_attr, ",");
+                if(NULL != groups)
+                {
+                    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG
+                                 DEBUG_ERRNO,
+                                 r->server, "Found LDAP Groups <%s>", groups);
+                    retval = (NULL == retval) ? groups :
+                        ap_pstrcat(r->pool, retval, ",", groups, NULL);
+                }
             }
         }
+        else
+        {
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server,
+                         "Could not identify user LDAP User = <%s = %s>",
+                         conf->psldap_userkey, user);
+        }
+        if (NULL == aldap) { ldap_unbind_s(ldap); }
     }
-    else
-    {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                     "Could not identify user LDAP User = <%s = %s>",
-                     conf->psldap_userkey, user);
-    }
+
     return retval;
 }
 
-static char * get_ldap_grp(request_rec *r, const char *user, const char *pass,
-                           psldap_config_rec *conf)
+static char * get_ldap_grp(request_rec *r, const char *user,
+                           const char *pass, psldap_config_rec *conf)
 {
-    if (conf->psldap_use_ldap_groups)
-    {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                     "Attempting to find group membership in LDAP User = <%s = %s>",
-                     conf->psldap_userkey, user);
-        return get_groups_containing_grouped_attr(r, user, pass, conf);
+    LDAP *ldap = NULL;
+    char *result = NULL;
+    int cacheResultMissing = 0;
+    
+    if (conf->psldap_cache_auth) {
+        const psldap_cache_item *record = 
+            psldap_cache_item_find(r, conf->psldap_hosts, user, NULL, pass,
+                                   CACHE_KEY);
+        /* Lookup groups in cache for this user */;
+        if(NULL != record) result = ap_pstrdup(r->pool, record->groups);
     }
-    else
-    {
-        return (NULL == conf->psldap_groupkey) ? NULL :
-            get_ldap_val(r, user, pass, conf, NULL, NULL,
-                         conf->psldap_groupkey, ",");
+    if (NULL == result) {
+        if (conf->psldap_use_ldap_groups)
+        {
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server,
+                         "Finding group membership of LDAP User = <%s = %s>",
+                         conf->psldap_userkey, user);
+            result = get_groups_containing_grouped_attr(r, ldap, user, pass,
+                                                        conf);
+        }
+        else
+        {
+            result = (NULL == conf->psldap_groupkey) ? NULL :
+                get_ldap_val(r, user, pass, conf, NULL, NULL,
+                             conf->psldap_groupkey, ",");
+        }
     }
+    return result;
 }
 
 static int password_matches(const psldap_config_rec *sec, request_rec *r,
@@ -810,8 +1813,8 @@ static int authenticate_via_query (request_rec *r, psldap_config_rec *sec,
     */
     char *real_pw;
 
-    if(NULL != (real_pw = get_ldap_val(r, user, sent_pw, sec, NULL, NULL,
-                                       sec->psldap_passkey, ",")))
+    if(NULL != (real_pw = get_ldap_val(r, user, sent_pw, sec, NULL,
+                                       NULL, sec->psldap_passkey, ",")))
     {
         if(password_matches(sec, r, real_pw, sent_pw))
         {
@@ -851,25 +1854,18 @@ static int util_read(request_rec *r, char **buf)
         long length = r->remaining;
         char *argsbuf = (char*)*buf = ap_pcalloc(r->pool, length + 2);
 
-#ifndef APACHE_V2
         ap_hard_timeout("util_read", r);
-#endif
-	
         while ((length > rpos) &&
                (rpos += ap_get_client_block(r, argsbuf, length - rpos)) > 0)
         {
             argsbuf = (char*)*buf + rpos;
-#ifndef APACHE_V2
             ap_reset_timeout(r);
-#endif
         }
         if(rpos <= length) buf[rpos] = '\0';
         else ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
                           "Buffer overflow reading page response %s",
                           r->unparsed_uri);
-#ifndef APACHE_V2
         ap_kill_timeout(r);
-#endif
     }
     else rc = !OK;
     return rc;
@@ -952,13 +1948,17 @@ static void set_psldap_auth_cookie(request_rec *r, psldap_config_rec *sec,
     char *cookie_string;
     char *cookie_value;
     int secure = sec->psldap_secure_auth_cookie;
+    const char *cookiedomain = sec->psldap_cookiedomain;
 
     cookie_value = ap_pstrcat(r->pool, sec->psldap_userkey, "=", userValue,
                               "&", sec->psldap_passkey, "=", passValue, NULL);
     cookie_string = ap_pstrcat(r->pool, cookie_credential_param, "=",
                                ap_pbase64encode(r->pool, cookie_value),
                                "; path=/",
-                               (secure) ? "; secure" : "", NULL);
+                               (secure) ? "; secure" : "",
+                               (cookiedomain) ? "; domain=" : "",
+                               (cookiedomain) ? cookiedomain : "",
+                               NULL);
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
                  "Adding auth cookie Set-Cookie: %s", cookie_string);
     ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
@@ -1131,39 +2131,6 @@ static int get_provided_username(request_rec *r, char **sent_user)
     return get_provided_authvalue(r, "user", sent_user);
 }
 
-static int ldap_authenticate_user_old (request_rec *r)
-{
-    psldap_config_rec *sec =
-        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
-                                                   &psldap_module);
-    conn_rec *c = r->connection;
-    char *sent_pw = NULL;
-    char *sent_user = NULL;
-    int res = 0;
-
-    if(!sec->psldap_userkey) return DECLINED;
-    
-    if ((OK != (res = get_provided_password (r, &sent_pw))) ||
-        (OK != (res = get_provided_username (r, &sent_user))) )
-    {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                     "Failed to acquire credentials for authentication",
-                     (NULL == sent_user) ? "" : sent_user);
-        return res;
-    }
-
-    if(sec->psldap_authexternal)
-    {
-        return authenticate_via_bind (r, sec, sent_user, sent_pw);
-    }
-    if (sec->psldap_authsimple)
-    {
-        return authenticate_via_query (r, sec, sent_user, sent_pw);
-    }
-
-    return authenticate_via_query (r, sec, sent_user, sent_pw);
-}
-
 static int get_provided_credentials(request_rec *r, psldap_config_rec *sec,
                                     char **sent_pw, char **sent_user)
 {
@@ -1270,9 +2237,10 @@ static int ldap_authenticate_user (request_rec *r)
     conn_rec *c = r->connection;
     char *sent_pw = NULL;
     char *sent_user = NULL;
-    int res = 0;
+    int res = DECLINED;
+    int cacheResultMissing = 1;
 
-    if(!sec->psldap_userkey) return DECLINED;
+    if(!sec->psldap_userkey) return res;
     
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                  "Authenticating LDAP user");
@@ -1285,10 +2253,21 @@ static int ldap_authenticate_user (request_rec *r)
     }
     else
     {
+        const psldap_cache_item *record = NULL;
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                      "Authenticating user %s with passed credentials",
                      (NULL == sent_user) ? "" : sent_user);
-        if(sec->psldap_authexternal)
+        if (sec->psldap_cache_auth) {
+            record = psldap_cache_item_find(r, sec->psldap_hosts, sent_user,
+                                            NULL, sent_pw, CACHE_KEY);
+        }
+        if (NULL != record) {
+            cacheResultMissing = 0;
+            res = ((0 == strcmp(sent_user, record->key)) &&
+                   (0 == strcmp(sent_pw, record->passwd)) ) ?
+                OK : HTTP_UNAUTHORIZED;
+        }
+        else if(sec->psldap_authexternal)
         {
             res = authenticate_via_bind (r, sec, sent_user, sent_pw);
         }
@@ -1315,17 +2294,13 @@ static int ldap_authenticate_user (request_rec *r)
                and the credential uri is set */
             const char *post_login_uri = ap_pstrdup(r->pool, r->uri);
             request_rec *sr;
-#ifdef APACHE_V2
-	    sr = ap_sub_req_lookup_uri(sec->psldap_credential_uri, r, NULL);
-#else
-	    sr = ap_sub_req_lookup_uri(sec->psldap_credential_uri, r);
-#endif
+
+            sr = sub_req_lookup_uri(sec->psldap_credential_uri, r, NULL);
             sr->prev = r;
             r->content_type = sr->content_type;
             sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
-#ifndef APACHE_V2
+
             ap_soft_timeout("update ldap data", r);
-#endif
             ap_send_http_header(r);
             res = ap_run_sub_req(sr);
             if (ap_is_HTTP_SUCCESS(res))
@@ -1334,10 +2309,15 @@ static int ldap_authenticate_user (request_rec *r)
             }
             res = DONE;
             ap_destroy_sub_req(sr);
-#ifndef APACHE_V2
             ap_kill_timeout(r);
-#endif
         }
+    } else if ((OK == res) && cacheResultMissing) {
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
+                     "Cached user credentials and info for user %s: %s",
+                     sec->psldap_hosts, sent_user);
+        /* Cache the user account information */
+        psldap_cache_item_create(r, sec->psldap_hosts, sent_user, NULL,
+                                 sent_pw, NULL);
     }
     return res;
 }
@@ -1362,7 +2342,7 @@ static int ldap_check_auth(request_rec *r)
     int groupRequirementExists = 0;
 
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                 "Checking LDAP user authentication");
+                 "Checking LDAP user authorization");
     if (!reqs_arr || (OK != get_provided_credentials (r, sec, &sent_pw, &user
                                                       )) )
     {
@@ -1414,7 +2394,7 @@ static int ldap_check_auth(request_rec *r)
         }
     }
     /* If no groups were required, return OK */
-    if ((NULL == sec->psldap_groupkey) && !groupRequirementExists) return OK;
+    if ((NULL == sec->psldap_groupkey) || !groupRequirementExists) return OK;
     
     if (!sec->psldap_authoritative) return DECLINED;
     if (NULL != errstr) ap_log_reason (errstr, r->filename, r);
@@ -1617,9 +2597,11 @@ static int ldap_update_handler(request_rec *r)
                      conf->psldap_hosts);
         res = HTTP_INTERNAL_SERVER_ERROR;
     }
-    else if(LDAP_SUCCESS != (err_code = ldap_bind_s(ldap,
-                                                    bindas = get_user_dn(r, user, password, conf),
-                                                    password, conf->psldap_bindmethod) ) )
+    else if((NULL != (bindas = get_user_dn(r, &ldap, user, password, conf))) &&
+            (LDAP_SUCCESS !=
+             (err_code = ldap_bind_s(ldap, bindas, password,
+                                     conf->psldap_bindmethod) ) )
+            )
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_bind as user <%s> failed on ldap update: %s",
@@ -1636,18 +2618,14 @@ static int ldap_update_handler(request_rec *r)
         {
             request_rec *sr;
             const char *post_login_uri = get_post_login_uri(r);
-#ifdef APACHE_V2
-            sr = ap_sub_req_lookup_uri(post_login_uri, r, NULL);
-#else
-	    sr = ap_sub_req_lookup_uri(post_login_uri, r);
-#endif
+
+            sr = sub_req_lookup_uri(post_login_uri, r, NULL);
             sr->prev = r;
             r->content_type = sr->content_type;
             set_psldap_auth_cookie(r, conf, user, password);
             sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
-#ifndef APACHE_V2
+
             ap_soft_timeout("update ldap data", r);
-#endif
             ap_send_http_header(r);
             res = ap_run_sub_req(sr);
             if (ap_is_HTTP_SUCCESS(res))
@@ -1656,23 +2634,22 @@ static int ldap_update_handler(request_rec *r)
             }
             else
             {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                             r->server,
                              "LDAP update sub request had problems (%d): %s",
                              res, post_login_uri);
             }
             res = DONE;
             ap_destroy_sub_req(sr);
-#ifndef APACHE_V2
             ap_kill_timeout(r);
-#endif
+
             return res;
         }
         else
         {
             r->content_type = "text/html";
-#ifndef APACHE_V2
+
             ap_soft_timeout("update ldap data", r);
-#endif
             ap_send_http_header(r);
 	    
             /* Process the requested update here. Send response - ideally
@@ -1696,9 +2673,8 @@ static int ldap_update_handler(request_rec *r)
                 ap_table_do(actionHandler, (void*)&ps, t_env, NULL);
             }
             ap_rputs("</body>", r);
-#ifndef APACHE_V2
             ap_kill_timeout(r);
-#endif
+
             res = OK;
         }
 	
@@ -1724,6 +2700,8 @@ static int ldap_update_handlerV2(request_rec *r)
 
 static void register_hooks(pool *p)
 {
+    /* Hook in the module initialization */
+    ap_hook_post_config(module_init, NULL, NULL, APR_HOOK_MIDDLE);
     /* [9]  content handlers */
     ap_hook_handler(ldap_update_handlerV2, NULL, NULL, APR_HOOK_MIDDLE);	
     /* [5]  check/validate user_id        */
@@ -1735,11 +2713,11 @@ static void register_hooks(pool *p)
 module MODULE_VAR_EXPORT psldap_module =
 {
     STANDARD20_MODULE_STUFF,
-    create_ldap_auth_dir_config,/* per-directory config creator       */
-    merge_ldap_auth_dir_config,	/* dir config merger                  */
-    NULL,			/* server config creator              */
-    NULL,			/* server config merger               */
-    ldap_auth_cmds,		/* config directive table             */
+    create_ldap_auth_dir_config,	/* per-directory config creator       */
+    merge_ldap_auth_dir_config,		/* dir config merger                  */
+    create_ldap_auth_srv_config,	/* server config creator              */
+    merge_ldap_auth_srv_config,		/* server config merger               */
+    ldap_auth_cmds,					/* config directive table             */
     register_hooks
 };
 
@@ -1756,10 +2734,10 @@ module MODULE_VAR_EXPORT psldap_module =
 {
     STANDARD_MODULE_STUFF,
     module_init,		/* initializer                        */
-    create_ldap_auth_dir_config,/* per-directory config creator       */
-    merge_ldap_auth_dir_config,	/* dir config merger                  */
-    NULL,			/* server config creator              */
-    NULL,			/* server config merger               */
+    create_ldap_auth_dir_config,	/* per-directory config creator       */
+    merge_ldap_auth_dir_config,		/* dir config merger                  */
+    create_ldap_auth_srv_config,	/* server config creator              */
+    merge_ldap_auth_srv_config,		/* server config merger               */
     ldap_auth_cmds,		/* config directive table             */
     ldap_handlers,		/* [9]  content handlers              */
     translate_handler,		/* [2]  URI-to-filename translation   */

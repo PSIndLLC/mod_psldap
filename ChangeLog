@@ -1,6 +1,40 @@
+Revision 0.73
+===================
+Implemented caching array in shared memory leveraging the apache ap_mm APIs.
+
+Addition of caching, controlled by the PsLDAPAuthUseCache parameter, set to off by default
+
+Reuse of existing LDAP connections implemented in acquiring authorization data to improve overall performance in authorization phase.
+	
+Addition of PsLDAPAuthCookieDomain. The default is to let the cookie domain default to the server domain
+
+Initialization code has been added for Apache 2.0 (Courtesy Gunter Knauf)
+
+Reorganized code to improve readability of mixed Apache 2.0 and Apache 1.3 compatible implementation
+
+
+Revision 0.71
+===================
+Addition of cookie based authentication against LDAP server using forms to 
+collect the authentication data.
+
+Made form data accessible to all subrequests by adding it to the subprocess_env
+table immediately after acquisition.
+
+Addition of ability to recurse up request_rec chain to acquire authentication
+data
+
+Created mechanism to identify pending changes to current record when ldap
+records are updated through forms (experimental - not exposed).
+
+	
+Revision 0.70
+===================
+Initial work started on the processing of LDAP requests within the module
+
+	
 Revision 0.63
 ===================
-	
 Addition of LDAP group authentication through the addition of the following
 parameters: PsLDAPUseLDAPGroups, PsLDAPUserGroupAttr, PsLDAPGroupMemberAttr,
 PsLDAPGroupNameAttr. The default is to not use LDAP based group authorization.

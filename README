@@ -1,0 +1,422 @@
+mod_psldap
+===========
+
+Version 0.7
+by David Picard
+
+This module is based on Alexander Mayrhofer's mod_auth_ldap, version 0.5.
+
+sha1 algarithm originally by Steve Reid, modified by Alexander Mayrhofer
+
+LDAP authentication and access module for Apache web server
+(http://www.apache.org/).
+
+This module allows the web user to authenticate against an LDAP store and
+manage information in the LDAP store.
+
+For history of this module, review the ChangeLog file. The latest version of
+this module can be acquired at http://www.psind.com:8080/projects/mod_psldap/
+
+Feature Summary
+================
+
+This module is intended to provide LDAP authentication and maintenance services
+specific to each VirtualServer running under an Apache web server. The features
+provided by this module are as follows:
+
+Authentication Features:
+1.  Direct authentication of a user against an LDAP server.
+2.  Authentication against an LDAP server given the user's knowledge of an
+    attribute setting in the LDAP tree for their record.
+3.  Allow identification of the branch of the LDAP tree under which the user
+    must be located.
+4.  Allow for function with LDAP servers configured to enforce high levels of
+    security.
+5.  Support for kerberos based access to an LDAP server.
+6.  Allow for group identification based on an attribute in the user's record.
+    This functionality will not preclude authentication should no group be 
+    identified.
+
+
+Maintenance Features:
+1.  Allow the web user to query the LDAP server for information, within the
+    limits of their privileges on the server. The module will generate an XML
+    representation of the LDAP records that meet the query criteria requested
+    by the user. This module will optionally apply an XSL transformation to
+    the generated XML and return the resultant document to the user.
+2.  Allow the user to edit any attributes in his/her own record, given he/she
+    is granted read/write access to those attributes by the LDAP server. This
+    feature assumes the attribute name in the LDAP server is used as the value
+    name in a POST operation.
+3.  Allow the LDAP administrator to edit any record in the LDAP server.
+4.  Optionally denies access to all LDAP maintenance functionality if the web
+    user is not accessing this module through an https connection.
+
+
+
+Compile with Apache
+====================
+
+Prerequisites
+
+In order to build mod_psldap you will need at a minimum, an ldap library and a
+build environment (compiler, linker, pre-processor, etc...) installed on the
+build machine. The mod_psldap module was built and tested against OpenLDAP
+version 2.0.23, (downloadable from http://www.openldap.org) but may very well
+build with other versions of this library.
+
+In addition to the ldap library, the Apache web server source must be available
+or the web server itself must be installed on the build machine. The source can
+be acquired from the Apache site (http://www.apache.org) or any mirror sites.
+
+This module can be built in two ways, as a part of the Apache build or through
+the Apache apxs utility.
+
+
+Build Through Apache
+
+Unpack Apache as usual, and change into it's "modules" directory:
+
+   % gzip -dc ../path/to/archive/apache_1.3.23.tar.gz | tar -xv<BR>
+   ...
+   % cd apache_1.3.23/src/modules
+
+Then, unpack the mod_psldap archive into the modules directory, e.g.
+
+   % gzip -dc ../path/to/archive/mod_psldap-0.6.tar.gz | tar -xv
+
+Configuring, Building, Installing
+
+Change into the newly created "mod_psldap" directory, and configure the 
+module itself (some parts of the sha algorithm are endian-dependent, and 
+endianess is not checked by the Apache configure script, so the
+module comes with it's own autoconf script).
+
+   % cd mod_psldap; ./configure
+
+Now it's time to choose your favorite apache Config options, and additionally
+ activate the LDAP authentication module. 
+
+   % cd ../../..; ./configure --prefix=/var/apps/apache \
+   --activate-module=src/modules/mod_psldap/mod_psldap.c
+
+After Apache has been configured to your choice, make and install it as usual:
+
+   % make
+   ...
+   % make install
+
+Apache also provides a mechanism to build the module as a DSO compatible with
+a precompiled apache server. To compile the module independently, use the apxs
+utility:
+
+   % apxs -o mod_psldap.so -c mod_psldap.c sha1.o -lldap -llber
+
+
+Summary Description of Configuration Parameters
+===============================================
+
+PsLDAPHosts        - List of LDAP hosts which should be queried
+
+PsLDAPBindDN       - DN used to bind to the LDAP directory, if binding with
+      provided credentials is not desired. This value is also used to initially
+      bind to acquire the DN of the authenticating user.
+
+PsLDAPBindPassword - The password corresponding to PsLDAPBindDN
+
+PsLDAPBaseDN       - The DN in the LDAP directory which contains the per-user
+      subnodes
+
+PsLDAPUserKey      - The key in the directory whose value contains the username
+      provided with the authentication credentials
+
+PsLDAPPassKey      - The key in the directory whose value contains the password
+      provided with the authentication credentials
+
+PsLDAPGroupKey     - The key in the directory whose value contains the groups
+      in which the user maintains membership
+
+PsLDAPSearchScope  - Set Scope when searching in LDAP. Can be 'base',
+      'onelevel', or 'subtree'
+
+PsLDAPAuthoritative - Set to 'off' to allow control to be passed on, if the
+      user is unknown to this module
+
+PsLDAPAuthSimple   - Set to 'on' if authentication is to be performed by
+      acquiring an attribute from the LDAP server with the configured
+      credentials.
+
+PsLDAPAuthExternal - Set to 'on' if authentication is to be performed by
+      binding with the user provided credentials
+
+PsLDAPBindMethod   - Set to 'simple', 'krbv41', or 'krbv42' to determine
+      binding to server
+
+PsLDAPCryptPasswords - Set to 'on' if the LDAP server maintains crypted
+      password strings
+
+PsLDAPSchemePrefix - Set to 'on' if the LDAP server maintains scheme-prefixed
+      password strings as described in rfc2307
+
+
+Configuring the module
+======================
+
+Next step after installing the mod_psldap-enabled Apache is to configure 
+it for operation. We'll not talk about general Apache configuration issues, 
+please refer to the Apache documentation for that. This page focuses on the
+directives introduced by mod_psldap and associated standard directives.
+
+First, let's address some basic Apache configuration settings for
+authentication. There are two types of authentication supported by the Apache
+web server: Basic and Digest. While Digest authentication is more secure and
+can be used over a normal HTTP connection without compromising passwords, not
+all browsers fully support Digest authentication. While Basic authentication is
+more universally supported, it must be initiated within an SSL session in order
+to pass the authentication credentials without risk of compromise. This module
+does not currently support Digest authentication, but does fully support Basic
+authentication.
+
+To enable Basic authentication, the administrator must specify an authorization
+name and the authorization type within a location or directory section in the
+apache configuration or htaccess files. The location or directory within which
+the AuthName and AuthType are defined will then be protected through Basic
+authentication.
+
+    <Location "/someLocation">
+        AuthName "Protected information"
+        AuthType Basic
+        ....
+    </Location>
+
+
+Second, let's address how mod_psldap is enabled to perform authentication
+operations under Basic authentication. You will want to select the
+authentication method that is most in line with your network topology.
+
+This module supports two different means of authentication with an LDAP server:
+with a configured set of credentials (PsLDAPAuthSimple) or with the user
+provided credentials (PsLDAPAuthExternal). Keep in mind that connecting with
+the configured credentials potentially compromises your LDAP server by
+allowing anybody with read access to the http config or htaccess files to view
+the configured credentials. You could of course allow an anonymous user access
+to your LDAP server with the ability to read the passwords of every user in
+your system, but this is definitely worse than exposing the credentials of a
+user who is granted read access to the passwords while denying all other users
+read access to the password attribute. Of course, granting any user read access
+to the password attribute could be considered a serious compromise to the
+security of the LDAP server as well. Storing the passwords in the LDAP server
+in encrypted form helps to lessen the potential for compromise, but does not
+eliminate it.
+
+It's also important to note that PsLDAP supports connectivity to an LDAP server
+(PsLDAPBindMethod) using either a simple unencrypted connection (simple), or
+one encrypted with either kerberos 4.1 (krbv41) or kerberos 4.2 (krbv42).
+      
+    ...
+    # One of the following must be set to 'on'
+    PsLDAPAuthSimple off
+    PsLDAPAuthExternal on
+    # Set to 'simple', 'krbv41', or 'krbv42' to determine binding to server
+    PsLDAPBindMethod simple
+    ...
+
+Now we need to decide if PsLDAP is the authoritative authentication mechanism,
+will we allow another authentication module to check if the user is
+authenticated if authentication fails through PsLDAP? We control this behavior
+through the settings indicated by PsLDAPAuthoritative - 'off' indicates yes -
+'on' indicates no.
+
+    ...
+    PsLDAPAuthoritative on
+    ...
+
+
+Specifying the LDAP Server
+============================
+
+By this time, you're probably thinking, "Enough already - how do I tell this
+thing about my LDAP server?".  There are several configuration settings that
+impact the connection to the LDAP server.
+
+The first connection setting we'll address is how to determine the location of
+the LDAP server(s).
+
+    ...
+    PsLDAPHosts "myldapserver yourldapserver:9999"
+    ...
+
+Note that more than one LDAP server can be specified by separating each server
+in the list with a space character. Also, an alternative port can be identified
+for a server by following the server name/IP address with a ':' and the
+alternative port number.
+
+Next we'll address how to connect to the LDAP servers listed in the PsLDAPHosts
+configuration setting.
+
+
+Binding To An LDAP Server As A User
+====================================
+
+By default, mod_psldap tries to bind anonymously to the LDAP directory.
+
+If you want the module to use specific credentials for binding, you can do
+that by specifying them in the config section, e.g.: 
+
+   PsLDAPBindDN "mail=webadmin,dc=mycompany,dc=com"
+   PsLDAPBindPassword wapassword
+
+Warning! Keep in mind that anybody with read access to those credentials may
+be able to use them to gain unauthorized access to your LDAP directory. 
+Don't forget to double-check the permissions on the config file.
+
+There's a third method in binding to the directory available: Using the 
+credentials supplied by the browser. If you add lines like the following
+ones to the config, omitting the settings for PsLDAPBindDN &
+PsLDAPBindPassword:
+
+   PsLDAPBaseDN "type=luser,o=psind,c=us"
+   PsLDAPUserKey mail
+   PsLDAPUserPass userPassword
+   PsLDAPAuthExternal on
+
+... the module will bind as the user under the base DN "type=luser,o=psind,
+c=us", for an entry whose "mail" attribute value matches the user name passed
+by the user through the browser authentication with the browser-supplied
+password. If that succeeds, no more password checks are being done, and the
+browser supplied credentials are believed to be correct.
+
+If we don't specify the Bind parameters (and therefore didn't add the above
+lines to the config file), we'll now have to tell the module where and how to
+find the user's credentials in the LDAP directory. If all your users are at the
+same level of the directory (e.g. exactly one level below "type=luser,o=psind,
+c=us"), and they all have the same key in their RDN (e.g. "webuser=<username>",
+the story is rather simple:
+
+   PsLDAPBaseDN "type=luser,o=psind,c=us"
+   PsLDAPSearchScope base
+   PsLDAPUserKey webuser
+   PsLDAPPassKey webpassword
+
+(The last line above tells the module that the user's password is stored in the
+attribute named "webpassword". The module will search below "type=luser,
+o=psind,c=us" for an entry with an attribute <webuser>=provided_user_name.
+
+Imagine, all your users are still below the same base DN as above, but some of
+them have different RDN's. For example, there may be one department storing all
+their users using the RDN "surname=<name>", maybe another department chose
+"extension=<number>". If all of those entries have their web credentials stored
+in the same attributes (e.g. "webuser" and "webpassword" again), you will have
+to change one line of the config snippet above:
+
+   PsLDAPSearchScope onelevel
+
+If your users are *not* at exactly one level below the base DN, but scattered
+through a specific subtree, you can finally use:
+
+   PsLDAPSearchScope subtree
+
+Again, all those users need to have their credentials in the same attributes,
+e.g. once again "webuser" and "webpassword". We go now into comparing the
+password supplied by the browser against the value from the user's node in the
+LDAP directory.
+
+If we're using PsLDAPAuthExternal the password check is being skipped, because
+the password has already been checked by the LDAP server. For clear text
+password strings (generally a very bad idea), you don't have to add anything to
+the configuration. If your password strings are crypted, you'll have to add
+
+   PsLDAPCryptPasswords on
+
+to your config snippet. Please be aware, that if you have crypted passwords in
+the directory, and don't set this option to "on", users will be able to
+authenticate successfully using the crypted(!) password string which may not be
+what you want... ;-)
+
+There is a third alternative: use scheme prefixed passwords as described in 
+RFC 2307. This seems to be the preferred method to store passwords in
+Netscape's directory server. You can enable scheme prefixed passwords by 
+setting
+
+   PsLDAPSchemePrefix on
+
+(Pretty straight forward, isn't it? ;-) mod_psldap will then be able to 
+check passwords prefixed with "{crypt}" (Un*X crypt) and "{sha}" (Base64 
+encodced SHA1 digests as described in FIPS-180-1). Case of the prefix 
+strings doesn't matter.
+
+Ok, we've finally checked the user's password, we can open the gates... 
+except if only members of specific groups are permitted to enter. In this 
+case, we need to tell mod_auth_ldap the name of the attribute listing the 
+user's memberships, e.g. by adding:
+
+   PsLDAPGroupKey webgroup
+
+and listing the user's groups comma separated, e.g. 
+
+   <Limit GET POST>
+   require valid-user
+   </Limit>
+
+or
+
+   <Limit GET POST>
+   require group beerdrinking
+   </Limit>
+
+before you close the Location with
+
+</Location>
+
+
+Some Examples
+==============
+Let's say you're maintaining the contact information for everyone you know in
+your LDAP server. If you want to provide access to your web server to only the people you know, based on their email address and some provided credential,
+add the following segment to your apache configuration file:
+
+# First, we configure the "default" to be a very restrictive set of 
+# permissions.  
+#
+<Directory />
+    # Set the default LDAP directory setting for authentication
+    PsLDAPHosts "ldap.mydomain.com"
+    PsLDAPUserKey mail
+    PsLDAPPassKey userPassword
+    PsLDAPAuthExternal on
+    PsLDAPSchemePrefix on
+    PsLDAPGroupKey ou
+    PsLDAPBaseDN "dc=mydomain,dc=com"
+    PsLDAPSearchScope subtree
+</Directory>
+
+NOTE: The configuration options for connecting to the LDAP server can be set at
+the Directory or even the server level to avoid repetition across your
+configurations - I would highly encourage this -
+
+Why specify the PsLDAPGroupKey to be "ou"? We want to filter by the group in
+the require line of the configuration. I only want family members to see the
+pictures I post on my website, so I restrict access to pictures on my web
+server those people in my LDAP server marked in the ou=Family organizational
+unit.
+
+    <FilesMatch "*.jpg">
+        AuthType Basic
+        AuthName family
+	require group Family
+	require valid-user
+    </FilesMatch>
+
+
+Bug reports, patches
+====================
+
+In case you found any bug, have a question, or did enhance the module, please
+drop me a mail at
+
+   psldap@psind.com
+
+Your message will usually be read and answered within 2 days.
+
+
+David Picard

@@ -1,0 +1,20 @@
+Changed auth_ldapsearchscope member of ldap_auth_config_rec. Implemented a new mechanism to initialize the value on reading from the config file.
+
+Addition of AuthLDAPBindAsFoundUser configuration parameter to bind as the user found in the filter. This differs from the AuthLDAPBindAsUser functionality as it does not assume the search base concatenated to the user key represents the DN. It should be noted that the password need only match the first eight letters when this mechanism is employed.
+
+Addition of AuthLDAPBindMethod to allow binding to LDAP servers implementing kerberos authentication.
+
+Changed AuthLDAPSearchScope parameter to be initialized in the ldap_auth_config_rec structure directly.
+
+Changed get_ldap_val to acquire only the requested attribute from the ldap record. This must be done to allow the module to function when authenticating against a highly secure ldap server that denies access by field.
+
+Replaced calls to ldap_open with ldap_init to conform with deprecation of ldap_open.
+
+Addition of extended information regarding the ldap errors on searches.
+
+Fixed attribute value return to concatenate all values. This fixed false authorization failures that occurred when more than one group attribute instance appears in a record.
+
+Repaired hole in returning AUTH_REQUIRED for unencrypted password comparisons when DECLINED should have been returned. This was occurring regardless of the setting of AuthLDAPAuthoritative. Repaired a similar hole in the group based authorization.
+
+Changed group validation to allow the user to be authenticated if no group is identified and no group attribute is identified.
+

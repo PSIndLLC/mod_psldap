@@ -1,0 +1,7 @@
+OBJS= sha1.o mod_psldap.o
+SRC= mod_psldap.c sha1.c
+
+mod_psldap.so: $(SRC) Makefile
+	$(APXS) -o $@ -c $(DEF) $(INC) $(LIB) $(SRC)
+mod_psldap.o: mod_psldap.c sha1.o
+sha1.o: sha1.c

@@ -1,3 +1,7 @@
+Revision 0.78
+===================
+Adjust DSML_psldap.js to address IE failure to implement importNode - fixes updates to records through DSML_editform.xsl
+
 Revision 0.77
 ===================
 Enable processing of parameters sent through both GET and POST to module.

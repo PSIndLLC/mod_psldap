@@ -136,11 +136,24 @@ PsLDAPPassKey      - The key in the directory whose value contains the password
 PsLDAPGroupKey     - The key in the directory whose value contains the groups
       in which the user maintains membership
 
+PsLDAPUserGroupAttr - The LDAP schema attribute of the user which is used to
+      identify the user as a group member. Default value is 'dn'.
+
+PsLDAPGroupMemberAttr - The LDAP schema attribute of the group object used to
+      identify each user in the LDAP group. Default value is 'uniqueMember'.
+
+PsLDAPGroupNameAttr - The LDAP schema attribute of the group object used to
+      uniquely identify the group. Default value is 'cn'.
+
 PsLDAPSearchScope  - Set Scope when searching in LDAP. Can be 'base',
       'onelevel', or 'subtree'
 
 PsLDAPAuthoritative - Set to 'off' to allow control to be passed on, if the
       user is unknown to this module
+
+PsLDAPUseLDAPGroups - Set to 'on' to lookup the user's group using LDAP groups
+      rather than using an LDAP user record's attribute to identify the group
+      directly. Default value is 'off'.
 
 PsLDAPAuthSimple   - Set to 'on' if authentication is to be performed by
       acquiring an attribute from the LDAP server with the configured
@@ -345,14 +358,38 @@ check passwords prefixed with "{crypt}" (Un*X crypt) and "{sha}" (Base64
 encodced SHA1 digests as described in FIPS-180-1). Case of the prefix 
 strings doesn't matter.
 
+Setting Up Your Groups
+======================
+
 Ok, we've finally checked the user's password, we can open the gates... 
 except if only members of specific groups are permitted to enter. In this 
-case, we need to tell mod_auth_ldap the name of the attribute listing the 
+case, we need to tell mod_psldap the name of the attribute listing the 
 user's memberships, e.g. by adding:
 
    PsLDAPGroupKey webgroup
 
-and listing the user's groups comma separated, e.g. 
+What if you want to use LDAP groups? Maybe you'd like the added protection of
+having the group membership outside of the user's record and don't want to
+worry about attribute level permissions in your LDAP configuration. Or perhaps
+you'd like to set up a group administrator without allowing them administrative
+access to the record's of the user's in their groups.
+
+Simply turn on LDAP group based authentication by setting the following:
+
+    PsLDAPUseLDAPGroups on
+    PsLDAPUserGroupAttr dn
+    PsLDAPGroupMemberAttr uniqueMember
+    PsLDAPGroupNameAttr cn
+
+The above settings will set the group validation to work through the LDAP
+groups mechanism - specifically using the groupOfUniqueNames schema. It uses
+the dn of the user to map to the attribute settings for uniqueMember in the
+groupOfUniqueNames record. The group name against which the user is validated
+corresponds to the cn attribute set in the groupOfUniqueNames record.
+
+To specify the group to check, regardless of the mechanism used to identify the
+group, enter the groups in a comma separated list in the .htaccess or apache
+configuration file, e.g. 
 
    <Limit GET POST>
    require valid-user
@@ -361,7 +398,7 @@ and listing the user's groups comma separated, e.g.
 or
 
    <Limit GET POST>
-   require group beerdrinking
+   require group beerdrinking,beerguzzling
    </Limit>
 
 before you close the Location with

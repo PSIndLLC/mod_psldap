@@ -1,3 +1,15 @@
+Revision 0.63
+===================
+	
+Addition of LDAP group authentication through the addition of the following
+parameters: PsLDAPUseLDAPGroups, PsLDAPUserGroupAttr, PsLDAPGroupMemberAttr,
+PsLDAPGroupNameAttr. The default is to not use LDAP based group authorization.
+
+
+
+Revision 0.62
+===================
+	
 Changed auth_ldapsearchscope member of ldap_auth_config_rec. Implemented a new mechanism to initialize the value on reading from the config file.
 
 Addition of AuthLDAPBindAsFoundUser configuration parameter to bind as the user found in the filter. This differs from the AuthLDAPBindAsUser functionality as it does not assume the search base concatenated to the user key represents the DN. It should be noted that the password need only match the first eight letters when this mechanism is employed.

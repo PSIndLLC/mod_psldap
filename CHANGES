@@ -1,2 +1,10 @@
-0.6:
+0.63:
+Addition of LDAP group authentication through the addition of the following
+configuration parameters: PsLDAPUseLDAPGroups, PsLDAPUserGroupAttr,
+PsLDAPGroupMemberAttr, PsLDAPGroupNameAttr. The default is to not use LDAP
+based group authorization.
+
+Fixed merge configuration functionality for string related parameters
+
+0.62:
 Initial release

@@ -34,6 +34,17 @@
 #define INT_UNSET -1
 #define STR_UNSET NULL
 
+/*
+  conf->psldap_use_ldap_groups - boolean value to indicate if ldap group
+  queries are to nbe executed to determine the group (default: off)
+  conf->psldap_user_grp_attr - attribute of the user to identify the user
+  as a group member (default: dn)
+  conf->psldap_grp_mbr_attr - the attribute of the group object used to
+  identify each user (default: uniqueMember)
+  conf->psldap_grp_nm_attr - the attribute of the group object used to
+  identify the group (default: cn)
+*/
+
 typedef struct  {
 
     char *psldap_hosts;
@@ -43,6 +54,9 @@ typedef struct  {
     char *psldap_userkey;
     char *psldap_passkey;
     char *psldap_groupkey;
+    char *psldap_user_grp_attr;
+    char *psldap_grp_mbr_attr;
+    char *psldap_grp_nm_attr;
     int   psldap_searchscope;
     int   psldap_authoritative;
     int   psldap_cryptpasswords;
@@ -50,6 +64,7 @@ typedef struct  {
     int   psldap_authexternal;
     int   psldap_bindmethod;
     int   psldap_schemeprefix;
+    int   psldap_use_ldap_groups;
 
 } psldap_config_rec;
 
@@ -62,6 +77,9 @@ void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_binddn = STR_UNSET;
     sec->psldap_bindpassword = STR_UNSET;
     sec->psldap_basedn = STR_UNSET;
+    sec->psldap_user_grp_attr = STR_UNSET;
+    sec->psldap_grp_mbr_attr = STR_UNSET;
+    sec->psldap_grp_nm_attr = STR_UNSET;
 
     sec->psldap_searchscope = INT_UNSET;
     sec->psldap_authoritative = INT_UNSET;
@@ -70,6 +88,7 @@ void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_authexternal = INT_UNSET;
     sec->psldap_bindmethod = LDAP_AUTH_NONE;
     sec->psldap_schemeprefix = INT_UNSET;
+    sec->psldap_use_ldap_groups = INT_UNSET;
 
     return sec;
 }
@@ -77,15 +96,16 @@ void *create_ldap_auth_dir_config (pool *p, char *d)
 /** Set a string attribute _a_ in config record _r_ from the attribute _a_ in
  *  config record _n_ if the attribute in _r_ is unset, using apache pool _p_
  */
-#define set_cfg_str_if_n_set(_p_, _r_, _n_, _a_)					\
-    if (STR_UNSET != _n_->_a_) _r_->_a_ = ap_pstrdup(_p_, _n_->_a_)
+#define set_cfg_str_if_n_set(_p_, _r_, _n_, _a_)			\
+    if ((STR_UNSET == _r_->_a_) && (STR_UNSET != _n_->_a_))		\
+        _r_->_a_ = ap_pstrdup(_p_, _n_->_a_)
 	
 /** Set an integer attribute _a_ in config record _r_ from the attribute _a_ in
  *  config record _n_ if the attribute in _r_ equals value _c_, otherwise set
  *  to default value _d_
  */
-#define set_cfg_int_if_n_set(_r_, _n_, _a_, _c_, _d_)				\
-    if (_c_ == _r_->_a_)										\
+#define set_cfg_int_if_n_set(_r_, _n_, _a_, _c_, _d_)			\
+    if (_c_ == _r_->_a_)						\
         _r_->_a_ = (_c_ == _n_->_a_) ? _d_ : _n_->_a_
 
 void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
@@ -103,6 +123,9 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, n, psldap_userkey);
     set_cfg_str_if_n_set(p, result, n, psldap_passkey);
     set_cfg_str_if_n_set(p, result, n, psldap_groupkey);
+    set_cfg_str_if_n_set(p, result, n, psldap_user_grp_attr);
+    set_cfg_str_if_n_set(p, result, n, psldap_grp_mbr_attr);
+    set_cfg_str_if_n_set(p, result, n, psldap_grp_nm_attr);
 
     if (NULL == b) return result;
     
@@ -113,6 +136,9 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, b, psldap_userkey);
     set_cfg_str_if_n_set(p, result, b, psldap_passkey);
     set_cfg_str_if_n_set(p, result, b, psldap_groupkey);
+    set_cfg_str_if_n_set(p, result, b, psldap_user_grp_attr);
+    set_cfg_str_if_n_set(p, result, b, psldap_grp_mbr_attr);
+    set_cfg_str_if_n_set(p, result, b, psldap_grp_nm_attr);
 
     set_cfg_int_if_n_set(result, b, psldap_searchscope, INT_UNSET,
                          LDAP_SCOPE_BASE);
@@ -128,6 +154,8 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_authexternal, INT_UNSET, 0);
     /* no scheme prefix in password strings */
     set_cfg_int_if_n_set(result, b, psldap_schemeprefix, INT_UNSET, 0);
+    /* Do not use ldap groups for group identification by default */
+    set_cfg_int_if_n_set(result, b, psldap_use_ldap_groups, INT_UNSET, 0);
 
     return result;
 }
@@ -208,6 +236,24 @@ command_rec ldap_auth_cmds[] = {
       "The key in the directory whose value contains the groups in which the"
       " user maintains membership"
     },
+    { "PsLDAPUserGroupAttr", ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_user_grp_attr),
+      OR_AUTHCFG, TAKE1, 
+      "The LDAP schema attribute of the user which is used to identify the"
+      " user as a group member. Default value is 'dn'."
+    },
+    { "PsLDAPGroupMemberAttr", ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_grp_mbr_attr),
+      OR_AUTHCFG, TAKE1, 
+      "The LDAP schema attribute of the group object used to identify each"
+      " user in the LDAP group. Default value is 'uniqueMember'."
+    },
+    { "PsLDAPGroupNameAttr", ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_grp_nm_attr),
+      OR_AUTHCFG, TAKE1, 
+      "The LDAP schema attribute of the group object used to uniquely"
+      " identify the group. Default value is 'cn'."
+    },
     { "PsLDAPSearchScope", set_ldap_search_scope,
       (void*)XtOffsetOf(psldap_config_rec, psldap_searchscope),
       OR_AUTHCFG, TAKE1, 
@@ -219,6 +265,13 @@ command_rec ldap_auth_cmds[] = {
       OR_AUTHCFG, FLAG, 
       "Set to 'off' to allow control to be passed on, if the user is unknown"
       " to this module"
+    },
+    { "PsLDAPUseLDAPGroups", ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_use_ldap_groups),
+      OR_AUTHCFG, FLAG, 
+      "Set to 'on' to lookup the user's group using LDAP groups rather than"
+      " using an LDAP user record's attribute to identify the group directly."
+      " Default value is 'off'."
     },
     /* Authentication methods */
     { "PsLDAPAuthSimple", ap_set_flag_slot,
@@ -285,7 +338,7 @@ static char * get_user_dn(request_rec *r, const char *user, const char *pass,
     }
     
     ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user, NULL);
-	
+    
     /* check for search scope, build the base dn query */
     if(LDAP_SCOPE_BASE == conf->psldap_searchscope)
     {
@@ -316,8 +369,8 @@ static char * get_user_dn(request_rec *r, const char *user, const char *pass,
     if(NULL == (ld_entry = ldap_first_entry(ldap, ld_result)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE, r->server,
-                     "user <%s=%s> not found in <%s>",
-                     ldap_attrs[0], user, ldap_base);
+                     "attr <%s> for user <%s> not found in <%s>",
+                     ldap_attrs[0], ldap_query, ldap_base);
         goto AbortDNAcquisition;
     }
 
@@ -366,8 +419,9 @@ static char * build_string_list(request_rec *r, char * const *values,
 }
 
 static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
-                           psldap_config_rec *conf, const char *attr,
-                           const char *separator) {
+                           psldap_config_rec *conf,
+                           const char *query_by, const char *query_for,
+                           const char *attr, const char *separator) {
     const char *bindas = NULL, *bindpass = NULL;
     LDAP *ldap = NULL;
     LDAPMessage *ld_result = NULL, *ld_entry = NULL;
@@ -390,8 +444,19 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
         goto GET_LDAP_VAL_RETURN;
     }
 
-    ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user, NULL);
-
+    /* If no attribute to query_by is passed, or no value to query_for is
+       passed - assume this is a query of an attribute within the user's
+       record */
+    if ((NULL == query_by) || (NULL == query_for))
+    {
+        ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user,
+                                NULL);
+    }
+    else
+    {
+        ldap_query = ap_pstrcat(r->pool, query_by, "=", query_for,
+                                NULL);
+    }
     ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server,
                  "User = <%s = %s> : ldap_query = <%s>",
                  conf->psldap_userkey, user, ldap_query);
@@ -494,11 +559,56 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
     return retval; 
 }
 
+static char * get_groups_containing_grouped_attr(request_rec *r,
+                                                 char *user, char *pass,
+                                                 psldap_config_rec *conf)
+{
+    char *retval = NULL;
+    const char *groupkey = (NULL == conf->psldap_user_grp_attr) ? NULL :
+        get_ldap_val(r, user, pass, conf, NULL, NULL,
+                     conf->psldap_user_grp_attr, ":");
+    if (NULL != groupkey)
+    {
+        while(groupkey[0])
+        {
+            char *v = ap_getword(r->pool, &groupkey,':');
+            char *groups = (NULL == conf->psldap_grp_mbr_attr) ? NULL :
+                get_ldap_val(r, user, pass, conf, conf->psldap_grp_mbr_attr,
+                             v, conf->psldap_grp_nm_attr, ",");
+            if(NULL != groups)
+            {
+                ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server,
+                             "Found LDAP Groups <%s>", groups);
+                retval = (NULL == retval) ? groups :
+                    ap_pstrcat(r->pool, retval, ",", groups, NULL);
+            }
+        }
+    }
+    else
+    {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server,
+                     "Could not identify user LDAP User = <%s = %s>",
+                     conf->psldap_userkey, user);
+    }
+    return retval;
+}
+
 static char * get_ldap_grp(request_rec *r, char *user, char *pass,
                            psldap_config_rec *conf)
 {
-    return (NULL == conf->psldap_groupkey) ? NULL :
-        get_ldap_val(r, user, pass, conf, conf->psldap_groupkey, ",");
+    if (conf->psldap_use_ldap_groups)
+    {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, r->server,
+                     "Attempting to find group membership in LDAP User = <%s = %s>",
+                     conf->psldap_userkey, user);
+        return get_groups_containing_grouped_attr(r, user, pass, conf);
+    }
+    else
+    {
+        return (NULL == conf->psldap_groupkey) ? NULL :
+            get_ldap_val(r, user, pass, conf, NULL, NULL,
+                         conf->psldap_groupkey, ",");
+    }
 }
 
 static int password_matches(const psldap_config_rec *sec, request_rec *r,
@@ -569,7 +679,8 @@ static int authenticate_via_bind (request_rec *r, psldap_config_rec *sec,
        protection on the server. You can pretty much guarantee that a user
        will be able to read their own userkey
     */
-    if(NULL != get_ldap_val(r, user, sent_pw, sec, sec->psldap_userkey, ",") )
+    if(NULL != get_ldap_val(r, user, sent_pw, sec, NULL, NULL,
+                            sec->psldap_userkey, ",") )
     {
         return OK;
     }
@@ -589,7 +700,7 @@ static int authenticate_via_query (request_rec *r, psldap_config_rec *sec,
     */
     char *real_pw;
 
-    if(NULL != (real_pw = get_ldap_val(r, user, sent_pw, sec,
+    if(NULL != (real_pw = get_ldap_val(r, user, sent_pw, sec, NULL, NULL,
                                        sec->psldap_passkey, ",")))
     {
         if(password_matches(sec, r, real_pw, sent_pw))
@@ -647,7 +758,7 @@ static int get_provided_password(request_rec *r, const char **sent_pw)
     return DECLINED;
 }
 
-int ldap_authenticate_user (request_rec *r)
+static int ldap_authenticate_user (request_rec *r)
 {
     psldap_config_rec *sec =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
@@ -677,7 +788,7 @@ int ldap_authenticate_user (request_rec *r)
     
 /* Checking ID */
     
-int ldap_check_auth(request_rec *r)
+static int ldap_check_auth(request_rec *r)
 {
     psldap_config_rec *sec =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
@@ -794,7 +905,8 @@ static int util_read(request_rec *r, const char **buf)
 static int read_post(request_rec *r, table **tab)
 {
     const char *data, *type;
-    char *key, *val;
+    char *key;
+    char *val;
     int rc = OK;
 
     if (r->method_number != M_POST)

@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.73
+Version 0.76
 by David Picard
 
 This module is based on Alexander Mayrhofer's mod_auth_ldap, version 0.5.

@@ -1,3 +1,11 @@
+Revision 0.76
+===================
+Fixed directory and server initialization routines - feedback accounted for.
+
+Revision 0.75
+===================
+Fixed directory and server initialization routines - untested.
+
 Revision 0.74
 ===================
 Recognized failure to provide credentials as an auth failure, allowing denial after three attempts to authenticate without credentials.

@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.75"
+#define PSLDAP_VERSION_LABEL "0.76"
 
 #include "httpd.h"
 #include "http_conf_globals.h"
@@ -998,6 +998,7 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_cookiedomain = STR_UNSET;
     sec->psldap_credential_uri = STR_UNSET;
     sec->psldap_cache_auth = INT_UNSET;
+
     return sec;
 }
 
@@ -1036,8 +1037,7 @@ static void *create_ldap_auth_srv_config (pool *p, server_rec *s)
 
 void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
 {
-    psldap_config_rec *result
-        = (psldap_config_rec *)ap_pcalloc (p, sizeof(psldap_config_rec));
+    psldap_config_rec *result = create_ldap_auth_dir_config(p, NULL);
     psldap_config_rec *b = (psldap_config_rec *)base_conf;
     psldap_config_rec *n = (psldap_config_rec *)new_conf;
 
@@ -1114,8 +1114,7 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
 
 void *merge_ldap_auth_srv_config (pool *p, void *base_conf, void *new_conf)
 {
-    psldap_server_rec *result
-        = (psldap_server_rec *)ap_pcalloc (p, sizeof(psldap_server_rec));
+    psldap_server_rec *result = create_ldap_auth_srv_config(p, NULL);
     psldap_server_rec *b = (psldap_server_rec *)base_conf;
     psldap_server_rec *n = (psldap_server_rec *)new_conf;
 

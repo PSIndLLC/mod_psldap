@@ -1,0 +1,53 @@
+<?xml version="1.0" standalone="yes"?>
+<!doctype html public "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1l/DTD/transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<html>
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+   <meta name="Author" content="David J. Picard" />
+   <meta name="keywords" lang="us-en" content="airline,automation,operations,schedule,software,logistics" />
+   <meta name="description" content="Picard Software Industries, provider of custom software solutions since 1998. We also assist our clients in defining and prioritizing their objectives to provide early realization of positive operational impact." />
+   <meta name="robots" content="NOFOLLOW, INDEX" />
+   <meta name="copyright" content="&copy; 2001 Picard Software Industries" />
+   <meta name="date" content="2001-08-11T20:00:00-05:00" />
+   <title>Home of PSInd.com</title>
+   <link rel=STYLESHEET type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
+<!-- Background black, text white, links red (unvisited), yellow (visited), blue (active) -->
+   <script language="JavaScript" src="/javascript/corpStyle.js"></script>
+</head>
+<!--#include virtual="/header.html"-->
+<h1>XML Data Island</h1>
+  <xml id="sample2" src="DSML_sample3.xml" />
+  <xml id="sample2-style" src="DSML_cards.xsl" />
+  <div id="transformContent">
+  </div>
+  <script>
+    var dsmlLoaded = false;
+    var processorLoaded = false;
+    var dsmlTemplate = document.implementation.createDocument("", "", null);
+    var dsmlDoc = document.implementation.createDocument("", "", null);
+    dsmlDoc.onload = function() { loadedDSML(); }
+    dsmlDoc.load("DSML_sample3.xml");
+
+    function loadedDSML() {
+      dsmlLoaded = true;
+      alert("Loaded DSML content");
+      
+      dsmlTemplate.onload = function() { processDSML(); }
+      dsmlTemplate.load("DSML_cards.xsl");
+    }
+
+    function processDSML() {
+      // Netscape Mozilla only
+      var dsmlProcessor = new XSLTProcessor();
+      var contentDiv = document.getElementById("transformContent");
+      contentDiv.innerHTML = "<p>Processing DSML...</p>";
+      dsmlProcessor.importStylesheet(dsmlTemplate);
+      var newFragment = dsmlProcessor.transformToFragment(dsmlDoc, document);
+      contentDiv.innerHTML = "<p>Processed</p>";
+      contentDiv.appendChild(newFragment);
+    }
+  </script>
+<!--#include virtual="/footer.html"-->
+</html>

@@ -1,0 +1,121 @@
+<?xml version="1.0" standalone="yes"?>
+<!doctype html public "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1l/DTD/transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+    <meta name="Author" content="David J. Picard" />
+    <meta name="keywords" lang="us-en" content="" />
+    <meta name="description" content="" />
+    <meta name="robots" content="NOINDEX" />
+    <meta name="copyright" content="&copy; 2004 PSInd, LLC" />
+    <meta name="date" content="2004-06-11T20:00:00-05:00" />
+    <title>PSInd - LDAP Management Page</title>
+    <link rel="STYLESHEET" type="text/css" href="/psldap/DSML_psldap.css" />
+    <script language="JavaScript" src="/psldap/DSML_psldap.js" ></script>
+    <script language="JavaScript">
+        function synchCompareSelect() {
+            var strQuery = "";
+            var searchByElement = document.queryForm.searchby;
+            var searchCompareElement = document.queryForm.searchcompare;
+            var searchValueElement = document.queryForm.searchvalue;
+            strQuery = searchByElement.options[searchByElement.selectedIndex].value;
+            if ("" == strQuery) {
+                // Advanced choice selected
+                searchCompareElement.selectedIndex = 4;
+            } else if (4 == searchCompareElement.selectedIndex) {
+                searchCompareElement.selectedIndex = 3;
+            }
+        }
+        function generateQueryString() {
+            var searchElement = document.queryForm.search;
+            var searchByElement = document.queryForm.searchby;
+            var searchCompareElement = document.queryForm.searchcompare;
+            var searchValueElement = document.queryForm.searchvalue;
+            var strQuery = searchByElement.options[searchByElement.selectedIndex].value;
+            strQuery = "(" + strQuery +
+                searchCompareElement.options[searchCompareElement.selectedIndex].value.replace(/\?/i, searchValueElement.value) + ")";
+            searchElement.value = strQuery;
+            window.defaultStatus = "Getting LDAP records for filter = " + strQuery;
+            return true;
+        }
+    </script>
+
+</head>
+
+<!--#include virtual="/header.html"-->
+
+<!-- Add body of page here -->
+<h2>LDAP Manager</h2>
+<h3>Search for a Record</h3>
+<p>Enter the LDAP query string in the <em>LDAP Query</em> field and select <em>Submit</em> - the style sheets should be fine as they are.</p>
+<div>
+<form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/ldapupdate">
+    <table>
+<!--
+        <tr ><td align="left"><label>Login (E-Mail)
+	    <input type="input" name="mail" size="20" maxlength="64" value="dave" required></label>
+        </td></tr>
+        <tr ><td align="left"><label>Password
+	    <input type="password" name="userPassword" size="20" maxlength="64" value="" required></label>
+        </td></tr>
+-->
+        <tr><td align="left"><label>LDAP Query
+	    <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" ></label>
+	    <select onchange="synchCompareSelect();" size="1" name="searchby" >
+                <option selected value="mail">eMail</option>
+                <option value="givenName">First Name</option>
+                <option value="sn">Last Name</option>
+                <option value="o">Organization</option>
+                <option value="ou">Org Unit</option>
+                <option value="">Advanced...</option>
+            </select>
+	    <select onchange="synchCompareSelect();" size="1" name="searchcompare" >
+                <option value="=?*">begins with</option>
+                <option selected value="=*?*">contains</option>
+                <option value="=*?">ends with</option>
+                <option value="=?">equals</option>
+                <option value="?">...</option>
+            </select>
+	    <input type="text" name="searchvalue" size="32" maxlength="128" value="@" >
+        </td></tr>
+        <tr>
+          <td align="left"><label>Primary Style
+	    <select size="1" name="xsl1" >
+                <option selected value="/psldap/DSML_cards.xsl">Card View</option>
+                <option value="/psldap/DSML_table.xsl">Table View</option>
+                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+            </select>
+            &nbsp;<label>Secondary Style
+	    <select size="1" name="xsl2" >
+                <option value="/psldap/DSML_cards.xsl">Card View</option>
+                <option selected value="/psldap/DSML_table.xsl">Table View</option>
+                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+            </select>
+          </td>
+        </tr>
+        <tr><td align="left"><label>Request Domain
+	    <select size="1" name="dn" >
+                <option selected value="dc=some,dc=com">Some .COM</option>
+                <option value="dc=another,dc=com">Another .COM</option>
+            </select>
+        </td></tr>
+        <tr>
+	    <td align="CENTER">
+                <input type="submit" name="FormAction" value="Search"> &nbsp; &nbsp;
+                <input type="reset">
+            </td>
+	</tr>
+    </table>
+</form>
+</div>
+<hr>
+<h3>Create a New Record</h3>
+<p><a href="DSML_new_o.xml">Create a new organization</a></p>
+<p><a href="DSML_new_ou.xml">Create a new unit</a></p>
+<p><a href="DSML_new_group.xml">Create a new group</a></p>
+<p><a href="DSML_new_person.xml">Create a new person</a></p>
+
+<!--#include virtual="/footer.html"-->
+
+</html>

@@ -544,7 +544,7 @@ XSLT may be applied. To specify the transform to be applied, set "xsl1" or
 I've included a few sample pages in the distribution to provide a starting
 point for creating simple and complex pages:
   *  change_info.html - a simple form to change fixed fields
-  *  ldap_query.html - a more advanced form to search for and review records
+  *  index.html - a more advanced form to search for and review records
   *  DSML_editform.xsl - allows for editing of a record via an HTML form -
                          with fields limited to those processed by the XSL -
                          representing a fairly extensive selection.
@@ -553,17 +553,30 @@ point for creating simple and complex pages:
   *  DSML_table.xsl - allows the user to view specified fields that are
                       visible in a tabular format.
 
+Also note that the samples also ship with a series of XML files intended to provide
+a mechanism by which new records can be entered. With the XSL implementation of
+DSML_editform.xsl, an empty XML fragment adhering to the DSML schema is required to
+create a new record. The good news is that the format of the forms is consistent
+in all views (edit, create, and delete).
+
+
+The web directory should be copied recursively to /psldap under your web root if
+your intent is to run the samples without modification. Future revisions of these
+samples will focus on several points of improvement, including improved graphics
+and a reduction in the use of hardcoded paths.
+
 In order to enable form processing, the following segment must be added to your
 httpd.conf:
 
     <Location /ldapupdate>
       SetHandler application/x-ldap-update
       AuthType Basic
+      # AuthName really can be anything
       AuthName "LDAP Update"
       <Limit GET POST>
         Order Deny,Allow
         Deny from all
-        # Allow from local network only:
+        # Allow from local network only - no internet access
         Allow from 192 10
       </Limit>
     </Location>
@@ -573,7 +586,8 @@ it should never be set to "form" as the credentials may get confused with
 data that is being inserted or modified on any forms.
 
 
-LIMITATIONS: The multipart/form-data Content-Type is not yet handled.
+LIMITATIONS: The multipart/form-data Content-Type is not yet handled - neither
+is binary content in the directory such as pictures.
 
 
 

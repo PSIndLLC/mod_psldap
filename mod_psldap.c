@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.73"
+#define PSLDAP_VERSION_LABEL "0.74"
 
 #include "httpd.h"
 #include "http_conf_globals.h"
@@ -105,6 +105,7 @@ typedef struct  {
     char *psldap_user_grp_attr;
     char *psldap_grp_mbr_attr;
     char *psldap_grp_nm_attr;
+    int   psldap_auth_enabled;
     int   psldap_searchscope;
     int   psldap_authoritative;
     int   psldap_cryptpasswords;
@@ -943,9 +944,7 @@ static int compare_key(const void *a_item1, const void *a_item2)
     psldap_cache_item *item2 = *((psldap_cache_item**)a_item2); 
 
     if (0 == (result = strcmp(item1->lhost, item2->lhost))) {
-        if (0 == (result = strcmp(item1->key, item2->key))) {
-            result = strcmp(item1->passwd, item2->passwd);;
-        }
+        result = strcmp(item1->key, item2->key);
     }
     return result;
 }
@@ -986,6 +985,7 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_grp_mbr_attr = STR_UNSET;
     sec->psldap_grp_nm_attr = STR_UNSET;
 
+    sec->psldap_auth_enabled = INT_UNSET;
     sec->psldap_searchscope = INT_UNSET;
     sec->psldap_authoritative = INT_UNSET;
     sec->psldap_cryptpasswords = INT_UNSET; 
@@ -1068,6 +1068,7 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, b, psldap_grp_nm_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_cookiedomain);
 
+    set_cfg_int_if_n_set(result, b, psldap_auth_enabled, INT_UNSET, 1);
     set_cfg_int_if_n_set(result, b, psldap_searchscope, INT_UNSET,
                          LDAP_SCOPE_BASE);
     /* by default, we use simple binding to ldap, never use auth_none */
@@ -1156,6 +1157,11 @@ static const char* set_ldap_slot(cmd_parms *parms, void *mconfig,
 }
 
 command_rec ldap_auth_cmds[] = {
+    { "PsLDAPEnableAuth", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_auth_enabled),
+      OR_AUTHCFG, FLAG, 
+      "Flag to enable / disable A&A. Default value is 'on'"
+    },
     { "PsLDAPHosts", (cmd_func)ap_set_string_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_hosts),
       OR_AUTHCFG, TAKE1, 
@@ -1637,6 +1643,7 @@ static char * get_ldap_val(request_rec *r, const char *user, const char *pass,
 static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
                                                  const char *user,
                                                  const char *pass,
+                                                 const char *delim,
                                                  psldap_config_rec *conf)
 {
     char *retval = NULL;
@@ -1664,14 +1671,14 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
                 char *groups = (NULL == conf->psldap_grp_mbr_attr) ? NULL :
                     get_ldap_val_bound(r, ldap, conf, user,
                                        conf->psldap_grp_mbr_attr,
-                                       v, conf->psldap_grp_nm_attr, ",");
+                                       v, conf->psldap_grp_nm_attr, delim);
                 if(NULL != groups)
                 {
                     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG
                                  DEBUG_ERRNO,
                                  r->server, "Found LDAP Groups <%s>", groups);
                     retval = (NULL == retval) ? groups :
-                        ap_pstrcat(r->pool, retval, ",", groups, NULL);
+                        ap_pstrcat(r->pool, retval, delim, groups, NULL);
                 }
             }
         }
@@ -1710,7 +1717,7 @@ static char * get_ldap_grp(request_rec *r, const char *user,
                          "Finding group membership of LDAP User = <%s = %s>",
                          conf->psldap_userkey, user);
             result = get_groups_containing_grouped_attr(r, ldap, user, pass,
-                                                        conf);
+                                                        ",", conf);
         }
         else
         {
@@ -1779,7 +1786,6 @@ static int password_matches(const psldap_config_rec *sec, request_rec *r,
     if ( !(result = ('\0' == errstr[0])) )
     {
         ap_log_reason (errstr, r->uri, r);
-        ap_note_basic_auth_failure (r);
     }
 
     return result;
@@ -1797,11 +1803,6 @@ static int authenticate_via_bind (request_rec *r, psldap_config_rec *sec,
     {
         return OK;
     }
-    if (!(sec->psldap_authoritative)) return DECLINED;
-
-    ap_log_error (APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                  "LDAP user %s not found or password invalid", user);
-    ap_note_basic_auth_failure (r);
     return HTTP_UNAUTHORIZED;
 }
 
@@ -1820,19 +1821,7 @@ static int authenticate_via_query (request_rec *r, psldap_config_rec *sec,
         {
             return OK;
         }
-        else if(sec->psldap_authoritative)
-        {
-            return HTTP_UNAUTHORIZED;
-        }
-        return DECLINED;
     }    
-    if (!(sec->psldap_authoritative))
-    {
-        return DECLINED;
-    }
-    ap_log_error (APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                  "LDAP user %s not found or password invalid", user);
-    ap_note_basic_auth_failure (r);
     return HTTP_UNAUTHORIZED;
 }
 
@@ -2094,8 +2083,7 @@ static int get_provided_authvalue(request_rec *r, const char* field,
             if (fieldKey == sec->psldap_userkey) {
                 *sent_value = ap_pstrdup(r->pool, get_user_name(r) );
                 return OK;
-            }
-            if (fieldKey == sec->psldap_passkey) {
+            } else if (fieldKey == sec->psldap_passkey) {
                 int res = ap_get_basic_auth_pw(r, (const char**)sent_value);
                 return res;
             }
@@ -2240,21 +2228,25 @@ static int ldap_authenticate_user (request_rec *r)
     int res = DECLINED;
     int cacheResultMissing = 1;
 
-    if(!sec->psldap_userkey) return res;
+    if(!sec->psldap_userkey || !sec->psldap_auth_enabled) {
+        return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
+    }
     
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                  "Authenticating LDAP user");
     if (OK != (res = get_provided_credentials (r, sec, &sent_pw, &sent_user
                                                )))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
                      "Failed to acquire credentials for authentication",
                      (NULL == sent_user) ? "" : sent_user);
     }
     else
     {
         const psldap_cache_item *record = NULL;
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
                      "Authenticating user %s with passed credentials",
                      (NULL == sent_user) ? "" : sent_user);
         if (sec->psldap_cache_auth) {
@@ -2266,13 +2258,9 @@ static int ldap_authenticate_user (request_rec *r)
             res = ((0 == strcmp(sent_user, record->key)) &&
                    (0 == strcmp(sent_pw, record->passwd)) ) ?
                 OK : HTTP_UNAUTHORIZED;
-        }
-        else if(sec->psldap_authexternal)
-        {
+        } else if(sec->psldap_authexternal) {
             res = authenticate_via_bind (r, sec, sent_user, sent_pw);
-        }
-        else if (sec->psldap_authsimple)
-        {
+        } else if (sec->psldap_authsimple) {
             res = authenticate_via_query (r, sec, sent_user, sent_pw);
         }
         else res = authenticate_via_query (r, sec, sent_user, sent_pw);
@@ -2281,7 +2269,8 @@ static int ldap_authenticate_user (request_rec *r)
     if (res == HTTP_UNAUTHORIZED)
     {
         char *authType = (char*)ap_auth_type(r);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
                      "Credentials don't exist, sending form for %s auth: %s",
                      authType, sec->psldap_credential_uri);
         if (NULL == authType) authType = "";
@@ -2310,6 +2299,13 @@ static int ldap_authenticate_user (request_rec *r)
             res = DONE;
             ap_destroy_sub_req(sr);
             ap_kill_timeout(r);
+        } else if (sec->psldap_authoritative) {
+            ap_log_error (APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
+                          "LDAP user %s not found or password invalid",
+                          (NULL != sent_user) ? sent_user : "<blank>");
+            ap_note_basic_auth_failure (r);
+        } else {
+            res = DECLINED;
         }
     } else if ((OK == res) && cacheResultMissing) {
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
@@ -2341,10 +2337,14 @@ static int ldap_check_auth(request_rec *r)
     const char *orig_groups = NULL;
     int groupRequirementExists = 0;
 
+    if (!sec->psldap_userkey || !sec->psldap_auth_enabled)
+    {
+        return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
+    }
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                  "Checking LDAP user authorization");
-    if (!reqs_arr || (OK != get_provided_credentials (r, sec, &sent_pw, &user
-                                                      )) )
+    if (!reqs_arr || 
+        (OK != get_provided_credentials (r, sec, &sent_pw, &user)) )
     {
         return DECLINED;
     }
@@ -2373,8 +2373,18 @@ static int ldap_check_auth(request_rec *r)
                 orig_groups = groups;
                 while('\0' != t[0])
                 {
-                    w = ap_getword(r->pool, &t, ' ');
+                    if (t[0] == '"') {
+                        t = &t[1];
+                        w = ap_getword(r->pool, &t, '"');
+                    } else if (t[0] == '\'') {
+                        t = &t[1];
+                        w = ap_getword(r->pool, &t, '\'');
+                    } else {
+                        w = ap_getword(r->pool, &t, ' ');
+                    }
                     groups = orig_groups;
+                    /* TODO - optimize this to use string functions instead
+                       of parsing out the string segments */
                     while(groups[0])
                     {
                         v = ap_getword(r->pool, &groups,',');
@@ -2393,10 +2403,12 @@ static int ldap_check_auth(request_rec *r)
             }
         }
     }
+
     /* If no groups were required, return OK */
     if ((NULL == sec->psldap_groupkey) || !groupRequirementExists) return OK;
     
     if (!sec->psldap_authoritative) return DECLINED;
+
     if (NULL != errstr) ap_log_reason (errstr, r->filename, r);
     ap_note_basic_auth_failure (r);
 

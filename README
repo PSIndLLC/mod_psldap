@@ -490,6 +490,16 @@ before you close the Location with
 
 
 
+Disabling Authentication and Authorization Functions
+====================================================
+To disable authentication and authorization checking by the module, simply set
+the configuration variable PsLDAPEnableAuth to a value of 'off'. Alternatively,
+do not set the PsLDAPUserKey in the htaccess or anywhere in the path to the
+disabled directory. A failure to set the user key will also disable the modules
+A&A functionality.
+
+
+
 Enabling Caching
 ================
 Enabling the cache is relatively straightforward, simply add and set the

@@ -1,3 +1,14 @@
+Revision 0.74
+===================
+Recognized failure to provide credentials as an auth failure, allowing denial after three attempts to authenticate without credentials.
+
+Changed authorization handler to check for existence of user key definition and to decline authorization handling if the key is not defined. Authentication had already been checking this condition. This fixes a crash in the module.
+
+Addition of configuration parameter, PsLDAPEnableAuth to control whether or not A&A is enabled. Set to 'on' by default.
+
+Changed require group parsing to recognize group names with spaces when they are quoted with either single or double quotes. The type of quote used to delineate the group may not be used in the group name.
+
+	
 Revision 0.73
 ===================
 Implemented caching array in shared memory leveraging the apache ap_mm APIs.

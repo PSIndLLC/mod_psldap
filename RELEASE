@@ -1,0 +1,3 @@
+This release of the mod_psldap module focuses on the first functional implementation of the web interface to the LDAP server based on partial implementation of a DSML-like schema:
+
+Created a series of XML template files for the various patterns, implemented XSL to translate DSML search results to tabular, card, and editable forms. Created the default style templates and tuned the dynamic HTML manipulation to reduce required server interactions. Improved performance of earlier prototype comparison algorithms to check for changed values and evaluate the nature of changes required to the record on the server.

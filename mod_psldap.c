@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.79"
+#define PSLDAP_VERSION_LABEL "0.80"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -2060,11 +2060,19 @@ static int translate_handler(request_rec *r)
     return DECLINED;
 }
 
-static void parse_client_data(request_rec *r, char **data, char *key,
-                              table **tab)
+/** Parses the key/value pairs out of a query string as passed through the
+ *  data pointer. The data string is altered as part of the parse operation,
+ *  which populates the parsed key value pairs into the passed table.
+ *  @param r a pointer to the request_rec structure instance for this request
+ *  @param data a reference to a string pointer, the reference and the string
+ *              pointer must be a non-NULL value
+ *  @param tab a reference to the table pointer to be populated with the
+ *             key value pairs parsed from the data string
+ **/
+static void parse_client_data(request_rec *r, char **data, table **tab)
 {
     const char *tmp;
-    char *val;
+    char *val, *key;
     while (('\0' != *((char*)*data)) &&
            (val = ap_getword_nc(r->pool, data, '&')))
     {
@@ -2125,7 +2133,7 @@ static int util_read(request_rec *r, char **buf)
 
 static int read_get(request_rec *r, table **tab)
 {
-    char *data, *key;
+    char *data;
     int rc = OK;
 
     if (r->method_number != M_GET)
@@ -2138,19 +2146,24 @@ static int read_get(request_rec *r, table **tab)
     {
         *tab = r->subprocess_env = ap_make_table(r->pool, 8);
     }
-    else if (NULL != ap_table_get(*tab, FORM_ACTION)) return rc;
+    if ( (NULL == ap_table_get(*tab, FORM_ACTION)) &&
+         (NULL != r->parsed_uri.query) )
+    {
+        data = ap_pstrdup(r->pool, r->parsed_uri.query);
+        parse_client_data(r, &data, tab);
+        if (NULL == ap_table_get(*tab, FORM_ACTION))
+        {
+            ap_clear_table(*tab);
+        }
+    }
 
-    data = ap_pstrdup(r->pool, r->parsed_uri.query);
-
-    parse_client_data(r, &data, key, tab);
-
-    return OK;
+    return rc;
 }
 
 static int read_post(request_rec *r, table **tab)
 {
     const char *tmp;
-    char *data, *key;
+    char *data;
     int rc = OK;
 
     if (r->method_number != M_POST)
@@ -2182,7 +2195,7 @@ static int read_post(request_rec *r, table **tab)
 
     if ((rc = util_read(r, &data)) != OK) return rc;
     
-    parse_client_data(r, &data, key, tab);
+    parse_client_data(r, &data, tab);
 
     return OK;
 }
@@ -2231,9 +2244,10 @@ static int get_form_fieldvalue(request_rec *r, const char* fieldname,
     table *tab = NULL;
 
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "getting form value for %s from post", fieldname);
-    
+                 "getting form value for %s from get", fieldname);
     read_get(r, &tab);
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "getting form value for %s from post", fieldname);
     read_post(r, &tab);
 
     if (NULL != tab)
@@ -2417,8 +2431,9 @@ static int get_provided_credentials(request_rec *r, psldap_config_rec *sec,
         result = get_provided_credentials(r->prev, sec, sent_pw, sent_user);
     }
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Credentials %saquired via %s auth for user %s",
-                 (OK == result) ? "" : "not ", authType, *sent_user);
+                 "Credentials (%s:%s) %saquired for %s via %s auth for user %s",
+                 sec->psldap_userkey , sec->psldap_passkey,
+                 (OK == result) ? "" : "not ", r->uri, authType, *sent_user);
     return result;
 }
 
@@ -2488,6 +2503,69 @@ static void set_post_login_uri(request_rec *r, const char *post_login_uri)
     ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
 }
 
+static int log_table_values(void *data, const char *key,
+                                const char *value)
+{
+    request_rec *r = (request_rec*)data;
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 r->server,
+                 "Header in kv pair: <%s> = <%s>", key, value);
+    return 1;
+}
+
+static int auth_form_redirect(request_rec *r, psldap_config_rec *sec,
+                              const char *redirect_uri,
+                              const char *user, const char *password)
+{
+    request_rec *sr;
+    int res = DONE;
+
+    if ((NULL != user) && (NULL != password))
+    {
+        set_psldap_auth_cookie(r, sec, user, password);
+    }
+    sr = sub_req_lookup_uri(redirect_uri, r, NULL);
+    sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
+    r->content_type = sr->content_type;
+    
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 r->server,
+                 "Executing subrequest %s of type %s", redirect_uri,
+                 sr->content_type);
+    ap_table_do(log_table_values, r, r->headers_in, NULL);
+
+    ap_soft_timeout("update ldap data", r);
+    ap_send_http_header(r);
+    res = ap_run_sub_req(sr);
+    if (!ap_is_HTTP_SUCCESS(res) && !ap_is_HTTP_SUCCESS(sr->status))  {
+        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
+                     "LDAP update sub request had problems (%d:%d): %s",
+                     res, sr->status, redirect_uri);
+    }
+    res = DONE;
+    ap_destroy_sub_req(sr);
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 r->server,
+                 "...subrequest destroyed");
+    ap_kill_timeout(r);
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 r->server,
+                 "...request timeout killed");
+
+    return res;
+}
+
+static int auth_form_redirect_handler(request_rec *r)
+{
+    psldap_config_rec *conf =
+        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                   &psldap_module);
+    ap_internal_redirect(conf->psldap_credential_uri, r);
+    return OK;
+    return auth_form_redirect(r, conf, conf->psldap_credential_uri,
+                       NULL, NULL);
+}
+
 static int ldap_authenticate_user (request_rec *r)
 {
     psldap_config_rec *sec =
@@ -2504,7 +2582,7 @@ static int ldap_authenticate_user (request_rec *r)
     }
     
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                 "Authenticating LDAP user");
+                 "Authenticating LDAP user for <%s>", r->uri);
     if (OK != (res = get_provided_credentials (r, sec, &sent_pw, &sent_user
                                                )))
     {
@@ -2526,24 +2604,36 @@ static int ldap_authenticate_user (request_rec *r)
         }
         if (NULL != record) {
             cacheResultMissing = 0;
+ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
+                     "Authentication of user %s through cache",
+                     (NULL == sent_user) ? "" : sent_user);
             res = ((0 == strcmp(sent_user, record->key)) &&
                    (0 == strcmp(sent_pw, record->passwd)) ) ?
                 OK : HTTP_UNAUTHORIZED;
         } else if(sec->psldap_authexternal) {
+ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
+                     "Authentication of user %s through bind",
+                     (NULL == sent_user) ? "" : sent_user);
             res = authenticate_via_bind (r, sec, sent_user, sent_pw);
-        } else if (sec->psldap_authsimple) {
+        } else { /* if (sec->psldap_authsimple)  or anything else */
+ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
+                     "Authentication of user %s through query",
+                     (NULL == sent_user) ? "" : sent_user);
             res = authenticate_via_query (r, sec, sent_user, sent_pw);
         }
-        else res = authenticate_via_query (r, sec, sent_user, sent_pw);
     }
-	
+ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                     r->server,
+                     "Authentication of user %s complete",
+                     (NULL == sent_user) ? "" : sent_user);
+
     if (res == HTTP_UNAUTHORIZED)
     {
         char *authType = (char*)ap_auth_type(r);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-                     r->server,
-                     "Credentials don't exist, sending form for %s auth: %s",
-                     authType, sec->psldap_credential_uri);
+
         if (NULL == authType) authType = "";
         authType  = ap_pstrdup(r->pool, authType);
         ap_str_tolower(authType);
@@ -2552,24 +2642,17 @@ static int ldap_authenticate_user (request_rec *r)
         {
             /* We should return the credential page if authtype is cookie,
                and the credential uri is set */
-            const char *post_login_uri = ap_pstrdup(r->pool, r->uri);
-            request_rec *sr;
-
-            sr = sub_req_lookup_uri(sec->psldap_credential_uri, r, NULL);
-            sr->prev = r;
-            r->content_type = sr->content_type;
-            sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
-
-            ap_soft_timeout("update ldap data", r);
-            ap_send_http_header(r);
-            res = ap_run_sub_req(sr);
-            if (ap_is_HTTP_SUCCESS(res))
-            {
-                res = DONE;
-            }
-            res = DONE;
-            ap_destroy_sub_req(sr);
-            ap_kill_timeout(r);
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
+                         r->server,
+                         "Credentials don't exist on page request <%s>,"
+                         " sending form for %s auth: %s",
+                         r->uri, authType, sec->psldap_credential_uri);
+            r->handler = ap_pstrdup(r->pool, "ldap-auth-form");
+            res = OK;
+            /*
+              res = auth_form_redirect(r, sec, sec->psldap_credential_uri,
+                                     NULL, NULL);
+            */
         } else if (sec->psldap_authoritative) {
             ap_log_error (APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                           "LDAP user %s not found or password invalid",
@@ -3294,33 +3377,9 @@ static int ldap_update_handler(request_rec *r)
         actionHandler = get_action_handler(r, &action);
         if (login_and_reply ==actionHandler)
         {
-            request_rec *sr;
             const char *post_login_uri = get_post_login_uri(r);
 
-            sr = sub_req_lookup_uri(post_login_uri, r, NULL);
-            sr->prev = r;
-            r->content_type = sr->content_type;
-            set_psldap_auth_cookie(r, conf, user, password);
-            sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
-
-            ap_soft_timeout("update ldap data", r);
-            ap_send_http_header(r);
-            res = ap_run_sub_req(sr);
-            if (ap_is_HTTP_SUCCESS(res))
-            {
-                res = DONE;
-            }
-            else
-            {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                             r->server,
-                             "LDAP update sub request had problems (%d): %s",
-                             res, post_login_uri);
-            }
-            res = DONE;
-            ap_destroy_sub_req(sr);
-            ap_kill_timeout(r);
-
+            auth_form_redirect(r, conf, post_login_uri, user, password);
             return res;
         }
         else
@@ -3397,9 +3456,7 @@ static int ldap_update_handler(request_rec *r)
 #ifdef APACHE_V2
 static int ldap_update_handlerV2(request_rec *r)
 {
-    if (strcmp(r->handler, "ldap-update") ||
-        strcmp(r->handler, "application/x-ldap-update") ||
-        strcmp(r->handler, "application/x-httpd-psldap") ) {
+    if (0 != strcmp(r->handler, "ldap-update") ) {
         return DECLINED;
     }
     
@@ -3433,8 +3490,7 @@ module MODULE_VAR_EXPORT psldap_module =
 handler_rec ldap_handlers [] =
 {
     {"ldap-update", ldap_update_handler},
-    {"application/x-ldap-update", ldap_update_handler},
-    {"application/x-httpd-psldap", ldap_update_handler},
+    {"ldap-auth-form", auth_form_redirect_handler},
     {NULL}
 };
 

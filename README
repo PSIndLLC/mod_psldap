@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.77
+Version 0.80
 by David Picard
 
 This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
@@ -251,15 +251,47 @@ file.
 
     # The following is for psldap services:
     <IfModule mod_psldap.c>
-      AddType application/x-ldap-update .lde
-      AddType ldap-update .ldu
-      AddHandler ldap_update_handler .ldu
-      <Location /ldapupdate>
-        SetHandler application/x-ldap-update
+      AddHandler ldap-update .ldu
+      # Set server wide defaults
+      <Location />
+        PsLDAPHosts "ldap.somewhere.com"
+        PsLDAPUserKey mail
+        PsLDAPPassKey userPassword
+        PsLDAPAuthExternal on
+        PsLDAPSchemePrefix on
+        PsLDAPGroupKey ou
+        PsLDAPBaseDN "dc=somewhere,dc=com"
+        PsLDAPSearchScope subtree
+        PsLDAPAuthUseCache on
+        PsLDAPCredentialForm /psldapAuthForm.html
+        PsLDAPSecureAuthCookie off
+      </Location>
+      # Bind an authentication handler
+      <Location /ldapauth>
+        SetHandler ldap-update
         AuthType Form
+        AuthName "LDAP Auth"
+        require valid-user
+      </Location>
+      # Bind a query handler
+      <Location /ldapupdate>
+        SetHandler ldap-update
+        AuthType Form
+        AuthName "LDAP Query"
+        require valid-user
       </Location>
     </IfModule>
 
+Note that the auth type and auth name must be specified for the handler. Every
+action handled by the ldap-update handler is authenticated, therefore the auth
+type must be specified. We have also commented the line to turn off security on
+the cookie transmission, as we would strongly advise the administrator only
+allow for secure cookies containing credentials (although the credentials in
+the cookie are base 64 encoded). If you are not protecting the pages via SSL, then you
+must uncomment the secureauthcookie parameter. All the remaining parameters
+are defined at the root directory on your web server to apply the settings
+uniformly across your site. If this approach is not taken, the administrator
+should ensure these lines repeat across locations as well.
 
 The content of the form should follow a very specific format. The name for each
 input element must coincide with the name of the LDAP field against which
@@ -286,6 +318,12 @@ ncel"></td>
     </table>
 </form>
 
+Note that in the form above, the login name field coincides with the setting
+for PsLDAPUserKey, while the password coincides with the field specified in the
+PsLDAPPassKey. It is important to ensure the PsLDAPUserKey field in the ldap
+server is searchable by an anonymous user and readable by the owner. If the
+query mode of authentication is applied, then the same constraints regarding
+visibility should also be applied to the password attribute.
 
 Second, let's address how mod_psldap is enabled to perform authentication
 operations under Basic authentication. You will want to select the

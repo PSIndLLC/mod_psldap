@@ -207,10 +207,10 @@ function submitVisibleRecord(action) {
     if (action == "Create") {
         objForm.dn.value = prompt("Enter the base DN to contain this record");
         if (objForm.elements["o"]) {
-            objForm.dn.value = "o=" + objForm.elements["o"].value + ", " + objForm.dn.value;
+	    objForm.dn.value = "o=" + objForm.elements["o"].value + ", " + objForm.dn.value;
         }
         else if (objForm.elements["o-1"]) {
-            objForm.dn.value = "o=" + objForm.elements["o-1"].value + ", " + objForm.dn.value;
+	    objForm.dn.value = "o=" + objForm.elements["o-1"].value + ", " + objForm.dn.value;
         }
         if (objForm.elements["ou"]) {
             objForm.dn.value = "ou=" + objForm.elements["ou"].value + ", " + objForm.dn.value;
@@ -219,13 +219,13 @@ function submitVisibleRecord(action) {
             objForm.dn.value = "ou=" + objForm.elements["ou-1"].value + ", " + objForm.dn.value;
         }
         if (objForm.cn) {
-            if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
+	    if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
                 objForm.cn.value = objForm.elements["givenName"].value + " " +
                     objForm.elements["sn"].value;
             }
             else if (objForm.elements["givenName-1"] && objForm.elements["sn-1"] ) {
-                objForm.cn.value = objForm.elements["givenName-1"].value + " " +
-                    objForm.elements["sn-1"].value;
+	        objForm.cn.value = objForm.elements["givenName-1"].value + " " +
+		  objForm.elements["sn-1"].value;
             }
             objForm.dn.value = "cn=" + objForm.cn.value + ", " + objForm.dn.value;
         }
@@ -233,12 +233,12 @@ function submitVisibleRecord(action) {
     }
     
     if (wt.confirm("Are you sure you wish to change this record?") ) {
-	if (!(wt.document.importNode)) {
+        if (!(wt.document.importNode)) {
             /* IE does not support import node - the work arounds seem to
                be deficient when used with forms, so just submit the form
                in the context of the current page */
             /*wt.document.importNode = psldapImportNode;*/
-            objForm.submit();
+	    objForm.submit();
             return;
         }
         var objClone = wt.document.importNode(objForm, true);
@@ -270,7 +270,6 @@ function submitVisibleRecord(action) {
         }
         showProcessDocument(true);
         objClone.submit();
-        }
     }
 }
 

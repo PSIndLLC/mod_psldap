@@ -1,7 +1,33 @@
+Revision 0.82
+===================
+Implemented handling of multipart/form-data in post responses.
+
+Implemented updates to LDAP backing store with binary data, allowing for the setting of the jpegPhoto field in the inetOrgPerson schema.
+
+Fixed defect in delete handler for ldap records.
+
+	
+XSL/HTML Updates -
+-------------------------
+Updates to sample XSL to add links for editing visible records in table and card view.
+
+Fixed issue with password field in the new user XSL.
+
+Also added field to insert jpegPhoto when editing inetOrgPerson records.
+
+Allowed printing of name in table view XSL when CN is protected by accessing first and last name
+
+Implemented new look and feel for edit form buttons
+
+Set print css for the table view to style for printing
+
+Modified index page for XSL sample interface to create new from an input select. Tweaked the layout of the index as well to make a little more user friendly.
+
+
+	
 Revision 0.81
 ===================
-Changed auth form internal redirect to send 302 response - fixes pages with relative
-references to other resources and authenticated directory requests.
+Changed auth form internal redirect to send 302 response - fixes pages with relative references to other resources and authenticated directory requests.
 
 Revision 0.80
 ===================

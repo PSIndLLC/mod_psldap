@@ -29,8 +29,9 @@
     <searchResponse>
       <searchResultEntry dn="">
         <attr name="objectClass">
-          <value>organizationalUnit</value>
           <value>top</value>
+          <value>organizationalUnit</value>
+          <value>labeledURIObject</value>
         </attr>
       </searchResultEntry>
     </searchResponse>

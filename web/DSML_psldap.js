@@ -1,4 +1,4 @@
-var isNav, isIE
+var isNav, isIE;
 
 if (parseInt(navigator.appVersion) >= 4) {
     if (navigator.appName == "Netscape" ) {
@@ -8,9 +8,23 @@ if (parseInt(navigator.appVersion) >= 4) {
     }
 }
 
+// Update the URI with the bound URIs in the httpd.conf
+//var psldapRootUri = document.URL.substring(0, document.URL.lastIndexOf("/"));
+var psldapRootUri = "/psldap";
+var ldapupdateUri = "/ldapupdate";
+
 var currentRecord = 0;
 var formElmts = null;
 var recordNbrElmt = null;
+
+/** Alert with xml content **/
+function showMyXML() {
+    if (window.document.XMLDocument.xml) {
+        alert(window.document.XMLDocument.xml);
+    } else {
+        alert(window.document.textContent);
+    }
+}
 
 /** Forces the visibility of the images in the objSpan to be shown or hidden
  *  @param objSpan the span whose images are to be altered
@@ -161,6 +175,18 @@ function showProcessDocument(bForceShow) {
     }
 }
 
+/**
+ **/
+function psldapCopyAttributes(dest, src)
+{
+    var i;
+    for (i = src.attributes.length - 1; i >= 0; i--) {
+        var objAttr = src.attributes.item(i);
+        dest.setAttribute(objAttr.name, objAttr.value);
+    }
+    dest.className = src.className;
+}
+
 /** Implementation of the document importNode function to fix IE's broken 
  *  implementation of the DOM 2 spec. This function must be applied to a
  *  document object.
@@ -173,10 +199,13 @@ function psldapImportNode(objNode, bDeep)
 {
     var i;
     var result = this.createElement(objNode.tagName);
+    psldapCopyAttributes(result, objNode);
+/*
     for (i = objNode.attributes.length - 1; i >= 0; i--) {
         var objAttr = objNode.attributes.item(i);
         result.setAttribute(objAttr.name, objAttr.value);
     }
+*/
     if (bDeep) {
 /*
         for (i = 0; i < objNode.childNodes.length; i++) {
@@ -205,40 +234,47 @@ function submitVisibleRecord(action) {
     objForm = objForm[currentRecord-1];
     objForm.FormAction.value = action;
     if (action == "Create") {
+        var objOrgElement = (objForm.elements["o"]) ? objForm.elements["o"] :
+	    objForm.elements["o-1"];
+        var objOUElement = (objForm.elements["ou"]) ? objForm.elements["ou"] :
+	    objForm.elements["ou-1"];
+        var objCNElement = (objForm.elements["cn"]) ? objForm.elements["cn"] :
+	    objForm.elements["cn-1"];
         objForm.dn.value = prompt("Enter the base DN to contain this record");
-        if (objForm.elements["o"]) {
-	    objForm.dn.value = "o=" + objForm.elements["o"].value + ", " + objForm.dn.value;
+
+        if (objOrgElement && (objOrgElement.value != "")) {
+            objForm.dn.value = "o=" + objOrgElement.value + ", " + objForm.dn.value;
         }
-        else if (objForm.elements["o-1"]) {
-	    objForm.dn.value = "o=" + objForm.elements["o-1"].value + ", " + objForm.dn.value;
+
+        if (objOUElement && (objOUElement.value != "")) {
+            objForm.dn.value = "ou=" + objOUElement.value + ", " + objForm.dn.value;
         }
-        if (objForm.elements["ou"]) {
-            objForm.dn.value = "ou=" + objForm.elements["ou"].value + ", " + objForm.dn.value;
-        }
-        else if (objForm.elements["ou-1"]) {
-            objForm.dn.value = "ou=" + objForm.elements["ou-1"].value + ", " + objForm.dn.value;
-        }
-        if (objForm.cn) {
-	    if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
-                objForm.cn.value = objForm.elements["givenName"].value + " " +
+
+        if (objCNElement) {
+            if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
+                objCNElement.value = objForm.elements["givenName"].value + " " +
                     objForm.elements["sn"].value;
             }
             else if (objForm.elements["givenName-1"] && objForm.elements["sn-1"] ) {
-	        objForm.cn.value = objForm.elements["givenName-1"].value + " " +
-		  objForm.elements["sn-1"].value;
+                objCNElement.value = objForm.elements["givenName-1"].value + " " +
+                    objForm.elements["sn-1"].value;
             }
-            objForm.dn.value = "cn=" + objForm.cn.value + ", " + objForm.dn.value;
+            if (objCNElement.value != "") {
+                objForm.dn.value = "cn=" + objCNElement.value + ", " + objForm.dn.value;
+            }
         }
         objForm.dn.value = wt.prompt("Confirm the DN for this record:", objForm.dn.value);
     }
     
     if (wt.confirm("Are you sure you wish to change this record?") ) {
-        if (!(wt.document.importNode)) {
+	if (!(wt.document.importNode) ||
+             (objForm.encoding == "multipart/form-data") ) {
             /* IE does not support import node - the work arounds seem to
                be deficient when used with forms, so just submit the form
-               in the context of the current page */
+               in the context of the current page. Also multipart forms
+	       tend to have file input elements which cannot be cloned. */
             /*wt.document.importNode = psldapImportNode;*/
-	    objForm.submit();
+            objForm.submit();
             return;
         }
         var objClone = wt.document.importNode(objForm, true);
@@ -333,6 +369,194 @@ function showPrevRecord() {
     showRecord(currentRecord - 1);
 }
 
+function loadRecordUrl(sel) {
+    if (sel != "") {
+        window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=739, width=669");
+    }
+}
+
+function setNodeHideAttrs(objElmt, bHide, bHideChildren, strNamePrefix) {
+    var objChild;
+    if (bHide) {
+        if (objElmt.style) {
+            objElmt.style.display = "none";
+        }
+        if (null != strNamePrefix) {
+            if (objElmt.name && (undefined != objElmt.name) && 
+                (0 != objElmt.name.indexOf(strNamePrefix))) {
+                objElmt.name = strNamePrefix + objElmt.name;
+            }
+        }
+    } else {
+        if (objElmt.style) {
+            objElmt.style.display = "inline";
+        }
+        if (null != strNamePrefix) {
+            if (objElmt.name && (undefined != objElmt.name) && 
+                (0 == objElmt.name.indexOf(strNamePrefix)) ) {
+                objElmt.name = objElmt.name.substring(7);
+            }
+        }
+    }
+    if (bHideChildren && objElmt.firstChild &&
+        (undefined != objElmt.firstChild) ) {
+        var objChild;
+        var nextChild;
+        for (objChild = objElmt.firstChild; null != objChild;
+             objChild = nextChild) {
+            nextChild = objChild.nextSibling;
+            setNodeHideAttrs(objChild, bHide, true, strNamePrefix);
+        }
+    }
+}
+
+function hideAndGetParentByTagName(myElmt, argBChangeName, strParentTagName) {
+    var objElmt = myElmt;
+    var bChangeName = ((arguments.length < 1) || argBChangeName);
+
+    setNodeHideAttrs(objElmt, true, false,
+                       ((bChangeName) ? "hidden_" : null) );
+    if (arguments.length > 2) {
+        while ((null != objElmt) &&
+               (0 != objElmt.tagName.indexOf(strParentTagName)) ) {
+            objElmt = objElmt.parentNode;
+        }
+        if (null == objElmt) objElmt = myElmt;
+    }
+    setNodeHideAttrs(objElmt, true, true,
+                       ((bChangeName) ? "hidden_" : null) );
+    return objElmt;
+}
+
+function showPreviousSiblingAndHide(myElmt, argBChangeName, strParentTagName) {
+    var objElmt = myElmt;
+    var mySibling = null;
+    var bChangeName = ((arguments.length < 1) || argBChangeName);
+    
+    if (arguments.length > 2) {
+        objElmt = hideAndGetParentByTagName(myElmt, bChangeName,
+                                            strParentTagName);
+    } else {
+        objElmt = hideAndGetParentByTagName(myElmt, bChangeName);
+    }
+    objElmt = objElmt.previousSibling;
+    setNodeHideAttrs(objElmt, false, true,
+                       ((bChangeName) ? "hidden_" : null) );
+
+}
+
+function showNextSiblingAndHide(myElmt, argBChangeName, strParentTagName) {
+    var objElmt = myElmt;
+    var mySibling = null;
+    var bChangeName = ((arguments.length < 1) || argBChangeName);
+    
+    if (arguments.length > 2) {
+        objElmt = hideAndGetParentByTagName(myElmt, bChangeName,
+                                            strParentTagName);
+    } else {
+        objElmt = hideAndGetParentByTagName(myElmt, bChangeName);
+    }
+    objElmt = objElmt.nextSibling;
+    setNodeHideAttrs(objElmt, false, true,
+                       ((bChangeName) ? "hidden_" : null) );
+
+}
+
+function getEditableRecord(dn) {
+    var getUrl = ldapupdateUri + "?FormAction=Search&" +
+	"search=(objectClass=*)&dn=" + dn +
+        "&BinaryHRef=on" +
+        "&xsl1=" + psldapRootUri + "/DSML_editform.xsl" +
+        "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
+    loadRecordUrl(getUrl);
+}
+
+function getWindowHeight(objWindow) {
+    var myHeight = 0;
+    if( typeof( objWindow.innerWidth ) == 'number' ) {
+        //Non-IE
+        myHeight = objWindow.innerHeight;
+    } else if( document.documentElement &&
+              ( document.documentElement.clientWidth ||
+                document.documentElement.clientHeight ) ) {
+        //IE 6+ in 'standards compliant mode'
+        myHeight = document.documentElement.clientHeight;
+    } else if( document.body && ( document.body.clientWidth || document.body.clientHeight ) ) {
+        //IE 4 compatible
+        myHeight = document.body.clientHeight;
+    }
+    return myHeight;
+}
+
+function verticalWrapChildren(objCellElmt, reservedSize)
+{
+    var nextChild;
+    /* Take 20 off the window height for the scrollbar thickness ... */
+    var scrollThickness = 25;
+    var wrapHeight = getWindowHeight(window) - scrollThickness - reservedSize;
+    var currentElmt = objCellElmt;
+    var currentElmtHeight = currentElmt.scrollHeight;
+    var prevWrapHeight = objCellElmt.scrollHeight;
+    var previousHeight = objCellElmt.scrollHeight;
+    var brString = new String("BR");
+
+    do {
+        if ((currentElmtHeight >= wrapHeight) &&
+            (currentElmt.firstChild != currentElmt.lastChild) ) {
+            if (currentElmt != objCellElmt) {
+                /* Shift the previously moved element back and remove any
+                   trailing breaking space */
+                nextChild = currentElmt.removeChild(currentElmt.lastChild);
+                if (0 != brString.indexOf(nextChild.tagName) ) {
+                    objCellElmt.insertBefore(nextChild, objCellElmt.firstChild);
+                }
+                while (0 == brString.indexOf(currentElmt.lastChild.tagName) ) {
+                    currentElmt.removeChild(currentElmt.lastChild);
+                }
+            }
+
+            currentElmt = document.createElement(objCellElmt.tagName);
+            currentElmt.name = "wrapElmt";
+
+            currentElmt.className = objCellElmt.className;
+            //psldapCopyAttributes(currentElmt, objCellElmt);
+
+            objCellElmt.parentNode.insertBefore(currentElmt, objCellElmt);
+
+            prevWrapHeight = objCellElmt.scrollHeight;
+        }
+	previousHeight = objCellElmt.scrollHeight;
+
+	if (currentElmt == objCellElmt) {
+            previousHeight -= 1;
+        } else {
+            nextChild = currentElmt.appendChild(objCellElmt.firstChild);
+            if (currentElmt.scrollHeight > previousHeight) {
+                currentElmtHeight = currentElmt.scrollHeight;
+                previousHeight = objCellElmt.scrollHeight;
+            } else {
+                currentElmtHeight = prevWrapHeight - objCellElmt.scrollHeight;
+            }
+        }
+    } while ( (null != objCellElmt.firstChild) &&
+              (objCellElmt.scrollHeight <= previousHeight ) );
+}
+
+function initializeCards(reservedSize) {
+    window.status = "Organizing cards...";
+
+    var cardTable = document.getElementById("cardTable");
+    var cardTd = cardTable;
+    while ((null != cardTd) && (0 != cardTd.tagName.indexOf("TD"))) {
+        cardTd = cardTd.firstChild;
+    }
+    if (null != cardTd) {
+        verticalWrapChildren(cardTd, reservedSize);
+    }
+
+    window.status = "Done";
+}
+
 function initialize() {
     window.status = "Loading forms...";
 
@@ -341,4 +565,3 @@ function initialize() {
     showRecord(1);
     window.status = getAllFormElements().length + " records loaded";
 }
-

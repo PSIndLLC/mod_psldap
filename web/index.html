@@ -48,21 +48,14 @@
 <!-- Add body of page here -->
 <h2>LDAP Manager</h2>
 <h3>Search for a Record</h3>
-<p>Enter the LDAP query string in the <em>LDAP Query</em> field and select <em>Submit</em> - the style sheets should be fine as they are.</p>
+<p>Enter the LDAP query string in the <em>Search For</em> field, select the <em>Directory</em> in which you wish to search, and then select <em>Submit</em> - the style sheets should be fine as they are.</p>
 <div>
 <form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/ldapupdate">
     <table>
-<!--
-        <tr ><td align="left"><label>Login (E-Mail)
-	    <input type="input" name="mail" size="20" maxlength="64" value="dave" required></label>
-        </td></tr>
-        <tr ><td align="left"><label>Password
-	    <input type="password" name="userPassword" size="20" maxlength="64" value="" required></label>
-        </td></tr>
--->
-        <tr><td align="left"><label>LDAP Query
+        <tr><td align="left"><label><span style="margin-right: 18px; margin-left : 50px; ">Search For</span>
+ 	    <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" ></label>
 	    <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" ></label>
-	    <select onchange="synchCompareSelect();" size="1" name="searchby" >
+	    <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;">
                 <option selected value="mail">eMail</option>
                 <option value="givenName">First Name</option>
                 <option value="sn">Last Name</option>
@@ -70,7 +63,7 @@
                 <option value="ou">Org Unit</option>
                 <option value="">Advanced...</option>
             </select>
-	    <select onchange="synchCompareSelect();" size="1" name="searchcompare" >
+	    <select onchange="synchCompareSelect();" size="1" name="searchcompare" style="margin-right: 3px;">
                 <option value="=?*">begins with</option>
                 <option selected value="=*?*">contains</option>
                 <option value="=*?">ends with</option>
@@ -79,15 +72,21 @@
             </select>
 	    <input type="text" name="searchvalue" size="32" maxlength="128" value="@" >
         </td></tr>
+        <tr><td align="left"><label><span style="margin-right: 25px; margin-left : 50px; ">Directory</span>
+	    <select size="1" name="dn" >
+                <option selected value="dc=psind,dc=com">PSInd, LLC</option>
+                <option value="dc=picard,dc=us">Picard Family</option>
+            </select>
+        </td></tr>
         <tr>
-          <td align="left"><label>Primary Style
-	    <select size="1" name="xsl1" >
+          <td align="left"><label><span style="margin-right: 5px; margin-left : 50px; ">Primary Style</span>
+	    <select size="1" name="xsl1" style="margin-right: 3px;">
                 <option selected value="/psldap/DSML_cards.xsl">Card View</option>
                 <option value="/psldap/DSML_table.xsl">Table View</option>
                 <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
             </select>
             &nbsp;<label>Secondary Style
-	    <select size="1" name="xsl2" >
+	    <select size="1" name="xsl2" style="margin-right: 3px;">
                 <option value="/psldap/DSML_cards.xsl">Card View</option>
                 <option selected value="/psldap/DSML_table.xsl">Table View</option>
                 <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
@@ -110,11 +109,16 @@
 </form>
 </div>
 <hr>
-<h3>Create a New Record</h3>
-<p><a href="DSML_new_o.xml">Create a new organization</a></p>
-<p><a href="DSML_new_ou.xml">Create a new unit</a></p>
-<p><a href="DSML_new_group.xml">Create a new group</a></p>
-<p><a href="DSML_new_person.xml">Create a new person</a></p>
+<h3>Create a New...
+  <select size="1" name="newRecordSelect" style="margin-right: 3px;" onclick="loadRecordUrl(this.value)">
+    <option selected value="">Select One ...</option>
+    <option value="DSML_new_o.xml">Organization</option>
+    <option value="DSML_new_ou.xml">Organizational Unit</option>
+    <option value="DSML_new_group.xml">Group</option>
+    <option value="DSML_new_person.xml">Person</option>
+    <option value="DSML_new_user.xml">User</option>
+  </select>
+</h3>
 
 </body>
 

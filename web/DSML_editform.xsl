@@ -4,6 +4,8 @@
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/REC-html40'>
 <xsl:output method="html" encoding="ISO-8859-1" indent="yes" />
 
+<xsl:variable name="psldapRoot" select="'/psldap'" />
+
 <xsl:template match="/">
   <xsl:variable name="recordCount" select="count(//searchResponse/searchResultEntry)" />
   <xsl:element name="html">
@@ -21,7 +23,7 @@
       </xsl:element>
       <xsl:element name="script">
         <xsl:attribute name="language">JavaScript</xsl:attribute>
-        <xsl:attribute name="src">/psldap/DSML_psldap.js</xsl:attribute>
+        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/DSML_psldap.js</xsl:attribute>
       </xsl:element>
     </xsl:element>
     <xsl:element name="body">
@@ -29,7 +31,7 @@
       <xsl:element name="iframe">
 	<xsl:attribute name="id">processWindow</xsl:attribute>
 	<xsl:attribute name="name">processWindow</xsl:attribute>
-	<xsl:attribute name="src">/psldap/statusPage.html</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/statusPage.html</xsl:attribute>
 	<xsl:attribute name="width">650px</xsl:attribute>
 	<xsl:attribute name="style">display: none; border: none</xsl:attribute>
 	<xsl:attribute name="onload">showProcessDocument();</xsl:attribute>
@@ -45,7 +47,7 @@
                       <xsl:attribute name="href">javascript: void submitVisibleRecord('Create')</xsl:attribute>
                       <xsl:attribute name="title">Create a new record</xsl:attribute>
                       <xsl:element name="img">
-                        <xsl:attribute name="src">/psldap/images/newRecord.gif</xsl:attribute>
+                        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/newRecord.gif</xsl:attribute>
                       </xsl:element>
                     </xsl:element>
                   </xsl:element>
@@ -56,34 +58,32 @@
                       <xsl:attribute name="href">javascript: void submitVisibleRecord('Modify')</xsl:attribute>
                       <xsl:attribute name="title">Modify this record</xsl:attribute>
                       <xsl:element name="img">
-                        <xsl:attribute name="src">/psldap/images/editRecord.gif</xsl:attribute>
+                        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/editRecord.gif</xsl:attribute>
+                      </xsl:element>
+                    </xsl:element>
+                  </xsl:element>
+                  <xsl:element name="span">
+                    <xsl:element name="a">
+                      <xsl:attribute name="href">javascript: void submitVisibleRecord('Delete')</xsl:attribute>
+                      <xsl:attribute name="title">Delete this record</xsl:attribute>
+                      <xsl:element name="img">
+                        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/delRecord.gif</xsl:attribute>
                       </xsl:element>
                     </xsl:element>
                   </xsl:element>
                 </xsl:otherwise>
               </xsl:choose>
 
-              <xsl:if test="(not (//searchResponse/searchResultEntry[@dn='']/attribute::dn=''))">
-                <xsl:element name="span">
-                  <xsl:element name="a">
-                    <xsl:attribute name="href">javascript: void submitVisibleRecord('Delete')</xsl:attribute>
-                    <xsl:attribute name="title">Delete this record</xsl:attribute>
-                    <xsl:element name="img">
-                      <xsl:attribute name="src">/psldap/images/delRecord.gif</xsl:attribute>
-                    </xsl:element>
-                  </xsl:element>
-                </xsl:element>
-              </xsl:if>
-
               <xsl:element name="span">
                 <xsl:element name="a">
                   <xsl:attribute name="href">javascript: void resetVisibleRecord()</xsl:attribute>
                   <xsl:attribute name="title">Reset changes on current form</xsl:attribute>
                   <xsl:element name="img">
-                    <xsl:attribute name="src">/psldap/images/resetRec.gif</xsl:attribute>
+                    <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/resetRec.gif</xsl:attribute>
                   </xsl:element>
                 </xsl:element>
               </xsl:element>
+
               <xsl:if test="$recordCount &gt; 1">
                 <xsl:element name="span">
                   <xsl:element name="a">
@@ -170,7 +170,7 @@
   <xsl:param name='attrType' select='@name' />
 
   <xsl:element name="textarea">
-    <xsl:attribute name="name"><xsl:value-of select='$attrType' /></xsl:attribute>
+    <xsl:attribute name="name"><xsl:value-of select='$attrType' /><xsl:number value="position()" format="-1" /></xsl:attribute>
     <xsl:attribute name="rows"><xsl:value-of select='$rows' /></xsl:attribute>
     <xsl:attribute name="cols"><xsl:value-of select='$cols' /></xsl:attribute>
     <xsl:value-of select='value' /><xsl:text />
@@ -189,6 +189,9 @@
     <xsl:attribute name="style">display: none;</xsl:attribute>
     <td>
       <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
+        <xsl:if test="(attribute::dn='')">
+          <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
+        </xsl:if>
         <table width='100%' border='0' cellspacing='0'>
           <tr><td>
             <xsl:apply-templates select="." mode="recordHead">
@@ -294,6 +297,9 @@
     <xsl:attribute name="style">display: none;</xsl:attribute>
     <td>
       <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
+        <xsl:if test="(attribute::dn='')">
+          <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
+        </xsl:if>
         <table width='100%' border='0' cellspacing='0'>
           <tr><td>
             <xsl:apply-templates select="." mode="recordHead">
@@ -407,7 +413,11 @@
   <xsl:attribute name="nodeid"><xsl:value-of select="generate-id()" /></xsl:attribute>
   <xsl:attribute name="style">display: none;</xsl:attribute>
   <td>
-  <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
+  <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow" enctype="multipart/form-data" >
+  <!-- <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow" > -->
+  <xsl:if test="(attribute::dn='')">
+    <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
+  </xsl:if>
   <table width='100%' border='0' cellspacing='0'>
     <tr>
     <td>
@@ -428,20 +438,23 @@
       </xsl:element>
       <table class='boxed' width='100%'>
         <tr><td>
+        <table>
+        <tr>
+        <td width='120px' align='center'>
+          <!--<em>Photo<br /> Here</em> -->
+          <xsl:apply-templates select="." mode="jpegPhoto">
+          </xsl:apply-templates>
+        </td>
+        <td>
+        <table>
+        <tr valign="top"><td>
           <xsl:element name="input">
             <xsl:attribute name="type">hidden</xsl:attribute>
             <xsl:attribute name="name">cn</xsl:attribute>
             <xsl:attribute name="value"><xsl:value-of select="attr[@name='cn']/value"/></xsl:attribute>
           </xsl:element>
-          <table width='100%'>
+          <table>
             <tr>
-              <xsl:call-template name="editableAttr">
-                <xsl:with-param name="attrType">title</xsl:with-param>
-                <xsl:with-param name="label">Title</xsl:with-param>
-                <xsl:with-param name="width">4</xsl:with-param>
-                <xsl:with-param name="maxwidth">8</xsl:with-param>
-                <xsl:with-param name="multirow">no</xsl:with-param>
-              </xsl:call-template>
               <xsl:call-template name="editableAttr">
                 <xsl:with-param name="attrType">givenName</xsl:with-param>
                 <xsl:with-param name="label">First</xsl:with-param>
@@ -452,17 +465,38 @@
               <xsl:call-template name="editableAttr">
                 <xsl:with-param name="attrType">sn</xsl:with-param>
                 <xsl:with-param name="label">Last</xsl:with-param>
-                <xsl:with-param name="width">16</xsl:with-param>
+                <xsl:with-param name="width">18</xsl:with-param>
                 <xsl:with-param name="maxwidth">32</xsl:with-param>
+                <xsl:with-param name="multirow">no</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">title</xsl:with-param>
+                <xsl:with-param name="label">Title</xsl:with-param>
+                <xsl:with-param name="colspan">3</xsl:with-param>
+                <xsl:with-param name="width">42</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
                 <xsl:with-param name="multirow">no</xsl:with-param>
               </xsl:call-template>
             </tr>
           </table>
         </td></tr>
+        <tr><td>
+        </td></tr>
 
         <tr><td>
           <table>
             <tr>
+              <xsl:choose>
+                 <xsl:when test="(attribute::dn='')" >
+                  <xsl:comment>
+                    The template XML should contain a userPassword entry
+                  </xsl:comment>
+                </xsl:when>
+                <xsl:otherwise>
+                </xsl:otherwise>
+              </xsl:choose>
               <xsl:apply-templates select="attr[@name='userPassword']" >
                 <xsl:with-param name='label'>Password</xsl:with-param>
               </xsl:apply-templates>
@@ -475,11 +509,6 @@
                 <xsl:with-param name="maxwidth">64</xsl:with-param>
               </xsl:call-template>
             </tr>
-          </table>
-        </td></tr>
-
-        <tr><td>
-          <table>
             <tr>
               <xsl:call-template name="editableAttr">
                 <xsl:with-param name="attrType">o</xsl:with-param>
@@ -497,6 +526,11 @@
               </xsl:call-template>
             </tr>
           </table>
+        </td></tr>
+        </table>
+        </td>
+        </tr>
+        </table>
         </td></tr>
 
         <tr><td>
@@ -535,11 +569,10 @@
                 <xsl:with-param name="attrType">homePostalAddress</xsl:with-param>
                 <xsl:with-param name="label">Home Address</xsl:with-param>
                 <xsl:with-param name="rows">2</xsl:with-param>
-                <xsl:with-param name="cols">36</xsl:with-param>
+                <xsl:with-param name="colspan">3</xsl:with-param>
+                <xsl:with-param name="cols">48</xsl:with-param>
               </xsl:call-template>
             </tr>
-          </table>
-          <table>
             <tr>
               <xsl:call-template name="editableAttr">
                 <xsl:with-param name="attrType">homePhone</xsl:with-param>
@@ -591,6 +624,9 @@
     <xsl:attribute name="style">display: none;</xsl:attribute>
     <td>
       <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
+        <xsl:if test="(attribute::dn='')">
+          <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
+        </xsl:if>
         <table width='100%'>
           <tr><td>
             <xsl:apply-templates select="." mode="recordHead">
@@ -671,7 +707,7 @@
                   <xsl:with-param name="attrType">uniqueMember</xsl:with-param>
                   <xsl:with-param name="label">Members</xsl:with-param>
                   <xsl:with-param name="width">32</xsl:with-param>
-                  <xsl:with-param name="maxwidth">64</xsl:with-param>
+                  <xsl:with-param name="maxwidth">128</xsl:with-param>
                 </xsl:call-template>
               </tr>
             </table>
@@ -687,7 +723,7 @@
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">x121Address</xsl:with-param>
       <xsl:with-param name="label">X121 Address</xsl:with-param>
-      <xsl:with-param name="width">32</xsl:with-param>
+      <xsl:with-param name="width">48</xsl:with-param>
       <xsl:with-param name="maxwidth">64</xsl:with-param>
     </xsl:call-template>
   </tr>
@@ -695,7 +731,7 @@
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">registeredAddress</xsl:with-param>
       <xsl:with-param name="label">Registered Address</xsl:with-param>
-      <xsl:with-param name="width">32</xsl:with-param>
+      <xsl:with-param name="width">48</xsl:with-param>
       <xsl:with-param name="maxwidth">64</xsl:with-param>
     </xsl:call-template>
   </tr>
@@ -703,14 +739,22 @@
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">destinationIndicator</xsl:with-param>
       <xsl:with-param name="label">Destination Indicator</xsl:with-param>
-      <xsl:with-param name="width">32</xsl:with-param>
+      <xsl:with-param name="width">48</xsl:with-param>
       <xsl:with-param name="maxwidth">64</xsl:with-param>
+    </xsl:call-template>
+  </tr>
+  <tr>
+    <xsl:call-template name="editableAttr">
+      <xsl:with-param name="attrType">labeledURI</xsl:with-param>
+      <xsl:with-param name="label">Web Site</xsl:with-param>
+      <xsl:with-param name="width">48</xsl:with-param>
+      <xsl:with-param name="maxwidth">128</xsl:with-param>
     </xsl:call-template>
   </tr>
 </xsl:template>
 
 <xsl:template name="password">
-  <xsl:param name="suffix" select="(position())" />
+  <xsl:param name="suffix"><xsl:number value="position()" format="-1" /></xsl:param>
   <xsl:param name="width" select="20" />
   <xsl:param name="maxwidth" select="64" />
   <xsl:param name='attrType' select="ancestor-or-self::attr/attribute::name" />
@@ -747,7 +791,7 @@
     <xsl:element name="img">
       <xsl:attribute name="class">deleteNode</xsl:attribute>
       <xsl:attribute name="name">delete</xsl:attribute>
-      <xsl:attribute name="src">/psldap/images/delAttr.gif</xsl:attribute>
+      <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/delAttr.gif</xsl:attribute>
       <xsl:attribute name="alt">Del </xsl:attribute>
       <xsl:attribute name="title">Delete attribute</xsl:attribute>
       <xsl:attribute name="onmouseup">deleteCurrentSpan(this)</xsl:attribute>
@@ -758,7 +802,7 @@
     <xsl:element name="img">
       <xsl:attribute name="class">cloneNode</xsl:attribute>
       <xsl:attribute name="name">clone</xsl:attribute>
-      <xsl:attribute name="src">/psldap/images/newAttr.gif</xsl:attribute>
+      <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/newAttr.gif</xsl:attribute>
       <xsl:attribute name="alt">New </xsl:attribute>
       <xsl:attribute name="title">Add attribute</xsl:attribute>
       <xsl:attribute name="onmouseup">cloneAndAppendCurrentSpan(this)</xsl:attribute>
@@ -775,6 +819,7 @@
 <xsl:template name="editableAttr">
   <xsl:param name="attrType" select="attr/attribute::name" />
   <xsl:param name="label" select="attr/attribute::name" />
+  <xsl:param name="colspan">1</xsl:param>
   <xsl:param name="width">16</xsl:param>
   <xsl:param name="maxwidth">32</xsl:param>
   <xsl:param name="multirow">yes</xsl:param>
@@ -783,7 +828,9 @@
       <xsl:value-of select="$label" />
     </xsl:element>
   </td>
-  <td class="data">
+  <xsl:element name="td">
+    <xsl:attribute name="class">data</xsl:attribute>
+    <xsl:attribute name="colspan"><xsl:value-of select="$colspan" /></xsl:attribute>
     <xsl:variable name="titleCount" select="count(attr[@name=$attrType])" />
     <xsl:for-each select="attr[@name=$attrType]/value" >
       <xsl:call-template name="textinput">
@@ -804,12 +851,13 @@
         <xsl:with-param name="fillvalue" />
       </xsl:call-template>
     </xsl:if>
-  </td>
+  </xsl:element>
 </xsl:template>
 
 <xsl:template name="editableAttrTA">
   <xsl:param name="attrType" select="attr[(position()=1)]/attribute::name" />
   <xsl:param name="label" select="attr[(position()=1)]/attribute::name" />
+  <xsl:param name="colspan">1</xsl:param>
   <xsl:param name="rows" select="4" />
   <xsl:param name="cols" select="32" />
   <td class="label">
@@ -817,7 +865,9 @@
       <xsl:value-of select="$label" />
     </xsl:element>
   </td>
-  <td class="data">
+  <xsl:element name="td">
+    <xsl:attribute name="class">data</xsl:attribute>
+    <xsl:attribute name="colspan"><xsl:value-of select="$colspan" /></xsl:attribute>
     <xsl:variable name="titleCount" select="count(attr[@name=$attrType])" />
     <xsl:for-each select="attr[@name=$attrType]" >
       <xsl:call-template name="textarea">
@@ -833,7 +883,7 @@
         <xsl:with-param name='cols'><xsl:value-of select='$cols' /></xsl:with-param>
       </xsl:call-template>
     </xsl:if>
-  </td>
+  </xsl:element>
 </xsl:template>
 
 <xsl:template name="editableDeliveryPreference">
@@ -902,6 +952,18 @@
       </xsl:element>
     </xsl:element>
   </td>
+</xsl:template>
+
+<xsl:template match="attr[@name='objectClass']" mode="hidden">
+  <xsl:param name='attrType' select="ancestor-or-self::attr/attribute::name" />
+  <xsl:for-each select="ancestor-or-self::attr[@name='objectClass']/value">
+    <xsl:element name="input">
+      <xsl:variable name="suffix" select="(position())" />
+      <xsl:attribute name="type">hidden</xsl:attribute>
+      <xsl:attribute name="name"><xsl:value-of select='$attrType' />-<xsl:value-of select='$suffix' /></xsl:attribute>
+      <xsl:attribute name="value"><xsl:value-of select="." /></xsl:attribute>
+    </xsl:element>
+  </xsl:for-each>
 </xsl:template>
 
 <xsl:template match="attr">
@@ -991,29 +1053,22 @@
   <xsl:element name="Legend">Office Information</xsl:element>
   <table width='100%'>
     <tr><td>
-      <table>
-        <tr><td>
-          <table width='100%'>
-            <tr>
-              <xsl:call-template name="editableAttr">
-                <xsl:with-param name="attrType">physicalDeliveryOfficeName</xsl:with-param>
-                <xsl:with-param name="label">Office Name</xsl:with-param>
-                <xsl:with-param name="width">36</xsl:with-param>
-                <xsl:with-param name="maxwidth">64</xsl:with-param>
-              </xsl:call-template>
-            </tr>
-          </table>
-        </td></tr>
-      </table>
-    </td></tr>
-
-    <tr><td>
     <table width='100%'>
+    <tr>
+      <xsl:call-template name="editableAttr">
+        <xsl:with-param name="attrType">physicalDeliveryOfficeName</xsl:with-param>
+        <xsl:with-param name="label">Bldg</xsl:with-param>
+        <xsl:with-param name="colspan">5</xsl:with-param>
+        <xsl:with-param name="width">64</xsl:with-param>
+        <xsl:with-param name="maxwidth">64</xsl:with-param>
+      </xsl:call-template>
+    </tr>
     <tr>
       <xsl:call-template name="editableAttr">
         <xsl:with-param name="attrType">street</xsl:with-param>
         <xsl:with-param name="label">Street</xsl:with-param>
-        <xsl:with-param name="width">40</xsl:with-param>
+        <xsl:with-param name="colspan">3</xsl:with-param>
+        <xsl:with-param name="width">48</xsl:with-param>
         <xsl:with-param name="maxwidth">64</xsl:with-param>
         <xsl:with-param name="multirow">no</xsl:with-param>
       </xsl:call-template>
@@ -1025,16 +1080,11 @@
         <xsl:with-param name="multirow">no</xsl:with-param>
       </xsl:call-template>
     </tr>
-    </table>
-    </td></tr>
-
-    <tr><td>
-    <table width='100%'>
     <tr>
        <xsl:call-template name="editableAttr">
          <xsl:with-param name="attrType">l</xsl:with-param>
          <xsl:with-param name="label">City</xsl:with-param>
-         <xsl:with-param name="width">28</xsl:with-param>
+         <xsl:with-param name="width">24</xsl:with-param>
          <xsl:with-param name="maxwidth">48</xsl:with-param>
          <xsl:with-param name="multirow">no</xsl:with-param>
        </xsl:call-template>
@@ -1061,31 +1111,27 @@
         <tr>
           <xsl:call-template name="editableAttrTA">
             <xsl:with-param name="attrType">postalAddress</xsl:with-param>
-            <xsl:with-param name="label">Office Address</xsl:with-param>
+            <xsl:with-param name="label">Address</xsl:with-param>
             <xsl:with-param name="rows">3</xsl:with-param>
-            <xsl:with-param name="cols">36</xsl:with-param>
+            <xsl:with-param name="colspan">3</xsl:with-param>
+            <xsl:with-param name="cols">56</xsl:with-param>
           </xsl:call-template>
         </tr>
-      </table>
-    </td></tr>
-
-    <tr><td>
-    <table width='100%'>
     <tr>
        <xsl:call-template name="editableAttr">
          <xsl:with-param name="attrType">telephoneNumber</xsl:with-param>
-         <xsl:with-param name="label">Office Phone</xsl:with-param>
-         <xsl:with-param name="width">16</xsl:with-param>
-         <xsl:with-param name="maxwidth">24</xsl:with-param>
+         <xsl:with-param name="label">Phone</xsl:with-param>
+         <xsl:with-param name="width">21</xsl:with-param>
+         <xsl:with-param name="maxwidth">28</xsl:with-param>
        </xsl:call-template>
        <xsl:call-template name="editableAttr">
          <xsl:with-param name="attrType">facsimileTelephoneNumber</xsl:with-param>
-         <xsl:with-param name="label">Fax Number</xsl:with-param>
+         <xsl:with-param name="label">Fax</xsl:with-param>
          <xsl:with-param name="width">16</xsl:with-param>
          <xsl:with-param name="maxwidth">24</xsl:with-param>
        </xsl:call-template>
     </tr>
-    </table>
+      </table>
     </td></tr>
 
     <tr><td>
@@ -1125,6 +1171,48 @@
     </td></tr>
   </table>
   </xsl:element>
+</xsl:template>
+
+<xsl:template match="searchResultEntry" mode="jpegPhoto">
+  <xsl:variable name="jpegUrl"><xsl:value-of select="attr[@name='jpegPhoto']/value" disable-output-escaping="yes" /></xsl:variable>
+  <xsl:variable name="jpegCount" select="count(attr[@name='jpegPhoto'])+1" />
+    <xsl:choose>
+    <xsl:when test="(attr[@name='jpegPhoto']/value)">
+      <xsl:element name="img">
+        <xsl:attribute name="onclick">showNextSiblingAndHide(this,true)</xsl:attribute>
+        <xsl:attribute name="name">encJpegPhoto</xsl:attribute>
+        <xsl:attribute name="width">96</xsl:attribute>
+        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/newAttr.gif</xsl:attribute>
+        <xsl:attribute name="onload"><xsl:choose><xsl:when test="not(contains(attr[@name='jpegPhoto']/value,'BinaryData'))"><xsl:text>data:image/jpeg;base64,</xsl:text></xsl:when><xsl:otherwise>javascript:if (-1 != this.src.indexOf('images/')) this.src='</xsl:otherwise></xsl:choose><xsl:value-of select="$jpegUrl" /><xsl:if test="(contains(attr[@name='jpegPhoto']/value,'BinaryData'))" ><xsl:text>'</xsl:text></xsl:if></xsl:attribute>
+      </xsl:element>
+    </xsl:when>
+    <xsl:otherwise>
+      <xsl:element name="br" />
+    </xsl:otherwise>
+    </xsl:choose>
+    <xsl:element name="span">
+      <xsl:attribute name="style">vertical-align: center</xsl:attribute>
+      <xsl:if test="(attr[@name='jpegPhoto']/value)">
+        <xsl:attribute name="style">display:none</xsl:attribute>
+      </xsl:if>
+      <em>Photo<br />Here<br /></em>
+      <xsl:element name="input">
+	<xsl:attribute name="style">margin-top:10px</xsl:attribute>
+	<xsl:attribute name="type">file</xsl:attribute>
+        <xsl:attribute name="name"><xsl:if test="(attr[@name='jpegPhoto']/value)">hidden_</xsl:if>jpegPhoto<xsl:number value="1" format="-1" /></xsl:attribute>
+	<xsl:attribute name="size">4</xsl:attribute>
+	<xsl:attribute name="accept">image/jpeg,image/jpg</xsl:attribute>
+      </xsl:element>
+      <xsl:if test="(contains(attr[@name='jpegPhoto']/value,'BinaryData'))">
+        <xsl:element name="br" />
+        <xsl:element name="button">
+          <xsl:attribute name="type">button</xsl:attribute>
+          <xsl:attribute name="style">margin-top: 10px</xsl:attribute>
+          <xsl:attribute name="onclick">showPreviousSiblingAndHide(this, true, "SPAN")</xsl:attribute>
+          Cancel
+        </xsl:element>
+      </xsl:if>
+    </xsl:element>
 </xsl:template>
 
 </xsl:stylesheet>

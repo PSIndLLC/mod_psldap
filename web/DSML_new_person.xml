@@ -29,11 +29,11 @@
     <searchResponse>
       <searchResultEntry dn="">
         <attr name="objectClass">
-          <value>account</value>
-          <value>posixAccount</value>
-          <value>inetOrgPerson</value>
-          <value>organizationalPerson</value>
+          <value>top</value>
           <value>person</value>
+          <value>organizationalPerson</value>
+          <value>inetOrgPerson</value>
+          <value>labeledURIObject</value>
         </attr>
       </searchResultEntry>
     </searchResponse>

@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.81"
+#define PSLDAP_VERSION_LABEL "0.82"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -126,6 +126,9 @@
 #define INT_UNSET -1
 #define STR_UNSET NULL
 
+#define BINARY_REFS		"BinaryHRef"
+#define BINARY_DATA		"BinaryData"
+#define BINARY_TYPE		"BinaryType"
 #define FORM_ACTION		"FormAction"
 #define LOGIN_ACTION	"Login"
 #define SEARCH_ACTION	"Search"
@@ -1031,6 +1034,9 @@ typedef struct
     char *searchPattern;
     char *xslPrimaryUri;
     char *xslSecondaryUri;
+    char *fieldName;
+    char *responseType;
+    int binaryAsHref;
 } psldap_status;
 
 static void psldap_status_init(psldap_status *ps, request_rec *r, LDAP *ldap,
@@ -1048,7 +1054,9 @@ static void psldap_status_init(psldap_status *ps, request_rec *r, LDAP *ldap,
     ps->searchPattern = NULL;
     ps->xslPrimaryUri = NULL;
     ps->xslSecondaryUri = NULL;
-    
+    ps->fieldName = NULL;
+    ps->responseType = NULL;
+    ps->binaryAsHref = 0;    
     set_lderrno(ps->ldap, LDAP_SUCCESS);
 }
 
@@ -1650,6 +1658,61 @@ static char* construct_ldap_base(request_rec *r, psldap_config_rec *conf,
     return result;
 }
 
+#define PSLDAP_FILE_MAGIC "<FILE>"
+#define PSLDAP_FILE_MAGIC_SZ  sizeof(psldap_fmagic)
+
+typedef struct psldap_fmagic_struct {
+    char mtype[7];
+    size_t msize;
+} psldap_fmagic;
+
+static int is_psldap_magic_string(const char *magic)
+{
+    return ((NULL != magic) &&
+            (0 == strncmp(magic, PSLDAP_FILE_MAGIC,
+                          strlen(PSLDAP_FILE_MAGIC))));
+}
+
+static char* build_psldap_magic_string(request_rec *r, const char *val,
+                                       size_t len)
+{
+    char *result = ap_pcalloc(r->pool, PSLDAP_FILE_MAGIC_SZ + len);
+    psldap_fmagic *fmresult = (psldap_fmagic*)result;
+    
+    
+    sprintf(fmresult->mtype, "%s", PSLDAP_FILE_MAGIC);
+    fmresult->msize = len;
+    memcpy(result + PSLDAP_FILE_MAGIC_SZ, val, len);
+    ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
+                 " ... built magic string of length %d (%d)",
+                 len + PSLDAP_FILE_MAGIC_SZ, fmresult->msize);
+    return result;
+}
+  
+/** Determines if the passed char array is binary by iterating through the
+ *  characters and checking to see if they are printable.
+ *  @param str
+ *  @param len
+ *  @return 0 if the array is printable, non-zero if the array is not
+ *          printable.
+ **/
+static int isCharArrayBinary(request_rec *r, const char *str, size_t len)
+{
+    int j, result = 0;
+    //result = (str[len - 1] != '\0');
+    for (j = 0; (!result) && (j < (len -1)); j++) {
+        result = (!ap_isprint(str[j]) && !ap_isspace(str[j]) );
+    }
+    if (result && (j==(len-1))) result = (str[j] != '\0');
+    
+    if (result) {
+        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
+                     " unprintable %d of %d char <%d:%c> in str",
+                     j, len, str[j], str[j]);
+    }
+    return result;
+}
+
 /** Iterate through all values and concatenate them into a separator
  *  delimited string. This will not function properly if an attribute has
  *  embedded separator characters.
@@ -1666,15 +1729,42 @@ static char* construct_ldap_base(request_rec *r, psldap_config_rec *conf,
  *  @result allocated string containing all the values in the array values
  *          separated by string separator
  */
-static char * build_string_list(request_rec *r, char * const *values,
+static char * build_string_list(request_rec *r, struct berval * const *values,
                                 const char *separator)
 {
-    register int i;
+    register int i, j;
     char *result = NULL;
+    int useMagic = 0;
+    
+    for(i = 0; (NULL != values[i]) && !useMagic; i++)
+    {
+        useMagic = isCharArrayBinary(r, values[i]->bv_val, values[i]->bv_len);
+    }
+
     for(i = 0; NULL != values[i]; i++)
     {
-        result = (NULL == result) ? ap_pstrdup(r->pool, values[i]) :
-            ap_pstrcat(r->pool, result, separator, values[i], NULL);
+        char *val = values[i]->bv_val;
+        if (!useMagic) {
+            char *valBuffer = ap_pcalloc(r->pool, values[i]->bv_len + 1);
+            memcpy(valBuffer, val, values[i]->bv_len);
+            valBuffer[values[i]->bv_len] = '\0';
+            result = (NULL == result) ? valBuffer :
+              ap_pstrcat(r->pool, result, separator, valBuffer, NULL);
+        } else {
+            /* base64decode the value before passing it to this function */
+            /*
+            size_t length = ap_base64decode_len(val);
+            char *decodedValue = ap_pcalloc(r->pool, length);
+            ap_base64decode_binary(decodedValue, val);
+            val = build_psldap_magic_string(r, decodedValue, length);
+            */
+            val = build_psldap_magic_string(r, val, values[i]->bv_len);
+            if (NULL != result) {
+                result = val;
+            } else {
+                result = val;
+            }
+        }          
     }
     return result;
 }
@@ -1718,7 +1808,7 @@ static char * get_ldvalues_from_record(request_rec *r, psldap_config_rec *conf,
                                        const char *attr, const char *separator)
 {
     LDAPMessage *ld_entry = NULL;
-    char **ld_values = NULL;
+    struct berval **ld_values = NULL;
     char *result = NULL;
 
     if((NULL == record) ||
@@ -1728,7 +1818,7 @@ static char * get_ldvalues_from_record(request_rec *r, psldap_config_rec *conf,
                      "first entry in ldap result not acquired: %d",
                      get_lderrno(ldap) );
     }
-    else if(NULL == (ld_values = ldap_get_values(ldap, ld_entry, attr)))
+    else if(NULL == (ld_values = ldap_get_values_len(ldap, ld_entry, attr)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "get_ldvalues_from_record <%s | %s> failed",
@@ -1737,8 +1827,11 @@ static char * get_ldvalues_from_record(request_rec *r, psldap_config_rec *conf,
     }
     else
     {
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     r->server,
+                     "Building string list for attr %s", attr);
         result = build_string_list(r, ld_values, separator);
-        ldap_value_free(ld_values);
+        ldap_value_free_len(ld_values);
     }
 
     return result;
@@ -1755,7 +1848,7 @@ static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *co
     */
     LDAPMessage *ld_result = NULL, *ld_entry = NULL;
     const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
-    char **ld_values = NULL;
+    struct berval **ld_values = NULL;
     char *result = NULL;
     int  searchscope, err_code;
 
@@ -1777,7 +1870,7 @@ static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *co
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "user <%s> not found", user);
     }
-    else if(!(ld_values = ldap_get_values(ldap, ld_entry, attr)))
+    else if(!(ld_values = ldap_get_values_len(ldap, ld_entry, attr)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_get_values <%s | %d | %s | %s> failed",
@@ -1788,7 +1881,7 @@ static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *co
         result = build_string_list(r, ld_values, separator);
     }
 
-    if (NULL != ld_values) { ldap_value_free(ld_values); }
+    if (NULL != ld_values) { ldap_value_free_len(ld_values); }
     if (NULL != ld_result) { ldap_msgfree(ld_result);    }
 
     return result;
@@ -2061,6 +2154,194 @@ static int translate_handler(request_rec *r)
     return DECLINED;
 }
 
+static size_t get_psldap_file_magic_fragment_size(request_rec *r,
+                                                  const char *magic)
+{
+    size_t result = 0;
+    if (is_psldap_magic_string(magic) ) {
+        psldap_fmagic *fm = (psldap_fmagic*)magic;
+        result = fm->msize;
+        result = PSLDAP_FILE_MAGIC_SZ + result;
+    }
+    return result;
+}    
+
+static size_t get_psldap_file_magic_buffer_size(request_rec *r,
+                                                const char *magic)
+{
+    size_t result = 0;
+    if (is_psldap_magic_string(magic) ) {
+        size_t fragSz = 0;
+        do {
+            if (';' == magic[result]) result++;
+            fragSz = get_psldap_file_magic_fragment_size(r, magic + result);
+            result += fragSz;
+        } while((';' != magic[result]) && ('\0' != magic[result]) &&
+                (0 != fragSz) );
+    }
+    return result;
+}
+
+/** Finds an instance of the needle string literal within the binary data
+ *  in the haystack.
+ **/
+static const char* psldap_findmatch(char *haystack, char *needle, int strawCount)
+{
+    const char *result = haystack;
+    int needleSz = (NULL == needle) ? 0 : strlen(needle);
+    int needlePatternSz = 0;
+    
+    while (needle[++needlePatternSz] == needle[0]);
+    if (0 < needleSz) {
+        while ((NULL != result) &&
+               (0 != memcmp(result, needle, needleSz) ) ) {
+            result += 1;
+            while ((NULL != result) &&
+                   (0 != memcmp(result, needle, needlePatternSz) ) ) {
+                result += needlePatternSz;
+                result = memchr(result, needle[0],
+                                (result - haystack) + strawCount);
+            }
+        }
+    }
+    return result;
+}
+
+static int isLdapField(const char *fieldName)
+{
+    return ((0 != strcmp(FORM_ACTION, fieldName)) );
+     /* &&
+            (0 != strcmp(BINARY_DATA, fieldName)) &&
+            (0 != strcmp(BINARY_TYPE, fieldName)) &&
+            (0 != strcmp(BINARY_REFS, fieldName)) );
+     */
+}
+
+/** Parses the key/value pairs out of a multipart/form-data response from the
+ *  client as passed through the data pointer, which is a raw read of the
+ *  client response. The data string is altered as part of the parse
+ *  operation, which populates the parsed key value pairs into the passed
+ *  table.
+ *  @param r a pointer to the request_rec structure instance for this request
+ *  @param data a reference to a string pointer, the reference and the string
+ *              pointer must be a non-NULL value
+ *  @param tab a reference to the table pointer to be populated with the
+ *             key value pairs parsed from the data string
+ **/
+static int parse_multipart_data(request_rec *r, char **theData, table **tab)
+{
+    /* This routine will NOT handle binary files - strstr will choke.
+       Recommend the use of memcmp / memchr and construction of an algorithm
+       to more efficiently identify the termination of the MIME section.
+       Refer to RFCs 1341, 1521, & 1806 for MIME background */
+    const char *tmp;
+    char *val, *key, *filename;
+    const char *data = *theData;
+    int boundary_len = strlen(r->boundary);
+    int rc = OK;
+
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO,
+                 r->server,
+                 "Form content-type %s read (%d bytes) <experimental>",
+                 r->content_type, r->clength);
+
+    /* return DECLINED; */
+    for (data = strstr(data, r->boundary),
+             tmp = data = strstr(data + boundary_len, "Content-");
+         NULL != data;
+         tmp = ((NULL == data) ? NULL : (data + boundary_len)),
+           data = ((NULL == tmp) ? NULL : strstr(tmp, "\r\n\r\n")) )
+    {
+        size_t val_len = 0;
+        filename = NULL;
+        /* Key is quoted string in name= on the Content-Disposition: line */
+        key = strstr(tmp, "; name=\"") + 8;
+        val = strstr(key, "\"");
+        val[0] = '\0';
+
+        /* Value is string after double crlf */
+        val = strstr(val + 1, "\r\n\r\n") + 4;
+        if (NULL == (data = strstr(val, r->boundary)) ) {
+            data = psldap_findmatch(val, r->boundary,
+                                    r->clength - (val - *theData) );
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server, "... data size of value for key %s = %d",
+                         key, data - val );
+        }
+        /* The length of the value falls 2 chars before the next boundary,
+           account for the CR LF */
+        val_len =  data - val - 4;
+        val[val_len] = '\0';
+
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     r->server, "... parsing key %s - checking for file name",
+                     key);
+        filename = strstr(key + strlen(key) + 1, "filename=\"");
+        if (NULL != filename) {
+            char *quote;
+            filename += 10;
+            quote = strchr(filename, '\"');
+            if((NULL != quote) && (quote != filename)) quote[0] = '\0';
+            else filename = NULL;
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server, "... key %s file name is %s",
+                         key, (NULL != filename) ? filename : "<null>" );
+        } else {
+            int i = 0;
+            /*char *ptr = key + strlen(key) + 1, errBuffer[1024];*/
+            char *ptr = (char*)tmp, errBuffer[1024];
+            memset(errBuffer, '\0', sizeof(errBuffer));
+            while ((i < sizeof(errBuffer)) &&
+                   (ap_isprint(ptr[i]) || ap_iscntrl(ptr[i]) ) ) {
+                errBuffer[i] = ptr[i];
+                i++;
+            }
+            if (i == sizeof(errBuffer)) i--;
+            errBuffer[i] = '\0';
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server, "... key %s file name not found in %s",
+                         key, errBuffer);
+        }
+
+        if ( isLdapField(key) ) {
+            key = ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
+                             ap_getword_nc(r->pool, &key, '-'),
+                             NULL);
+        }
+
+        if (NULL != filename) {
+            val = build_psldap_magic_string(r, val, val_len + 1);
+        }
+
+        if (NULL != (tmp = ap_table_get(*tab, key)) )
+        {
+            if (NULL != filename) {
+                size_t magicSz = get_psldap_file_magic_buffer_size(r, tmp);
+                char *mergedVal = ap_pcalloc(r->pool, val_len + magicSz + 2);
+                memcpy(mergedVal, tmp, magicSz);
+                mergedVal[magicSz] = ';';
+                memcpy(mergedVal + magicSz + 1, val, val_len + 1);
+                ap_table_setn(*tab, key, mergedVal);
+            } else {
+                ap_table_setn(*tab, key,
+                              ap_pstrcat(r->pool, tmp, ";" , val, NULL));
+            }
+        } else {
+            if (!is_psldap_magic_string(val)) {
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                            r->server, "  ...parsed key/value: %s/%s",
+                            key, val);
+            } else {
+                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                             r->server, "  ...parsed key/value: %s/file:%s",
+                             key, filename);
+            }
+            ap_table_addn(*tab, key, val);
+        }
+    }
+    return rc;
+}
+
 /** Parses the key/value pairs out of a query string as passed through the
  *  data pointer. The data string is altered as part of the parse operation,
  *  which populates the parsed key value pairs into the passed table.
@@ -2078,7 +2359,7 @@ static void parse_client_data(request_rec *r, char **data, table **tab)
            (val = ap_getword_nc(r->pool, data, '&')))
     {
         char *vptr = ap_getword_nc(r->pool, &val, '=');
-        if (0 == strcmp(FORM_ACTION, vptr)) key = vptr;
+        if (!isLdapField(vptr) ) key = vptr;
         else key = ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
                               ap_getword_nc(r->pool, &vptr, '-'),
                               NULL);
@@ -2094,9 +2375,7 @@ static void parse_client_data(request_rec *r, char **data, table **tab)
         {
             ap_table_setn(*tab, key,
                           ap_pstrcat(r->pool, tmp, ";" , val, NULL));
-        }
-        else
-        {
+        } else {
             ap_table_add(*tab, key, ap_pstrdup(r->pool,val));
         }
     }
@@ -2111,24 +2390,33 @@ static int util_read(request_rec *r, char **buf)
     }
 
     if (ap_should_client_block(r)) {
-        int rsize, len_read, rpos=0;
-        long length = r->remaining;
+        int rsize, len_read = 0, rpos=0;
+        long length = (r->remaining > r->clength) ? r->remaining : r->clength;
         char *argsbuf = (char*)*buf = ap_pcalloc(r->pool, length + 2);
 
         ap_hard_timeout("util_read", r);
         while ((length > rpos) &&
-               (rpos += ap_get_client_block(r, argsbuf, length - rpos)) > 0)
+               (len_read = ap_get_client_block(r, argsbuf, length - rpos)) > 0)
         {
+            argsbuf[len_read] = '\0';
+            rpos += len_read;
             argsbuf = (char*)*buf + rpos;
             ap_reset_timeout(r);
         }
-        if(rpos <= length) buf[rpos] = '\0';
-        else ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
+        if(rpos > length) {
+            ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
                           "Buffer overflow reading page response %s",
                           r->unparsed_uri);
+        } else {
+            if (r->clength != len_read) r->clength = rpos;
+            rc = OK;
+        }
+        argsbuf[len_read] = '\0';
         ap_kill_timeout(r);
+    } else {
+        *buf = ap_pstrdup(r->pool, "");
+        rc = !OK;
     }
-    else rc = !OK;
     return rc;
 }
 
@@ -2180,15 +2468,17 @@ static int read_post(request_rec *r, table **tab)
     else if (NULL != ap_table_get(*tab, FORM_ACTION)) return rc;
 
     tmp = ap_table_get(r->headers_in, "Content-Type");
-    if (0 == strcasecmp(tmp, "multipart/form-data")) 
+    if (0 != strstr(tmp, "multipart/form-data") ) 
     {
-        /* TODO - implement multipart form handling */
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO, r->server,
-                     "Form content-type %s cannot yet be read", tmp);
-        return DECLINED;
-    }
-    else if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded"))
-    {
+        r->boundary = ap_pstrdup(r->pool, strstr(tmp, "boundary=") + 9);
+        r->content_type = ap_pstrdup(r->pool, "multipart/form-data");
+
+        if ((rc = util_read(r, &data)) != OK) {
+            return rc;
+        }
+        rc = parse_multipart_data(r, &data, tab);
+        return rc;
+    } else if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded")) {
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO, r->server,
                      "Form content-type %s cannot be read", tmp);
         return DECLINED;
@@ -2204,7 +2494,7 @@ static int read_post(request_rec *r, table **tab)
 const char* get_qualified_field_name(request_rec *r, const char *fieldname)
 {
     const char *result = fieldname;
-    if (0 != strcmp(FORM_ACTION, fieldname))
+    if (isLdapField(fieldname))
     {
         result = ap_pstrcat(r->pool, LDAP_KEY_PREFIX, fieldname, NULL);
     }
@@ -2214,6 +2504,30 @@ const char* get_qualified_field_name(request_rec *r, const char *fieldname)
 static const char *cookie_credential_param = "psldapcredentials";
 static const char *cookie_field_label = "PsLDAPField";
 
+/** Remove the previously set auth cookie from the err_headers_out struct
+ *  on the passed requestor instance.
+ *  @param r - the request_rec struct reference from which the 'Set-Cookie'
+ *             entry should be removed from the err_headers_out table 
+ **/
+static void remove_psldap_auth_cookie(request_rec *r)
+{
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "Unsetting auth cookie - removing all Set-Cookie entries "
+                 "from err_headers_out");
+    ap_table_unset(r->err_headers_out, "Set-Cookie");
+}
+
+/** Set the auth cookie into the err_headers_out struct on the passed
+ *  requestor instance.
+ *  @param r - the request_rec struct reference from which the 'Set-Cookie'
+ *             entry should be removed from the err_headers_out table 
+ *  @param sec - the psldap_config_sec reference containing the configuration
+ *               applied to this request
+ *  @param userValue - the string value containing the user name entered by
+ *                     the user
+ *  @param passValue - the string value containing the password entered by
+ *                    the user
+ **/
 static void set_psldap_auth_cookie(request_rec *r, psldap_config_rec *sec,
                                    const char *userValue,
                                    const char *passValue)
@@ -2237,7 +2551,7 @@ static void set_psldap_auth_cookie(request_rec *r, psldap_config_rec *sec,
     ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
 }
 
-static int get_form_fieldvalue(request_rec *r, const char* fieldname,
+static int get_first_form_fieldvalue(request_rec *r, const char* fieldname,
                                char **sent_value)
 {
     int result = 0;
@@ -2315,10 +2629,8 @@ static int get_cookie_fieldvalue(request_rec *r, const char* fieldname,
 
     if(0 == strlen(*sent_value) )
     {
-        result = get_form_fieldvalue(r, fieldname, sent_value);
-    }
-    else
-    {
+        result = get_first_form_fieldvalue(r, fieldname, sent_value);
+    } else {
         *sent_value = ap_pstrdup(r->pool, *sent_value);
         result = 1;
     }
@@ -2333,7 +2645,10 @@ static int get_cookie_fieldvalue(request_rec *r, const char* fieldname,
  * @param sent_value the memory location in which to write the
  *                   resultant string. This value is allocated in the
  *                   pool of r
- * @return 
+ * @return OK if the auth value was acquired, HTTP_UNAUTHORIZED if the auth
+ *         value could not be acquired and psldap was authoritative, or
+ *         DECLINED if the auth value could not be acquired and psldap is
+ *         not authoritative.
  */
 static int get_provided_authvalue(request_rec *r, const char* field,
                                   char **sent_value)
@@ -2363,9 +2678,7 @@ static int get_provided_authvalue(request_rec *r, const char* field,
                 return res;
             }
             return HTTP_UNAUTHORIZED;
-        }
-        else if (0 == strcmp("digest", authType))
-        {
+        } else if (0 == strcmp("digest", authType)) {
             if (fieldKey == sec->psldap_userkey) {
                 *sent_value = ap_pstrdup(r->pool, get_user_name(r) );
                 return OK;
@@ -2374,20 +2687,14 @@ static int get_provided_authvalue(request_rec *r, const char* field,
                 return res;
             }
             return HTTP_UNAUTHORIZED;
-        }
-        else if (0 == strcmp("form", authType))
-        {
-            return get_form_fieldvalue(r, fieldKey, sent_value) ? OK:
+        } else if (0 == strcmp("form", authType)) {
+            return get_first_form_fieldvalue(r, fieldKey, sent_value) ? OK:
                 HTTP_UNAUTHORIZED;
-        }
-        else if (0 == strcmp("cookie", authType))
-        {
+        } else if (0 == strcmp("cookie", authType)) {
             return get_cookie_fieldvalue(r, fieldKey, sent_value) ? OK:
                 HTTP_UNAUTHORIZED;
         }
-    }
-    else
-    {
+    } else {
         table *env = r->subprocess_env;
         *sent_value = ap_pstrdup(r->pool, ap_table_get(env, fieldKey) );
         if (NULL != *sent_value) return OK;
@@ -2460,11 +2767,9 @@ static int cookie_next_uri_cb(void *data, const char *key, const char *value)
                          "Next uri after auth set from referrer %s",
                          cookie_string);
         }
-    }
-    else if ((0 == strcmp("Cookie", key)) &&
-             (0 == strcmp(cookie_next_uri,
-                          ap_getword_nc(r->pool, &cookie_string, '=')) ) )
-    {
+    } else if ((0 == strcmp("Cookie", key)) &&
+               (0 == strcmp(cookie_next_uri,
+                            ap_getword_nc(r->pool, &cookie_string, '=')) ) ) {
         const char *val;
         cookie_string = ap_pbase64decode(r->pool, cookie_string);
         ap_table_setn(r->notes, cookie_next_uri, cookie_string);
@@ -2539,56 +2844,13 @@ static int ldap_redirect_handler(request_rec *r)
     return HTTP_MOVED_TEMPORARILY;
 }
 
-static int auth_form_redirect(request_rec *r, psldap_config_rec *sec,
-                              const char *redirect_uri,
-                              const char *user, const char *password)
-{
-    request_rec *sr;
-    int res = DONE;
-
-    if ((NULL != user) && (NULL != password))
-    {
-        set_psldap_auth_cookie(r, sec, user, password);
-        ap_table_set(r->notes, PSLDAP_REDIRECT_URI, redirect_uri);
-        r->handler = ap_pstrdup(r->pool, "ldap-send-redirect");
-        res = OK;
-    } else {
-        sr = sub_req_lookup_uri(redirect_uri, r, NULL);
-        sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
-        r->content_type = sr->content_type;
-        
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     r->server,
-                     "Executing subrequest %s of type %s", redirect_uri,
-                     sr->content_type);
-        ap_table_do(log_table_values, r, r->headers_in, NULL);
-        
-        ap_soft_timeout("update ldap data", r);
-        ap_send_http_header(r);
-        res = ap_run_sub_req(sr);
-        if (!ap_is_HTTP_SUCCESS(res) && !ap_is_HTTP_SUCCESS(sr->status))  {
-            ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-                         "LDAP update sub request had problems (%d:%d): %s",
-                         res, sr->status, redirect_uri);
-        }
-        res = DONE;
-        ap_destroy_sub_req(sr);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     r->server,
-                     "...subrequest destroyed");
-        ap_kill_timeout(r);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     r->server,
-                     "...request timeout killed");
-    }
-    return res;
-}
-
 static int auth_form_redirect_handler(request_rec *r)
 {
     psldap_config_rec *conf =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
                                                    &psldap_module);
+    /* Remove any previously set cookies for authentication */
+    remove_psldap_auth_cookie(r);
     ap_internal_redirect(conf->psldap_credential_uri, r);
     return OK;
 }
@@ -2617,9 +2879,7 @@ static int ldap_authenticate_user (request_rec *r)
                      r->server,
                      "Failed to acquire credentials for authentication",
                      (NULL == sent_user) ? "" : sent_user);
-    }
-    else
-    {
+    } else {
         const psldap_cache_item *record = NULL;
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
                      r->server,
@@ -2668,7 +2928,7 @@ ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
             (0 < strlen(sec->psldap_credential_uri)) )
         {
             /* We should return the credential page if authtype is cookie,
-               and the credential uri is set */
+               and the credential uri is set and unset the cookie */
             ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
                          r->server,
                          "Credentials don't exist on page request <%s>,"
@@ -2676,10 +2936,6 @@ ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
                          r->uri, authType, sec->psldap_credential_uri);
             r->handler = ap_pstrdup(r->pool, "ldap-auth-form");
             res = OK;
-            /*
-              res = auth_form_redirect(r, sec, sec->psldap_credential_uri,
-                                     NULL, NULL);
-            */
         } else if (sec->psldap_authoritative) {
             ap_log_error (APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                           "LDAP user %s not found or password invalid",
@@ -2774,9 +3030,7 @@ static int ldap_check_auth(request_rec *r)
                 }
                 errstr = ap_pstrcat(r->pool, "user ", user, " <", orig_groups,
                                     "> not in correct group <", t, ">", NULL);
-            }
-            else
-            {
+            } else {
                 errstr = ap_pstrcat(r->pool, "groups for user", user,
                                     " not found in LDAP directory (key ",
                                     (NULL == sec->psldap_groupkey) ? "NULL" :
@@ -2801,17 +3055,46 @@ static int compare_arg_strings(const void *arg1, const void *arg2)
     return strcmp(*((char**)arg1), *((char**)arg2) );
 }
 
+static int compare_arg_magic_binary(const void *arg1, const void *arg2)
+{
+    return memcmp(*((char**)arg1), *((char**)arg2), PSLDAP_FILE_MAGIC_SZ );
+}
+
+/** Parses the value string of concatenated values into an array. If the
+ *  arg string begins with PSLDAP_FILE_MAGIC, then the complete content is
+ *  copied as a single entry into the array_header.
+ **/
 static array_header* parse_arg_string(request_rec *r, const char **arg_string,
                                       const char delimiter)
 {
     array_header *result = ap_make_array(r->pool, 1, sizeof(char*));
     if ((NULL != arg_string) && (NULL != *arg_string)) {
-      while('\0' != (*arg_string)[0])
-      {
-          char **w = ap_push_array(result);
-          *w = ap_getword(r->pool, arg_string, delimiter);
-      }
-      qsort(result->elts, result->nelts, result->elt_size, compare_arg_strings);
+        const char *arg_ptr = *arg_string;
+        if (is_psldap_magic_string(arg_ptr) ) {
+            size_t magicSz = get_psldap_file_magic_buffer_size(r, arg_ptr);
+            size_t fragSz = 0;
+            do {
+                const char **w = ap_push_array(result);
+                if (';' == arg_ptr[0]) {
+                    /*arg_ptr[0] = '\0';*/
+                    arg_ptr += 1;
+                }
+                *w = arg_ptr;
+                fragSz = get_psldap_file_magic_fragment_size(r, arg_ptr);
+                arg_ptr += fragSz;
+            } while((arg_ptr < (*arg_string + magicSz)) &&
+                    (0 != fragSz) );
+            qsort(result->elts, result->nelts, result->elt_size,
+                  compare_arg_magic_binary);
+        } else {
+            while('\0' != (*arg_string)[0])
+            {
+                char **w = ap_push_array(result);
+                *w = ap_getword(r->pool, arg_string, delimiter);
+            }
+            qsort(result->elts, result->nelts, result->elt_size,
+                  compare_arg_strings);
+        }
     }
     return result;
 }
@@ -2821,6 +3104,80 @@ typedef struct {
     array_header *deletions;
     array_header *additions;
 } psldap_txns;
+
+static void* get_ldapmod_value_from_string(request_rec *r, const char *str,
+                                           LDAPMod *modptr)
+{
+    void *result = (void*)str;
+    
+    if ( is_psldap_magic_string(str) ) {
+        struct berval *value = ap_palloc(r->pool, sizeof(struct berval));
+        size_t length = get_psldap_file_magic_fragment_size(r, str);
+        modptr->mod_op |= LDAP_MOD_BVALUES;
+        /* base64encode the val before sending, ldap interface only accepts
+           encoded values */
+        /*
+        value->bv_len = ap_base64encode_len(length);
+        value->bv_val = ap_palloc(r->pool, value->bv_len);
+        ap_base64encode_binary(value->bv_val,
+                               (char*)str + PSLDAP_FILE_MAGIC_SZ,
+                               length);
+        */
+        value->bv_len = length;
+        value->bv_val = (char*)str + PSLDAP_FILE_MAGIC_SZ;
+        result = value;
+    }
+    
+    return result;
+}
+
+static void psldap_txns_add_item_to_results(request_rec *r, array_header *array,
+                                            const char *item, LDAPMod *modptr)
+{
+    char **value = (char**)ap_push_array(array);
+    *value = get_ldapmod_value_from_string(r, item, modptr);
+}
+
+static void psldap_add_values_to_mod(request_rec *r, LDAPMod *modptr, ...)
+{
+    va_list ap;
+    int i = 0, useBvalues = (0 != (modptr->mod_op & LDAP_MOD_BVALUES));
+    array_header *arg = NULL;
+
+    va_start(ap, modptr);
+    for (arg = va_arg(ap, array_header*); NULL != arg;
+         arg = va_arg(ap, array_header*)) {
+        i += arg->nelts;
+    }
+    va_end(ap);
+
+    if(useBvalues) {
+        modptr->mod_bvalues = ap_palloc(r->pool, (i + 1) *
+                                         sizeof(struct berval*));
+    } else {
+        modptr->mod_values = ap_palloc(r->pool, (i + 1) * sizeof(char*));
+    }
+
+    va_start(ap, modptr);
+    for (arg = va_arg(ap, array_header*), i = 0; NULL != arg;
+         arg = va_arg(ap, array_header*) ) {
+        int j;
+        for (j = 0; j < arg->nelts; j++) {
+            if(useBvalues) {
+                modptr->mod_bvalues[i++] = ((struct berval**)(arg->elts))[j];
+            } else {
+                modptr->mod_values[i++] = ((char**)(arg->elts))[j];
+            }
+        }
+    }
+    va_end(ap);
+
+    if(useBvalues) {
+        modptr->mod_bvalues[i] = NULL;
+    } else {
+        modptr->mod_values[i] = NULL;
+    }
+}
 
 static LDAPMod* get_transactions(request_rec *r, const char* attr,
                                  array_header *old_v, array_header *new_v)
@@ -2834,31 +3191,46 @@ static LDAPMod* get_transactions(request_rec *r, const char* attr,
     result->deletions = ap_make_array(r->pool, 1, sizeof(char*));
     result->additions = ap_make_array(r->pool, 1, sizeof(char*));
 
+    /* Initialize this to something - add is 0x0000 */
+    mresult->mod_op = LDAP_MOD_ADD;
+
     ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
                  "Finding differences of attr: %s", attr);
     while (((NULL != old_v) && (i < old_v->nelts)) || (j < new_v->nelts)) {
         char **value;
         if (j >= new_v->nelts) {
-            value = (char**)ap_push_array(result->deletions);
-            *value = ((char**)(old_v->elts))[i++];
+            psldap_txns_add_item_to_results(r, result->deletions,
+                                            ((char**)(old_v->elts))[i++],
+                                            mresult);
         } else if ((old_v_has_values) && (i >= old_v->nelts)) {
-            value = (char**)ap_push_array(result->additions);
-            *value = ((char**)(new_v->elts))[j++];
+            psldap_txns_add_item_to_results(r, result->additions,
+                                            ((char**)(new_v->elts))[j++],
+                                            mresult);
         } else {
             int compare = 1;
             if (old_v_has_values) {
-                compare = strcmp(((char**)(old_v->elts))[i],
-                                 ((char**)(new_v->elts))[j]);
+                if (is_psldap_magic_string(((char**)(old_v->elts))[i]) ||
+                    is_psldap_magic_string(((char**)(new_v->elts))[j]) ) {
+                    compare = memcmp(((char**)(old_v->elts))[i],
+                                     ((char**)(new_v->elts))[j],
+                                     PSLDAP_FILE_MAGIC_SZ);
+                } else {
+                    compare = strcmp(((char**)(old_v->elts))[i],
+                                     ((char**)(new_v->elts))[j]);
+                }
             }
             if (compare < 0) {
-                value = (char**)ap_push_array(result->deletions);
-                *value = ((char**)(old_v->elts))[i++];
+                psldap_txns_add_item_to_results(r, result->deletions,
+                                                ((char**)(old_v->elts))[i++],
+                                                mresult);
             } else if (compare > 0) {
-                value = (char**)ap_push_array(result->additions);
-                *value = ((char**)(new_v->elts))[j++];
+                psldap_txns_add_item_to_results(r, result->additions,
+                                                ((char**)(new_v->elts))[j++],
+                                                mresult);
             } else {
-                value = (char**)ap_push_array(result->keepers);
-                *value = ((char**)(old_v->elts))[i++];
+                psldap_txns_add_item_to_results(r, result->keepers,
+                                                ((char**)(old_v->elts))[i++],
+                                                mresult);
                 j++;
             }
         }
@@ -2872,32 +3244,19 @@ static LDAPMod* get_transactions(request_rec *r, const char* attr,
     if ((result->keepers->nelts == 0) && (result->deletions->nelts == 0) &&
         (result->additions->nelts > 0) ) {
         /* Adding new attributes */
-        mresult->mod_op = LDAP_MOD_ADD;
-        i = result->additions->nelts;
-        mresult->mod_values = ap_palloc(r->pool, (i + 1) * sizeof(char*));
-        for (i = 0; i < result->additions->nelts; i++) {
-            mresult->mod_values[i] = ((char**)(result->additions->elts))[i];
-        }
-        mresult->mod_values[i] = NULL;
-    } else if ((result->additions->nelts == 0) && (result->keepers->nelts == 0) &&
+        mresult->mod_op |= LDAP_MOD_ADD;
+        psldap_add_values_to_mod(r, mresult, result->additions, NULL);
+    } else if ((result->additions->nelts == 0) &&
+               (result->keepers->nelts == 0) &&
                (result->deletions->nelts > 0) ) {
         /* Deleting the attribute content or replacing */
         mresult->mod_op = LDAP_MOD_DELETE;
-        /* NULL terminated array of char*s */
         mresult->mod_values = NULL;
     } else if ((result->additions->nelts > 0) ||
                ((result->keepers->nelts > 0) && (result->deletions->nelts > 0)) ) {
-        mresult->mod_op = LDAP_MOD_REPLACE;
-        i = result->additions->nelts + result->keepers->nelts;
-        mresult->mod_values = ap_palloc(r->pool, (i + 1) * sizeof(char*));
-        /* NULL terminated array of char*s */
-        for (i = 0; i < result->additions->nelts; i++) {
-            mresult->mod_values[i] = ((char**)(result->additions->elts))[i];
-        }
-        for (j = 0; j < result->keepers->nelts; j++) {
-            mresult->mod_values[i++] = ((char**)(result->keepers->elts))[j];
-        }
-        mresult->mod_values[i] = NULL;
+        mresult->mod_op |= LDAP_MOD_REPLACE;
+        psldap_add_values_to_mod(r, mresult, result->keepers, result->additions,
+                                 NULL);
     } else {
         mresult = NULL;
     }
@@ -2995,59 +3354,114 @@ static void write_dsml_response_fragment(request_rec *r, const char *rt,
  *  a complete DSML searchResult node.
  *
  *  @param r request record from which to preform pool related operations
- *  @param ldResult the LDAPMessage instance received from the server containing the
- *         data in response to a search query.
- *
+ *  @param ldResult the LDAPMessage instance received from the server containing
+ *         the data in response to a search query.
+ *  @param mimeType is a character string indicating the expected mime type of
+ *         the response. Any value other than NULL causes only the content of the
+ *         first entry to be printed to the client (future implementation)
  *  @result allocated string containing all the values in the array values
  *          separated by string separator
  */
-static void write_dsml_search_response(request_rec *r, LDAP *ld, LDAPMessage *ldResult)
+static void write_dsml_search_response(request_rec *r, LDAP *ld,
+                                       LDAPMessage *ldResult,
+                                       const char *mimeType,
+                                       int binaryAsHref)
 {
     register LDAPMessage *ldEntry = NULL;
-    char *attr, *dn, **values, *tmp;
+    char *attr, *dn, *tmp;
+    struct berval **values;
     BerElement *ber;
-    int i;
+    int i, bytesWritten = 0;
 
-    ap_rputs("\t\t<searchResponse>\n", r);
-    write_dsml_response_fragment(r, "searchResultDone", LDAP_SUCCESS);
+    if (NULL == mimeType) {
+        ap_rputs("\t\t<searchResponse>\n", r);
+        write_dsml_response_fragment(r, "searchResultDone", LDAP_SUCCESS);
+    }
 
     for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
         ldEntry = ldap_next_entry(ld, ldEntry))
     {
         if (LDAP_RES_SEARCH_ENTRY == ldap_msgtype(ldEntry)) {
             dn = ldap_get_dn(ld, ldEntry);
-            ap_rvputs(r, "\t\t\t<searchResultEntry dn=\"",
-                      ap_escape_html(r->pool, dn), "\">\n", NULL);
+            if (NULL == mimeType) {
+                ap_rvputs(r, "\t\t\t<searchResultEntry dn=\"",
+                          ap_escape_html(r->pool, dn), "\">\n", NULL);
+            }
             for (tmp = ldap_first_attribute(ld, ldEntry, &ber); NULL != tmp;
                  tmp = ldap_next_attribute(ld, ldEntry, ber)) {
                 /* NOTE - use ldap_get_values_len for binary data - assumed ascii */
                 attr = ap_pstrdup(r->pool, tmp);
                 ldap_memfree(tmp);
-                values = ldap_get_values(ld, ldEntry, attr);
+                values = ldap_get_values_len(ld, ldEntry, attr);
                 if ((NULL != values) &&
-                    (0 < (i = ldap_count_values(values))) ) {
-                    ap_rvputs(r, "\t\t\t\t<attr name=\"", attr, "\">\n", NULL);
-                    while (i > 0) {
-                        i--;
-                        ap_rvputs(r, "\t\t\t\t\t<value>",
-                                  ap_escape_html(r->pool,
-                                                 strip_lt_whitespace(values[i]) ),
-                                  "</value>\n", NULL);
+                    (0 <= (i = ldap_count_values_len(values) - 1)) ) {
+                    if (NULL == mimeType) {
+                        ap_rvputs(r, "\t\t\t\t<attr name=\"", attr, "\">\n",
+                                  NULL);
                     }
-                    ap_rputs("\t\t\t\t</attr>\n", r);
-                    ldap_value_free(values);
+                    while (i >= 0) {
+                        char *sendValue = values[i]->bv_val;
+                        int useMagic = isCharArrayBinary(r, values[i]->bv_val,
+                                                         values[i]->bv_len);
+                        if (!useMagic) {
+                            char *encVal = ap_palloc(r->pool,
+                                                     values[i]->bv_len + 1);
+                            strncpy(encVal, values[i]->bv_val, 
+                                    values[i]->bv_len);
+                            encVal[values[i]->bv_len] = '\0';
+                            sendValue = ap_escape_html(r->pool,
+                                               strip_lt_whitespace(encVal));
+                        } else if (NULL != mimeType) {
+                            if (0 == bytesWritten) {
+                                ap_kill_timeout(r);
+                                bytesWritten = ap_send_mmap(values[i]->bv_val, r,
+                                                          0, values[i]->bv_len);
+                            }
+                        } else if (binaryAsHref) {
+                            /* TODO - compose URL to acquire binary file. How
+                               do we determine the appropriate type ??? */
+                            sendValue = ap_pstrcat(r->pool, "<![CDATA[",
+                               r->uri,
+                               "?FormAction=Search",
+                               "&search=", ap_escape_uri(r->pool, "(objectClass=*)"),
+                               "&dn=", ap_escape_uri(r->pool, dn),
+                               "&", BINARY_DATA, "=", attr,
+                               "&", BINARY_TYPE, "=", ap_escape_uri(r->pool, "image/jpeg"),
+                               "]]>",
+                               NULL);
+                        } else {
+                            int j = ap_base64encode_len(values[i]->bv_len);
+                            char *encVal = ap_palloc(r->pool, j);
+                            ap_base64encode_binary(encVal, sendValue,
+                                                   values[i]->bv_len);
+                            sendValue = encVal;
+                        }
+                        i--;
+                        if (NULL == mimeType) {
+                            ap_rvputs(r, "\t\t\t\t\t<value>", sendValue,
+                                      "</value>\n", NULL);
+                        }
+                    }
+                    if (NULL == mimeType) {
+                        ap_rputs("\t\t\t\t</attr>\n", r);
+                    }
+                    ldap_value_free_len(values);
                 }
             }
             ldap_memfree(dn);
             if (NULL != ber) ber_free(ber, 0);
-            ap_rputs("\t\t\t</searchResultEntry>\n", r);
+            if (NULL == mimeType) {
+                ap_rputs("\t\t\t</searchResultEntry>\n", r);
+            }
         } else {
             ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                          "Cannot read msg type building dsml results: %x",
                          ldap_msgtype(ldEntry) );
         }
     }
-    ap_rputs("\t\t</searchResponse>\n", r);
+    if (NULL == mimeType) {
+        ap_rputs("\t\t</searchResponse>\n", r);
+    }
 }
 
 /** This writes the DSML search response directly to the client. This response is not
@@ -3056,13 +3470,20 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld, LDAPMessage *ld
  *  @param r request_rec pointer
  *  @param conf psldap configuration instance
  *  @param ldap LDAP pointer
+ *  @param ps psldap_status pointer
  *  @param ldap_base string representation of the base of the query
  *  @param ldap_query string representation of the query filter
- *  @param attr the attribute to acquire from the server. See the man page on ldap_search_s
+ *  @param attr the attribute to acquire from the server. See the man page on
+ *         ldap_search_s
+ *  @param mimeType is a character string indicating the expected mime type of
+ *         the response. Any value other than NULL causes only the content of the
+ *         first entry to be printed to the client (future implementation)
  **/
 static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
-                                        LDAP *ldap, char *ldap_base, char *ldap_query,
-                                        const char *attr)
+                                        LDAP *ldap, psldap_status *ps,
+                                        char *ldap_base, char *ldap_query,
+                                        const char *attr, const char* mimeType,
+                                        int binaryAsHref)
 {
     LDAPMessage *ld_result = NULL, *ld_entry = NULL;
     const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
@@ -3079,20 +3500,20 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
-        ap_rputs("\t\t<searchResponse>\n", r);
-        write_dsml_response_fragment(r, "searchResultDone", err_code);
-        ap_rputs("\t\t</searchResponse>\n", r);
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_search failed: %s", ldap_err2string(err_code));
-    }
-    else
-    {
+        if (NULL == mimeType) {
+            ap_rputs("\t\t<searchResponse>\n", r);
+            write_dsml_response_fragment(r, "searchResultDone", err_code);
+            ap_rputs("\t\t</searchResponse>\n", r);
+            ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
+                         "ldap_search failed: %s", ldap_err2string(err_code));
+        }
+    } else {
         ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
                      "...ldap_search successfully executed with base / scope / pattern: "
                      "%s / %d / %s\n"
                      "Generating and sending DSML response to ldap search request...",
                      ldap_base, conf->psldap_searchscope, ldap_query);
-        write_dsml_search_response(r, ldap, ld_result);
+        write_dsml_search_response(r, ldap, ld_result, mimeType, binaryAsHref);
         ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
                       "...DSML search response sent");
     }
@@ -3111,10 +3532,50 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
     char *user = NULL;
     char *ldap_base = NULL;
     char *ldap_query = ps->searchPattern;
+    char *ldap_field = ps->fieldName;
+    char *response_type = ps->responseType;
     char *xslUri1 = ps->xslPrimaryUri;
     char *xslUri2 = ps->xslSecondaryUri;
+    int binaryHRef = ps->binaryAsHref;
 
-    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    if (NULL == key) {
+        if (NULL != val) strncpy((char*)val, "queryResponse", 15);
+        if ((NULL != ldap_query) &&
+            ( ((NULL != xslUri1) && (NULL != xslUri2) && (NULL != ps->mod_dn))
+              ||
+              (NULL != ps->responseType)
+              )
+            )
+        {
+            /* Use ldap_modify_s here to directly modify the entries. Possibly
+               add the LDAPMod to an array passed in the data. */
+            ldap_base = (NULL != ps->mod_dn) ? ps->mod_dn :
+                construct_ldap_base(r, conf, conf->psldap_basedn);
+            get_provided_username(r, &user);
+            if (NULL == ps->responseType) {
+                ap_rvputs(r,
+                          "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"",
+                          xslUri1,
+                          "\"?>\n",
+                          "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"",
+                          xslUri2,
+                          "\"?>\n",
+                          "<dsml>\n",
+                          " <batchResponse>\n",
+                          NULL);
+            }
+            write_dsml_sr_to_connection(r, conf, ldap, ps, ldap_base, ldap_query,
+                                        ps->fieldName, ps->responseType, 
+                                        ps->binaryAsHref);
+            if (NULL == ps->responseType) {
+                ap_rvputs(r,
+                          " </batchResponse>\n",
+                          "</dsml>",
+                          NULL);
+            }
+        }
+    }
+    else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
     {
         if(0 == strcmp("search", key + LDAP_KEY_PREFIX_LEN))
         {
@@ -3136,40 +3597,23 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
             ps->mod_dn = ap_pstrdup(r->pool, val);
             ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
                           "LDAP query record dn set to %s",
-                          xslUri2);
+                          ps->mod_dn);
+        } else if (0 == strcmp(BINARY_DATA, key + LDAP_KEY_PREFIX_LEN)) {
+            ldap_field = ps->fieldName = ap_pstrdup(r->pool, val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP query field set to %s", ldap_field);
+        } else if (0 == strcmp(BINARY_TYPE, key + LDAP_KEY_PREFIX_LEN)) {
+            response_type = ps->responseType = ap_pstrdup(r->pool, val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP response type set to %s",response_type);
+        } else if (0 == strcmp(BINARY_REFS, key + LDAP_KEY_PREFIX_LEN)) {
+            binaryHRef = ps->binaryAsHref = strcasecmp("off", val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP BinaryHRef set to %d", binaryHRef);
         } else {
             ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
                           "Form field %s not processed to perform ldap query",
                           key);
-        }
-    }
-    if ((NULL != ldap_query) && (NULL != xslUri1) && (NULL != xslUri2) &&
-        (NULL != ps->mod_dn) )
-    {
-        /* Use ldap_modify_s here to directly modify the entries. Possibly add
-           the LDAPMod to an array passed in the data. */
-        ldap_base = (NULL != ps->mod_dn) ? ps->mod_dn : construct_ldap_base(r, conf, conf->psldap_basedn);
-        get_provided_username(r, &user);
-        ap_rvputs(r,
-                  "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"",
-                  xslUri1,
-                  "\"?>\n",
-                  "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"",
-                  xslUri2,
-                  "\"?>\n",
-                  "<dsml>\n",
-                  " <batchResponse>\n",
-                  NULL);
-        write_dsml_sr_to_connection(r, conf, ldap, ldap_base, ldap_query, NULL);
-        ap_rvputs(r,
-                  " </batchResponse>\n",
-                  "</dsml>",
-                  NULL);
-        /* Reset the fields to prevent repeated writes to the browser */
-        {
-            ps->searchPattern = NULL;
-            ps->xslPrimaryUri = NULL;
-            ps->xslSecondaryUri = NULL;
         }
     }
     return TRUE;
@@ -3177,10 +3621,10 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
 
 static void rprintf_LDAPMod_instance(request_rec *r, LDAPMod *mod)
 {
-    int i;
+    int i = mod->mod_op ^ LDAP_MOD_BVALUES;
     const char *op_name;
 
-    switch(mod->mod_op)
+    switch(i)
     {
     case LDAP_MOD_REPLACE:
         op_name = "LDAP_MOD_REPLACE";
@@ -3195,15 +3639,46 @@ static void rprintf_LDAPMod_instance(request_rec *r, LDAPMod *mod)
         op_name = "Unknown Operation";
     }
 
-    ap_rprintf(r, "%s: Attr = %s: ", op_name,
+    ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                  ".. writing %s response to client on mod_op %d",
+                  (NULL != mod->mod_type) ? mod->mod_type : "",
+                  mod->mod_op);
+    ap_rprintf(r, "%s (%d): Attr = %s: ", op_name, mod->mod_op,
                (NULL != mod->mod_type) ? mod->mod_type : "");
-    if (NULL != mod->mod_values) {
+    if (0 != (mod->mod_op & LDAP_MOD_BVALUES)) {
+        if (NULL != mod->mod_bvalues) {
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          ".. writing binary values of %s response to client",
+                          (NULL != mod->mod_type) ? mod->mod_type : "");
+            for (i = 0; NULL != mod->mod_bvalues[i]; i++) {
+                ap_rprintf(r, " binary (%d) bytes: %d%s",
+                           i, mod->mod_bvalues[i]->bv_len,
+                           (NULL != mod->mod_bvalues[i+1]) ? "; " : "");
+            }
+        }
+    } else if (NULL != mod->mod_values) {
+        ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                      ".. writing char values of %s response to client",
+                      (NULL != mod->mod_type) ? mod->mod_type : "");
         for (i = 0; NULL != mod->mod_values[i]; i++) {
             ap_rprintf(r, "%s%s",
                        mod->mod_values[i],
                        (NULL != mod->mod_values[i+1]) ? "; " : "");
         }
     }
+}
+
+static const char* duplicate_value_data(request_rec *r, const char *value)
+{
+    char *result = NULL;
+    if (is_psldap_magic_string(value)) {
+        size_t newSz = get_psldap_file_magic_buffer_size(r, value);
+        result = ap_pcalloc(r->pool, newSz);
+        memcpy(result, value, newSz);
+    } else {
+        result = ap_pstrdup(r->pool, value);
+    }
+    return result;
 }
 
 static int add_record_in_ldap(void *data, const char *key, const char *val)
@@ -3213,14 +3688,20 @@ static int add_record_in_ldap(void *data, const char *key, const char *val)
     LDAP *ldap = ps->ldap;
     psldap_config_rec *conf = ps->conf;
 
-    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    if (NULL == key) {
+        if (NULL != val) strncpy((char*)val, "addResponse", 15);
+        if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
+            ps->mod_err = ldap_add_s(ps->ldap, ps->mod_dn, ps->mods);
+        }
+    }
+    else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
     {
         if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
         {
             /* The dn cannot be modified */
             ps->mod_dn = ap_pstrdup(r->pool, val);
         } else {
-            const char *value = ap_pstrdup(r->pool, val);
+            const char *value = duplicate_value_data(r, val);
             array_header *new_v = parse_arg_string(r, &value, ';');
             LDAPMod **mods_coll;
             LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
@@ -3237,6 +3718,25 @@ static int add_record_in_ldap(void *data, const char *key, const char *val)
 
 static int delete_record_in_ldap(void *data, const char *key, const char *val)
 {
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    LDAP *ldap = ps->ldap;
+    psldap_config_rec *conf = ps->conf;
+
+    if (NULL == key) {
+        if (NULL != val) strncpy((char*)val, "delResponse", 15);
+        if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
+            ps->mod_err = ldap_delete_s(ps->ldap, ps->mod_dn);
+        }
+    }
+    else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    {
+        if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
+        {
+            /* The dn cannot be modified */
+            ps->mod_dn = ap_pstrdup(r->pool, val);
+        }
+    }
     return TRUE;
 }
 
@@ -3255,37 +3755,53 @@ static int update_record_in_ldap(void *data, const char *key,
     const char *oldValue = NULL;
     char *user;
 
-    get_provided_username(r, &user);
-    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
-    {
-        char *ldap_query = NULL, *ldap_base = NULL;
-        
-        if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
-        {
-            /* The dn cannot be modified */
-            ps->mod_dn = ap_pstrdup(r->pool, val);
-            ps->mod_record = get_ldrecords(r, conf, ldap, ps->mod_dn,
-                                          user, LDAP_SCOPE_BASE);
-            ps->mod_err = get_lderrno(ldap) ;
-            oldValue = ps->mod_dn;
-        } else {
-            oldValue = get_ldvalues_from_record(r, conf, ldap,
-                                                ps->mod_record,
-                                                key + LDAP_KEY_PREFIX_LEN,
-                                                ";");
+    if (NULL == key) {
+        if (NULL != val) strncpy((char*)val, "modifyResponse", 15);
+        if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
+            int i;
+            for (i = 0; NULL != ps->mods[i]; i++) {
+                rprintf_LDAPMod_instance(ps->rr, ps->mods[i]);
+                ap_rprintf(ps->rr, " <br />\n");
+            }
+            ps->mod_err = ldap_modify_s(ps->ldap, ps->mod_dn, ps->mods);
         }
     }
-
-    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    else
     {
-        const char *value = ap_pstrdup(r->pool, val);
-        array_header *new_v = parse_arg_string(r, &value, ';');
-        array_header *old_v = parse_arg_string(r, &oldValue, ';');
-        LDAPMod **mods_coll;
-        LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
-                                            old_v, new_v);
-        if (NULL != tmp_mod) {
-            psldap_status_append_mod(ps, r, tmp_mod);
+        if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+        {
+            char *ldap_query = NULL, *ldap_base = NULL;
+            
+            get_provided_username(r, &user);
+            if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
+            {
+                /* The dn cannot be modified */
+                ps->mod_dn = ap_pstrdup(r->pool, val);
+                ps->mod_record = get_ldrecords(r, conf, ldap, ps->mod_dn,
+                                               user, LDAP_SCOPE_BASE);
+                ps->mod_err = get_lderrno(ldap) ;
+                oldValue = ps->mod_dn;
+            } else {
+                oldValue = get_ldvalues_from_record(r, conf, ldap,
+                                                    ps->mod_record,
+                                                    key + LDAP_KEY_PREFIX_LEN,
+                                                    ";");
+            }
+
+            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                         r->server,
+                         "Finding transactions for key %s", key);
+            {
+                const char *value = duplicate_value_data(r, val);
+                array_header *new_v = parse_arg_string(r, &value, ';');
+                array_header *old_v = parse_arg_string(r, &oldValue, ';');
+                LDAPMod **mods_coll;
+                LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
+                                                    old_v, new_v);
+                if (NULL != tmp_mod) {
+                    psldap_status_append_mod(ps, r, tmp_mod);
+                }
+            }
         }
     }
     return TRUE;
@@ -3293,14 +3809,14 @@ static int update_record_in_ldap(void *data, const char *key,
 
 static int (*get_action_handler(request_rec *r, const char **action))(void*, const char *,const char *)
 {
-    get_form_fieldvalue(r, FORM_ACTION, (char**)action);
+    get_first_form_fieldvalue(r, FORM_ACTION, (char**)action);
     if (NULL == *action)
     {
         // Assume this is a read request
         return get_dn_attributes_from_ldap;
     }
-    else
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
+    else ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                      r->server,
                      "Getting handler for action %s", *action);
 
     if (0 == strcmp(LOGIN_ACTION, *action))
@@ -3341,7 +3857,9 @@ static void write_dsml_err_response(request_rec *r, psldap_status *ps,
               (NULL != ps->xslSecondaryUri) ? ps->xslSecondaryUri : "",
               "\"?>\n",
               "<dsml>\n",
-              " <batchResponse>\n",
+              " <batchResponse id='",
+              (NULL != ps->mod_dn) ? ps->mod_dn : "NULL_DN",
+              "'>\n",
               NULL);
     write_dsml_response_fragment(r, opName, ps->mod_err);
     ap_rvputs(r,
@@ -3377,27 +3895,22 @@ static int ldap_update_handler(request_rec *r)
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                      "User <%s> ldap update rejected - missing auth info",
                      (NULL == user) ? "null" : user);
-    }
-    else if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT)))
-    { 
+    } else if(NULL == (ldap = ldap_init(conf->psldap_hosts, LDAP_PORT))) { 
         ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
                      "ldap_init failed on ldap update <%s>",
                      conf->psldap_hosts);
         res = HTTP_INTERNAL_SERVER_ERROR;
-    }
-    else if((NULL != (bindas = get_user_dn(r, &ldap, user, password, conf))) &&
-            (LDAP_SUCCESS !=
-             (err_code = ldap_bind_s(ldap, bindas, password,
-                                     conf->psldap_bindmethod) ) )
-            )
-    {
+    } else if((NULL != (bindas =
+                        get_user_dn(r, &ldap, user, password, conf))) &&
+              (LDAP_SUCCESS !=
+               (err_code = ldap_bind_s(ldap, bindas, password,
+                                       conf->psldap_bindmethod) ) )
+        ) {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_bind as user <%s> failed on ldap update: %s",
                      bindas, ldap_err2string(err_code));
         res = HTTP_INTERNAL_SERVER_ERROR;
-    }
-    else
-    {
+    } else {
         const char *action = NULL;
         int (*actionHandler)(void *data, const char *key,
                              const char *val);
@@ -3409,65 +3922,65 @@ static int ldap_update_handler(request_rec *r)
             set_psldap_auth_cookie(r, conf, user, password);
             ap_table_set(r->notes, PSLDAP_REDIRECT_URI, post_login_uri);
             res = ldap_redirect_handler(r);
-        }
-        else
-        {
+        } else {
             int sendXml = (get_dn_attributes_from_ldap == actionHandler);
-            r->content_type = (sendXml) ? "text/xml" : "text/html";
-
-            ap_soft_timeout("update ldap data", r);
-            ap_send_http_header(r);
-            ap_rputs((sendXml) ? "<?xml version=\"1.0\"?>\n" : "<body>\n", r);
 
             if (NULL != t_env)
             {
                 int err_code = LDAP_SUCCESS;
-                const char *opName = "errorResponse";
+                const char opName[16] = "errorResponse";
                 /* Add ldap connection pointer to the request and process
                    the table entries corresponding to the ldap attributes
                 */
                 psldap_status ps;
                 psldap_status_init(&ps, r, ldap, conf);
 
+                /*  Collect all supporting values from the request into the
+                    psldap_status struct */
                 ap_table_do(actionHandler, (void*)&ps, t_env, NULL);
+                ps.mod_err = get_lderrno(ps.ldap);
+
+                /* Setup the HTTP response ...*/
+                if (ps.responseType != NULL) {
+                    r->content_type = ps.responseType;
+                    sendXml = 0;
+                } else {
+                    r->content_type = (sendXml) ? "text/xml" : "text/html";
+                }
+                ap_soft_timeout("update ldap data", r);
+                ap_send_http_header(r);
+                if (NULL == ps.responseType) {
+                    ap_rputs((sendXml) ? "<?xml version=\"1.0\"?>\n" :
+                             "<body>\n", r);
+                }
+
+                /* Handle the request, fill the opName */
+                actionHandler(&ps, NULL, opName);
+
                 if (NULL != ps.mod_record) {
                     ldap_msgfree(ps.mod_record);
                     ps.mod_record = NULL;
                 }
 
-                ps.mod_err = get_lderrno(ps.ldap);
-                if ((NULL != ps.mod_dn) && (LDAP_SUCCESS == ps.mod_err)) {
-                    if (delete_record_in_ldap == actionHandler) {
-                        ps.mod_err = ldap_delete_s(ps.ldap, ps.mod_dn);
-                        opName = "delResponse";
-                    } else if (NULL != ps.mods[0]) {
-                        if (update_record_in_ldap == actionHandler) {
-                            int i;
-                            for (i = 0; NULL != ps.mods[i]; i++) {
-                                rprintf_LDAPMod_instance(r, ps.mods[i]);
-                                ap_rprintf(r, " <br />\n");
-                            }
-                            ps.mod_err = ldap_modify_s(ps.ldap, ps.mod_dn, ps.mods);
-                            opName = "modifyResponse";
-                        } else if (add_record_in_ldap == actionHandler) {
-                            ps.mod_err = ldap_add_s(ps.ldap, ps.mod_dn, ps.mods);
-                            opName = "addResponse";
-                        }
+                if (NULL == ps.responseType){
+                    if (!sendXml) {
+                        ap_rputs("<xml id='errResponse'>\n", r);
+                    }
+                    if (get_dn_attributes_from_ldap != actionHandler) {
+                        write_dsml_err_response(r, &ps, opName);
+                    }
+                    if (!sendXml) {
+                        ap_rputs("</xml>\n</body>", r);
                     }
                 }
-                if (!sendXml) {
-                    ap_rputs("<xml id='errResponse'>\n", r);
-                }
-                if (get_dn_attributes_from_ldap != actionHandler) {
-                    write_dsml_err_response(r, &ps, opName);
-                }
-                if (!sendXml) {
-                    ap_rputs("</xml>\n", r);
-                }
+            } else {
+                /* Setup the HTTP response ...*/
+                r->content_type = "text/html";
+                ap_soft_timeout("update ldap data", r);
+                ap_send_http_header(r);
+                ap_rputs("<body>\n</body>", r);
             }
-            if (!sendXml) {
-                ap_rputs("</body>", r);
-            }
+
             ap_kill_timeout(r);
 
             res = OK;

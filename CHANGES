@@ -1,3 +1,19 @@
+0.71:
+Addition of cookie based authentication against LDAP server using forms to 
+collect the authentication data.
+
+Made form data accessible to all subrequests by adding it to the subprocess_env
+table immediately after acquisition.
+
+Addition of ability to recurse up request_rec chain to acquire authentication
+data
+
+Created mechanism to identify pending changes to current record when ldap
+records are updated through forms (experimental - not exposed).
+
+0.70:
+Initial work started on the processing of LDAP requests within the module
+
 0.63:
 Addition of LDAP group authentication through the addition of the following
 configuration parameters: PsLDAPUseLDAPGroups, PsLDAPUserGroupAttr,

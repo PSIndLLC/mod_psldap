@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.76"
+#define PSLDAP_VERSION_LABEL "0.77"
 
 #include "httpd.h"
 #include "http_conf_globals.h"
@@ -31,6 +31,7 @@
 #include "http_request.h"
 #include "ap_compat.h"
 #include "ap_mm.h"
+#include "ap_config.h"
 
 #if 0
 /* Semaphores will not work on Linux, process sharing semaphores are not
@@ -86,6 +87,7 @@
 
 #define FORM_ACTION		"FormAction"
 #define LOGIN_ACTION	"Login"
+#define SEARCH_ACTION	"Search"
 #define MODIFY_ACTION	"Modify"
 #define CREATE_ACTION	"Create"
 #define DISABLE_ACTION	"Disable"
@@ -935,7 +937,32 @@ typedef struct
     request_rec *rr;
     LDAP *ldap;
     psldap_config_rec *conf;
+    char *mod_dn;
+    int mod_count;
+    LDAPMod **mods;
+    char *searchPattern;
+    char *xslPrimaryUri;
+    char *xslSecondaryUri;
 } psldap_status;
+
+static void psldap_status_append_mod(psldap_status *ps, request_rec *r,
+                                     LDAPMod *newMod)
+{
+    LDAPMod **mods_coll;
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "Appending LDAPMod instance for attr: %s",
+                 newMod->mod_type);
+    ps->mod_count++;
+    mods_coll = ap_palloc(r->pool, ps->mod_count * sizeof(LDAPMod*));
+    memcpy(mods_coll, ps->mods, (ps->mod_count - 2) * sizeof(LDAPMod*));
+    mods_coll[ps->mod_count-2] = newMod;
+    mods_coll[ps->mod_count-1] = NULL;
+    ps->mods = mods_coll;
+    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "... LDAPMod instance for attr: %s  appended to collection",
+                 newMod->mod_type);
+}
 
 static int compare_key(const void *a_item1, const void *a_item2)
 {
@@ -1534,10 +1561,10 @@ static char * build_string_list(request_rec *r, char * const *values,
     return result;
 }
 
-static char * get_ldvalues_from_connection(
-                                           request_rec *r, psldap_config_rec *conf, LDAP *ldap,
+static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *conf, LDAP *ldap,
                                            char *ldap_base, char *ldap_query, const char *user,
-                                           const char *attr, const char *separator)
+                                           const char *attr, const char *separator,
+                                           int scopeOverride)
 {
     /* Set the attribute list to return to include only the requested value.
        This is done to avoid false errors caused when querying more secure
@@ -1547,16 +1574,20 @@ static char * get_ldvalues_from_connection(
     const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
     char **ld_values = NULL;
     char *result = NULL;
-    int  err_code;
+    int  searchscope, err_code;
 
     ldap_attrs[0] = attr;
+    searchscope = (INT_UNSET != scopeOverride) ? scopeOverride : 
+        conf->psldap_searchscope;
     if(LDAP_SUCCESS !=
-       (err_code = ldap_search_s(ldap, ldap_base, conf->psldap_searchscope,
+       (err_code = ldap_search_s(ldap, ldap_base, searchscope,
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_search failed: %s", ldap_err2string(err_code));
+                     "ldap_search - %s | %d | %s- failed: %s",
+                     ldap_base, searchscope, ldap_query,
+                     ldap_err2string(err_code));
     }
     else if(!(ld_entry = ldap_first_entry(ldap, ld_result)))
     {
@@ -1566,7 +1597,8 @@ static char * get_ldvalues_from_connection(
     else if(!(ld_values = ldap_get_values(ldap, ld_entry, attr)))
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_get_values <%s> failed", attr);
+                     "ldap_get_values <%s | %d | %s | %s> failed",
+                     ldap_base, searchscope, ldap_query, attr);
     }
     else
     {
@@ -1632,7 +1664,7 @@ static char * get_ldap_val_bound(request_rec *r, LDAP *ldap,
         
         retval = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
                                               ldap_query, user, attr,
-                                              separator);
+                                              separator, INT_UNSET);
     }
 
     return retval; 
@@ -1846,6 +1878,39 @@ static int translate_handler(request_rec *r)
     return DECLINED;
 }
 
+static void parse_client_data(request_rec *r, char **data, char *key,
+                              table **tab)
+{
+    const char *tmp;
+    char *val;
+    while (('\0' != *((char*)*data)) &&
+           (val = ap_getword_nc(r->pool, data, '&')))
+    {
+        char *vptr = ap_getword_nc(r->pool, &val, '=');
+        if (0 == strcmp(FORM_ACTION, vptr)) key = vptr;
+        else key = ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
+                              ap_getword_nc(r->pool, &vptr, '-'),
+                              NULL);
+        /* Spaces remain as '+' if submitted in a form */
+        vptr = val;
+        ap_unescape_url(val);
+        while('\0' != *vptr)
+        {
+            if(*vptr == '+') *vptr = ' ';
+            vptr++;
+        }
+        if (NULL != (tmp = ap_table_get(*tab, key)) )
+        {
+            ap_table_setn(*tab, key,
+                          ap_pstrcat(r->pool, tmp, ";" , val, NULL));
+        }
+        else
+        {
+            ap_table_add(*tab, key, ap_pstrdup(r->pool,val));
+        }
+    }
+}
+
 static int util_read(request_rec *r, char **buf)
 {
     int rc = !OK;
@@ -1876,11 +1941,15 @@ static int util_read(request_rec *r, char **buf)
     return rc;
 }
 
-static int read_post(request_rec *r, table **tab)
+static int read_get(request_rec *r, table **tab)
 {
-    const char *tmp;
-    char *data, *key, *val;
+    char *data, *key;
     int rc = OK;
+
+    if (r->method_number != M_GET)
+    {
+        return rc;
+    }
 
     /* Ensure values are available for later processing */
     if (NULL == (*tab = r->subprocess_env) )
@@ -1889,46 +1958,49 @@ static int read_post(request_rec *r, table **tab)
     }
     else if (NULL != ap_table_get(*tab, FORM_ACTION)) return rc;
 
+    data = ap_pstrdup(r->pool, r->parsed_uri.query);
+
+    parse_client_data(r, &data, key, tab);
+
+    return OK;
+}
+
+static int read_post(request_rec *r, table **tab)
+{
+    const char *tmp;
+    char *data, *key;
+    int rc = OK;
+
     if (r->method_number != M_POST)
     {
         return rc;
     }
 
+    /* Ensure values are available for later processing */
+    if (NULL == (*tab = r->subprocess_env) )
+    {
+        *tab = r->subprocess_env = ap_make_table(r->pool, 8);
+    }
+    else if (NULL != ap_table_get(*tab, FORM_ACTION)) return rc;
+
     tmp = ap_table_get(r->headers_in, "Content-Type");
-    if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded"))
+    if (0 == strcasecmp(tmp, "multipart/form-data")) 
     {
         /* TODO - implement multipart form handling */
-        if (0 != strcasecmp(tmp, "multipart/form-data")) return DECLINED;
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO, r->server,
+                     "Form content-type %s cannot yet be read", tmp);
+        return DECLINED;
+    }
+    else if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded"))
+    {
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO, r->server,
+                     "Form content-type %s cannot be read", tmp);
         return DECLINED;
     }
 
     if ((rc = util_read(r, &data)) != OK) return rc;
     
-    while (('\0' != *data) && (val = ap_getword_nc(r->pool, &data, '&')))
-    {
-        char *vptr = ap_getword_nc(r->pool, &val, '=');
-        if (0 == strcmp(FORM_ACTION, vptr)) key = vptr;
-        else key = ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
-                              ap_getword_nc(r->pool, &vptr, '-'),
-                              NULL);
-        /* Spaces remain as '+' if submitted in a form */
-        vptr = val;
-        ap_unescape_url(val);
-        while('\0' != *vptr)
-        {
-            if(*vptr == '+') *vptr = ' ';
-            vptr++;
-        }
-        if (NULL != (tmp = ap_table_get(*tab, key)) )
-        {
-            ap_table_setn(*tab, key,
-                          ap_pstrcat(r->pool, tmp, ";" , val, NULL));
-        }
-        else
-        {
-            ap_table_add(*tab, key, ap_pstrdup(r->pool,val));
-        }
-    }
+    parse_client_data(r, &data, key, tab);
 
     return OK;
 }
@@ -1979,6 +2051,7 @@ static int get_form_fieldvalue(request_rec *r, const char* fieldname,
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
                  "getting form value for %s from post", fieldname);
     
+    read_get(r, &tab);
     read_post(r, &tab);
 
     if (NULL != tab)
@@ -2440,12 +2513,14 @@ static array_header* parse_arg_string(request_rec *r, const char **arg_string,
                                       const char delimiter)
 {
     array_header *result = ap_make_array(r->pool, 1, sizeof(char*));
-    while('\0' != (*arg_string)[0])
-    {
-        char **w = ap_push_array(result);
-        *w = ap_getword(r->pool, arg_string, delimiter);
+    if ((NULL != arg_string) && (NULL != *arg_string)) {
+      while('\0' != (*arg_string)[0])
+      {
+          char **w = ap_push_array(result);
+          *w = ap_getword(r->pool, arg_string, delimiter);
+      }
+      qsort(result->elts, result->nelts, result->elt_size, compare_arg_strings);
     }
-    qsort(result->elts, result->nelts, result->elt_size, compare_arg_strings);
     return result;
 }
 
@@ -2455,26 +2530,34 @@ typedef struct {
     array_header *additions;
 } psldap_txns;
 
-static psldap_txns* get_transactions(request_rec *r, array_header *old_v,
-                                     array_header *new_v)
+static LDAPMod* get_transactions(request_rec *r, const char* attr,
+                                 array_header *old_v, array_header *new_v)
 {
     psldap_txns *result = ap_palloc(r->pool, sizeof(psldap_txns));
+    LDAPMod *mresult = ap_palloc(r->pool, sizeof(LDAPMod));
     int i = 0, j = 0;
+    int old_v_has_values = ((NULL != old_v) && (old_v->nelts > 0));
+
     result->keepers = ap_make_array(r->pool, 1, sizeof(char*));
     result->deletions = ap_make_array(r->pool, 1, sizeof(char*));
     result->additions = ap_make_array(r->pool, 1, sizeof(char*));
 
-    while ((i < old_v->nelts) || (j < new_v->nelts)) {
+    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "Finding differences of attr: %s", attr);
+    while (((NULL != old_v) && (i < old_v->nelts)) || (j < new_v->nelts)) {
         char **value;
         if (j >= new_v->nelts) {
             value = (char**)ap_push_array(result->deletions);
             *value = ap_pstrdup(r->pool, ((char**)(old_v->elts))[i++]);
-        } else if (i >= old_v->nelts) {
+        } else if ((old_v_has_values) && (i >= old_v->nelts)) {
             value = (char**)ap_push_array(result->additions);
             *value = ap_pstrdup(r->pool, ((char**)(new_v->elts))[j++]);
         } else {
-            int compare = strcmp(((char**)(old_v->elts))[i],
+            int compare = 1;
+            if (old_v_has_values) {
+                compare = strcmp(((char**)(old_v->elts))[i],
                                  ((char**)(new_v->elts))[j]);
+            }
             if (compare < 0) {
                 value = (char**)ap_push_array(result->deletions);
                 *value = ap_pstrdup(r->pool, ((char**)(old_v->elts))[i++]);
@@ -2488,13 +2571,377 @@ static psldap_txns* get_transactions(request_rec *r, array_header *old_v,
             }
         }
     }
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "Creating LDAPMod of attr: %s", attr);
+    mresult->mod_type = (char*)attr;
+    if (result->deletions->nelts > 0) {
+        /* Deleting the attribute content or replacing */
+        if ((result->additions->nelts > 0) ||
+            (result->keepers->nelts > 0) ) {
+            mresult->mod_op = LDAP_MOD_REPLACE;
+            i = result->additions->nelts + result->keepers->nelts;
+            mresult->mod_values = ap_palloc(r->pool, (i + 1) * sizeof(char*));
+            /* NULL terminated array of char*s */
+            for (i = 0; i < result->additions->nelts; i++) {
+                mresult->mod_values[i] = ((char**)(result->additions->elts))[i];
+            }
+            for (j = 0; j < result->keepers->nelts; j++) {
+                mresult->mod_values[i++] = ((char**)(result->keepers->elts))[j];
+            }
+            mresult->mod_values[i] = NULL;
+        } else {
+            mresult->mod_op = LDAP_MOD_DELETE;
+            /* NULL terminated array of char*s */
+            mresult->mod_values = NULL;
+        }
+    } else if (result->additions->nelts > 0) {
+        mresult->mod_op = LDAP_MOD_ADD;
+        i = result->additions->nelts;
+        mresult->mod_values = ap_palloc(r->pool, (i + 1) * sizeof(char*));
+        for (i = 0; i < result->additions->nelts; i++) {
+            mresult->mod_values[i] = ((char**)(result->additions->elts))[i];
+        }
+        mresult->mod_values[i] = NULL;
+    } else {
+        mresult = NULL;
+    }
+    
+    return mresult;
+}
+
+/** Strips the leading and trailing white space in a given character string.
+ *  @param str the character string to be altered
+ **/
+static char* strip_lt_whitespace(char *str)
+{
+    int i, len = (NULL != str) ? strlen(str) : 0;
+    for (i = 0; ap_isspace(str[i]) && (i < len); i++) ;
+    for (len; ap_isspace(str[len - 1]) && (i < len); len--) ;
+    memmove(str, &str[i], (len - i + 1));
+    str[len] = '\0';
+    return str;
+}
+
+static const char* get_dsml_err_code_string(int err_code)
+{
+    static const char *dsml_err_strings[] = {
+        "success",
+        "operationsError",
+        "protocolError",
+        "timeLimitExceeded",
+        "sizeLimitExceeded",
+        "compareElse",
+        "compareTrue",
+        "authMethodNotSupported",
+        "strongAuthRequired",
+        "referral",
+        "adminLimitExceeded", /* 10 */
+        "unavailableCriticalExtension",
+        "confidentialityRequired",
+        "saslBindInProgress",
+        "noSuchAttribute",
+        "undefinedAttributeType",
+        "inappropriateMatching",
+        "constraintViolation",
+        "attributeOrValueExists",
+        "invalidAttributeSyntax",
+        "noSuchObject", /*20 */
+        "aliasProblem",
+        "invalidDNSyntax",
+        "aliasDereferencingProblem",
+        "inappropriateAuthentication",
+        "invalidCredentials",
+        "insufficientAccessRights",
+        "busy",
+        "unavailable",
+        "unwillingToPerform",
+        "loopDetect", /* 30 */
+        "namingViolation",
+        "objectClassViolation",
+        "notAllowedOnNonLeaf",
+        "notAllowedOnRDN",
+        "entryAlreadyExists",
+        "objectClassModsProhibited",
+        "affectMultipleDSAs",
+        "other"
+        };
+    const char *result = dsml_err_strings[38];
+
+    switch(err_code) {
+    case LDAP_SUCCESS:
+        result = dsml_err_strings[0];
+        break;
+    default:
+        result = dsml_err_strings[38];
+    }
     return result;
+}
+
+static void write_dsml_response_fragment(request_rec *r, const char *rt,
+                                         int err_code)
+{
+    ap_rprintf(r, "\t\t<%s>\n", rt);
+    ap_rputs("\t\t\t<resultCode>\n", r);
+    ap_rprintf(r, "\t\t\t\t%s\n", get_dsml_err_code_string(err_code) );
+    ap_rputs("\t\t\t</resultCode>\n", r);
+    ap_rputs("\t\t\t<errorMessage>\n", r);
+    ap_rprintf(r, "\t\t\t\t%s\n", ldap_err2string(err_code) );
+    ap_rputs("\t\t\t</errorMessage>\n", r);
+    ap_rprintf(r, "\t\t</%s>\n", rt);
+}
+
+/** Iterate through the results returned by the LDAP server and write them out as
+ *  a complete DSML searchResult node.
+ *
+ *  @param r request record from which to preform pool related operations
+ *  @param ldResult the LDAPMessage instance received from the server containing the
+ *         data in response to a search query.
+ *
+ *  @result allocated string containing all the values in the array values
+ *          separated by string separator
+ */
+static void write_dsml_search_response(request_rec *r, LDAP *ld, LDAPMessage *ldResult)
+{
+    register LDAPMessage *ldEntry = NULL;
+    char *attr, *dn, **values, *tmp;
+    BerElement *ber;
+    int i;
+
+    ap_rputs("\t\t<searchResponse>\n", r);
+    write_dsml_response_fragment(r, "searchResultDone", LDAP_SUCCESS);
+
+    for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
+        ldEntry = ldap_next_entry(ld, ldEntry))
+    {
+        if (LDAP_RES_SEARCH_ENTRY == ldap_msgtype(ldEntry)) {
+            dn = ldap_get_dn(ld, ldEntry);
+            ap_rvputs(r, "\t\t\t<searchResultEntry dn=\"", dn, "\">\n", NULL);
+            for (tmp = ldap_first_attribute(ld, ldEntry, &ber); NULL != tmp;
+                 tmp = ldap_next_attribute(ld, ldEntry, ber)) {
+                /* NOTE - use ldap_get_values_len for binary data - assumed ascii */
+                attr = ap_pstrdup(r->pool, tmp);
+                ldap_memfree(tmp);
+                values = ldap_get_values(ld, ldEntry, attr);
+                if ((NULL != values) &&
+                    (0 < (i = ldap_count_values(values))) ) {
+                    ap_rvputs(r, "\t\t\t\t<attr name=\"", attr, "\">\n", NULL);
+                    while (i > 0) {
+                        i--;
+                        ap_rvputs(r, "\t\t\t\t\t<value>",
+                                  ap_escape_html(r->pool,
+                                                 strip_lt_whitespace(values[i]) ),
+                                  "</value>\n", NULL);
+                    }
+                    ap_rputs("\t\t\t\t</attr>\n", r);
+                    ldap_value_free(values);
+                }
+            }
+            ldap_memfree(dn);
+            if (NULL != ber) ber_free(ber, 0);
+            ap_rputs("\t\t\t</searchResultEntry>\n", r);
+        } else {
+            ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
+                         "Cannot read msg type building dsml results: %x",
+                         ldap_msgtype(ldEntry) );
+        }
+    }
+    ap_rputs("\t\t</searchResponse>\n", r);
+}
+
+/** This writes the DSML search response directly to the client. This response is not
+ *  buffered by design to eliminate any overhead that may be incurred with overly large
+ *  datasets.
+ *  @param r request_rec pointer
+ *  @param conf psldap configuration instance
+ *  @param ldap LDAP pointer
+ *  @param ldap_base string representation of the base of the query
+ *  @param ldap_query string representation of the query filter
+ *  @param attr the attribute to acquire from the server. See the man page on ldap_search_s
+ **/
+static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
+                                        LDAP *ldap, char *ldap_base, char *ldap_query,
+                                        const char *attr)
+{
+    LDAPMessage *ld_result = NULL, *ld_entry = NULL;
+    const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
+    char **ld_values = NULL;
+    int  err_code;
+
+    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                 "Executing ldap_search with base / scope / pattern: "
+                 "%s / %d / %s ...",
+                 ldap_base, conf->psldap_searchscope, ldap_query);
+    ldap_attrs[0] = attr;
+    if(LDAP_SUCCESS !=
+       (err_code = ldap_search_s(ldap, ldap_base, conf->psldap_searchscope,
+                                 ldap_query, (char**)ldap_attrs, 0, &ld_result))
+       )
+    {
+        ap_rputs("\t\t<searchResponse>\n", r);
+        write_dsml_response_fragment(r, "searchResultDone", err_code);
+        ap_rputs("\t\t</searchResponse>\n", r);
+        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
+                     "ldap_search failed: %s", ldap_err2string(err_code));
+    }
+    else
+    {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                     "...ldap_search successfully executed with base / scope / pattern: "
+                     "%s / %d / %s\n"
+                     "Generating and sending DSML response to ldap search request...",
+                     ldap_base, conf->psldap_searchscope, ldap_query);
+        write_dsml_search_response(r, ldap, ld_result);
+        ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                      "...DSML search response sent");
+    }
+    
+    if (NULL != ld_result) { ldap_msgfree(ld_result); }
 }
 
 static int get_dn_attributes_from_ldap(void *data, const char *key,
                                        const char *val)
 {
-    return FALSE;
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    LDAP *ldap = ps->ldap;
+    psldap_config_rec *conf = ps->conf;
+    char *result = NULL;
+    char *user = NULL;
+    char *ldap_base = NULL;
+    char *ldap_query = ps->searchPattern;
+    char *xslUri1 = ps->xslPrimaryUri;
+    char *xslUri2 = ps->xslSecondaryUri;
+
+    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    {
+        if(0 == strcmp("search", key + LDAP_KEY_PREFIX_LEN))
+        {
+            ldap_query = ps->searchPattern = ap_pstrdup(r->pool, val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP query pattern set to %s",
+                          ldap_query);
+        }
+        else if (0 == strcmp("xsl1", key + LDAP_KEY_PREFIX_LEN))
+        {
+            xslUri1 = ps->xslPrimaryUri = ap_pstrdup(r->pool, val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP query primary xsl uri set to %s",
+                          xslUri1);
+        }
+        else if (0 == strcmp("xsl2", key + LDAP_KEY_PREFIX_LEN))
+        {
+            xslUri2 = ps->xslSecondaryUri = ap_pstrdup(r->pool, val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP query secondary xsl uri set to %s",
+                          xslUri2);
+        } else if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
+        {
+            ps->mod_dn = ap_pstrdup(r->pool, val);
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP query record dn set to %s",
+                          xslUri2);
+        } else {
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "Form field %s not processed to perform ldap query",
+                          key);
+        }
+    }
+    if ((NULL != ldap_query) && (NULL != xslUri1) && (NULL != xslUri2) &&
+        (NULL != ps->mod_dn) )
+    {
+        /* Use ldap_modify_s here to directly modify the entries. Possibly add
+           the LDAPMod to an array passed in the data. */
+        ldap_base = (NULL != ps->mod_dn) ? ps->mod_dn : construct_ldap_base(r, conf, conf->psldap_basedn);
+        get_provided_username(r, &user);
+        ap_rvputs(r,
+                  "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"",
+                  xslUri1,
+                  "\"?>\n",
+                  "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"",
+                  xslUri2,
+                  "\"?>\n",
+                  "<dsml>\n",
+                  " <batchResponse>\n",
+                  NULL);
+        write_dsml_sr_to_connection(r, conf, ldap, ldap_base, ldap_query, NULL);
+        ap_rvputs(r,
+                  " </batchResponse>\n",
+                  "</dsml>",
+                  NULL);
+        /* Reset the fields to prevent repeated writes to the browser */
+        {
+            ps->searchPattern = NULL;
+            ps->xslPrimaryUri = NULL;
+            ps->xslSecondaryUri = NULL;
+        }
+    }
+    return TRUE;
+}
+
+static void rprintf_LDAPMod_instance(request_rec *r, LDAPMod *mod)
+{
+    int i;
+    const char *op_name;
+
+    switch(mod->mod_op)
+    {
+    case LDAP_MOD_REPLACE:
+        op_name = "LDAP_MOD_REPLACE";
+        break;
+    case LDAP_MOD_ADD:
+        op_name = "LDAP_MOD_ADD";
+        break;
+    case LDAP_MOD_DELETE:
+        op_name = "LDAP_MOD_DELETE";
+        break;
+    default:
+        op_name = "Unknown Operation";
+    }
+
+    ap_rprintf(r, "%s: Attr = %s: ", op_name,
+               (NULL != mod->mod_type) ? mod->mod_type : "");
+    if (NULL != mod->mod_values) {
+        for (i = 0; NULL != mod->mod_values[i]; i++) {
+            ap_rprintf(r, "%s%s",
+                       mod->mod_values[i],
+                       (NULL != mod->mod_values[i+1]) ? "; " : "");
+        }
+    }
+}
+
+static int add_record_in_ldap(void *data, const char *key, const char *val)
+{
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    LDAP *ldap = ps->ldap;
+    psldap_config_rec *conf = ps->conf;
+
+    if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
+    {
+        if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
+        {
+            /* The dn cannot be modified */
+            ps->mod_dn = ap_pstrdup(r->pool, val);
+        } else {
+            const char *value = ap_pstrdup(r->pool, val);
+            array_header *new_v = parse_arg_string(r, &value, ';');
+            LDAPMod **mods_coll;
+            LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
+                                                NULL, new_v);
+            if (NULL != tmp_mod) {
+                psldap_status_append_mod(ps, r, tmp_mod);
+                rprintf_LDAPMod_instance(r, tmp_mod);
+            }
+            ap_rprintf(r, " <br />");
+        }
+    }
+    return TRUE;
+}
+
+static int delete_record_in_ldap(void *data, const char *key, const char *val)
+{
+    return TRUE;
 }
 
 static int login_and_reply(void *data, const char *key, const char *val)
@@ -2502,8 +2949,8 @@ static int login_and_reply(void *data, const char *key, const char *val)
     return TRUE;
 }
 
-static int update_dn_attributes_in_ldap(void *data, const char *key,
-                                        const char *val)
+static int update_record_in_ldap(void *data, const char *key,
+                                 const char *val)
 {
     psldap_status *ps = (psldap_status*)data;
     request_rec *r = ps->rr;
@@ -2517,12 +2964,20 @@ static int update_dn_attributes_in_ldap(void *data, const char *key,
     {
         char *ldap_query = NULL, *ldap_base = NULL;
         
-        ldap_query = construct_ldap_query(r, conf, NULL, NULL, user);
-        ldap_base = construct_ldap_base(r, conf, ldap_query);
-        oldValue = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
-                                                ldap_query, user,
-                                                key + LDAP_KEY_PREFIX_LEN,
-                                                ";");
+        if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
+        {
+            /* The dn cannot be modified */
+            ps->mod_dn = ap_pstrdup(r->pool, val);
+            oldValue = ps->mod_dn;
+        } else {
+            ldap_query = construct_ldap_query(r, conf, "objectclass", "*", user);
+            ldap_base = ps->mod_dn;
+            /* ldap_base = construct_ldap_base(r, conf, ldap_query); */
+            oldValue = get_ldvalues_from_connection(r, conf, ldap, ldap_base,
+                                                    ldap_query, user,
+                                                    key + LDAP_KEY_PREFIX_LEN,
+                                                    ";", LDAP_SCOPE_BASE);
+        }
     }
 
     if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
@@ -2531,27 +2986,20 @@ static int update_dn_attributes_in_ldap(void *data, const char *key,
            the LDAPMod to an array passed in the data. */
         const char *value = ap_pstrdup(r->pool, val);
         array_header *new_v = parse_arg_string(r, &value, ';');
+        array_header *old_v = parse_arg_string(r, &oldValue, ';');
+        LDAPMod **mods_coll;
+        LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
+                                            old_v, new_v);
         ap_rprintf(r, " Attribute %s -> %s", key + LDAP_KEY_PREFIX_LEN,
                    ap_array_pstrcat(r->pool, new_v, ';') );
         
-        if(NULL == oldValue)
-        {
-            ap_rprintf(r, "&lt; no old value &gt; &lt;additions:%s&gt;</br>\n",
-                       ap_array_pstrcat(r->pool, new_v, ';')
-                       );
+        ap_rprintf(r, " &lt; oldValue = \"<em>%s</em>\" &gt; ",
+                   ap_array_pstrcat(r->pool, old_v, ';') );
+        if (NULL != tmp_mod) {
+            psldap_status_append_mod(ps, r, tmp_mod);
+            rprintf_LDAPMod_instance(r, tmp_mod);
         }
-        else
-        {
-            array_header *old_v = parse_arg_string(r, &oldValue, ';');
-            psldap_txns *txns = get_transactions(r, old_v, new_v);
-            ap_rprintf(r, " &lt; oldValue = <em>%s</em> &gt;",
-                       ap_array_pstrcat(r->pool, old_v, ';') );
-            ap_rprintf(r, " &lt; keepers:%s additions:%s deletions:%s &gt; </br>\n",
-                       ap_array_pstrcat(r->pool, txns->keepers, ';'),
-                       ap_array_pstrcat(r->pool, txns->additions, ';'),
-                       ap_array_pstrcat(r->pool, txns->deletions, ';')
-                       );
-        }
+        ap_rprintf(r, " <br />");
     }
     return TRUE;
 }
@@ -2572,23 +3020,47 @@ static int (*get_action_handler(request_rec *r, const char **action))(void*, con
     {
         return login_and_reply;
     }
+    if (0 == strcmp(SEARCH_ACTION, *action))
+    {
+        return get_dn_attributes_from_ldap;
+    }
     if (0 == strcmp(MODIFY_ACTION, *action))
     {
-        return update_dn_attributes_in_ldap;
+        return update_record_in_ldap;
     }
     if (0 == strcmp(CREATE_ACTION, *action))
     {
-        return update_dn_attributes_in_ldap;
+        return add_record_in_ldap;
     }
     if (0 == strcmp(DISABLE_ACTION, *action))
     {
-        return update_dn_attributes_in_ldap;
+        return update_record_in_ldap;
     }
     if (0 == strcmp(DELETE_ACTION, *action))
     {
-        return update_dn_attributes_in_ldap;
+        return delete_record_in_ldap;
     }
     return NULL;
+}
+
+static void write_dsml_err_response(request_rec *r, psldap_status *ps,
+                                    const char *opName, int err_code)
+{
+    ap_rvputs(r,
+              "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"",
+              ps->xslPrimaryUri,
+              "\"?>\n",
+              "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"",
+              ps->xslSecondaryUri,
+              "\"?>\n",
+              "<dsml>\n",
+              " <batchResponse>\n",
+              NULL);
+    write_dsml_response_fragment(r, opName, err_code);
+    ap_rvputs(r,
+              " </batchResponse>\n",
+              "</dsml>",
+              NULL);
 }
 
 static int ldap_update_handler(request_rec *r)
@@ -2610,6 +3082,7 @@ static int ldap_update_handler(request_rec *r)
         return DECLINED;
     }
 
+    read_get(r, &t_env);
     read_post(r, &t_env);
     
     if (OK != (res = get_provided_credentials (r, conf, &password, &user)))
@@ -2675,22 +3148,31 @@ static int ldap_update_handler(request_rec *r)
         }
         else
         {
-            r->content_type = "text/html";
+            int sendXml = (get_dn_attributes_from_ldap == actionHandler);
+            r->content_type = (sendXml) ? "text/xml" : "text/html";
 
             ap_soft_timeout("update ldap data", r);
             ap_send_http_header(r);
-	    
-            /* Process the requested update here. Send response - ideally
-               this will send back the page with a status in a status div
-               and the submit buttons hidden 
-            */
-            ap_rvputs(r,
-                      "<body>\n"
-                      "<h2>", action, " was not performed as ", user,
-                      ", functionality is disabled</h2>\n",
-                      NULL);
+            if (!sendXml) {
+                /* Process the requested update here. Send response - ideally
+                   this will send back the page with a status in a status div
+                   and the submit buttons hidden 
+                */
+                ap_rvputs(r,
+                          "<body>\n"
+                          "<h2>", action, " was not performed as ", user,
+                          ", functionality is disabled</h2>\n",
+                          NULL);
+            }
+            else
+            {
+                ap_rputs("<?xml version=\"1.0\"?>\n", r);
+            }
+
             if (NULL != t_env)
             {
+                int err_code = LDAP_SUCCESS;
+                const char *opName = "errorResponse";
                 /* Add ldap connection pointer to the request and process
                    the table entries corresponding to the ldap attributes
                 */
@@ -2698,9 +3180,37 @@ static int ldap_update_handler(request_rec *r)
                 ps.rr = r;
                 ps.ldap = ldap;
                 ps.conf = conf;
+                ps.mod_dn = NULL;
+                ps.mod_count = 1;
+                ps.mods = ap_palloc (r->pool, ps.mod_count * sizeof(LDAPMod*));
+                ps.mods[0] = NULL;
+                ps.searchPattern = NULL;
+                ps.xslPrimaryUri = NULL;
+                ps.xslSecondaryUri = NULL;
+
                 ap_table_do(actionHandler, (void*)&ps, t_env, NULL);
+                if (0 && (NULL != ps.mod_dn)) {
+                    if (delete_record_in_ldap == actionHandler) {
+                        err_code = ldap_delete_s(ps.ldap, ps.mod_dn);
+                        opName = "delResponse";
+                    } else if (NULL != ps.mods[0]) {
+                        if (update_record_in_ldap == actionHandler) {
+                            err_code = ldap_modify_s(ps.ldap, ps.mod_dn, ps.mods);
+                            opName = "modifyResponse";
+                        } else if (add_record_in_ldap == actionHandler) {
+                            err_code = ldap_add_s(ps.ldap, ps.mod_dn, ps.mods);
+                            opName = "addResponse";
+                        }
+                    }
+                }
+                if (sendXml &&
+                    (get_dn_attributes_from_ldap != actionHandler) ) {
+                    write_dsml_err_response(r, &ps, opName, err_code);
+                }
             }
-            ap_rputs("</body>", r);
+            if (!sendXml) {
+                ap_rputs("</body>", r);
+            }
             ap_kill_timeout(r);
 
             res = OK;

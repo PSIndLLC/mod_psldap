@@ -1,3 +1,13 @@
+Revision 0.77
+===================
+Enable processing of parameters sent through both GET and POST to module.
+
+Created mechanism to handle LDAP search, add, modify, and delete operations.
+
+Created DSML generation mechanism to expose new LDAP interface.
+
+Created XSL templates to apply to DSML to facilitate interactions through the new interfaces.
+
 Revision 0.76
 ===================
 Fixed directory and server initialization routines - feedback accounted for.

@@ -1,10 +1,11 @@
 mod_psldap
 ===========
 
-Version 0.76
+Version 0.77
 by David Picard
 
-This module is based on Alexander Mayrhofer's mod_auth_ldap, version 0.5.
+This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
+version 0.5.
 
 sha1 algorithm originally by Steve Reid, modified by Alexander Mayrhofer - 
 eliminated by David Picard in version 0.71 (using the apache sha1 functions)
@@ -41,17 +42,17 @@ Authentication Features:
     traffic and improve performance.
 
 
-Maintenance Features: (F=Future, I=Implemented)
-1.  (F) Allow the web user to query the LDAP server for information, within the
+Maintenance Features:
+1.  Allow the web user to query the LDAP server for information, within the
     limits of their privileges on the server. The module will generate an XML
     representation of the LDAP records that meet the query criteria requested
     by the user. This module will optionally apply an XSL transformation to
     the generated XML and return the resultant document to the user.
-2.  (F) Allow the user to edit any attributes in his/her own record, given
+2.  Allow the user to edit any attributes in his/her own record, given
     he/she is granted read/write access to those attributes by the LDAP server.
     This feature assumes the attribute name in the LDAP server is used as the
     value name in a POST operation.
-3.  (F) Allow the LDAP administrator to edit any record in the LDAP server.
+3.  Allow the LDAP administrator to edit any record in the LDAP server.
 4.  Optionally denies access to all LDAP maintenance functionality if the web
     user is not accessing this module through an https connection.
 
@@ -515,12 +516,12 @@ Setting Up Forms
 ================
 So now you've got everybody you know listed in your LDAP server with all their
 critical information ... yeah right. One of the problems with a directory is
-that people move ... and change their ISPs ... and change their phone numbers
-... and generally do other things that make them really hard to keep tabs on.
-Well, now you can let people update their information in your address book
-themselves - or they won't be able to see the nifty pictures of you and your
-girlfriend or boyfriend doing the wild thing (if you're more tame like me,
-they'll miss out on the pictures of your cute kids doing really cute things).
+that people move, change their ISPs,  change their phone numbers ... and
+generally do other things that make them really hard to keep tabs on. Well,
+now you can let people update their information in your address book themselves
+- or they won't be able to see the nifty pictures of you and your girlfriend
+or boyfriend doing the wild thing (if you're more tame like me, they'll miss
+out on the pictures of your cute kids doing really cute things).
 
 Creating a form is very easy. Just create a normal web form and set the names
 of the input elements to be the names of your ldap attributes. For the Submit
@@ -528,19 +529,49 @@ buttons, simply create an input element of type="submit", name="FormAction"
 and set the value attribute to one of three strings:
   *  "Update" - causes mod_psldap to update the settings listed on the page
               in the LDAP server.
-  *  "Create" - 
+  *  "Create" - creates the record in the LDAP server.
   *  "Delete" - deletes the record from the LDAP server.
   *  "Disable" - deletes the password of the account, making it inaccessible.
   *  "Login" - performs authentication, sets a auth cookie, and sends the user
               back to the referring page (which should have rejected
               access based on missing credentials).
 
-I've included a sample page in the distribution called change_info.html that
-provides a starting point for creating a simple page. Note that the default
-values for each input element are blank. These values are filled in by
-mod_psldap when the page is requested if the user authenticates prior to
-initiating the request (the page could also be protected by mod_psldap, which
-has the same effect). 
+PsLDAP provides a partial measure of DSML support, it will return a DSML
+document (this is an XML document) in response to a form post, to which an
+XSLT may be applied. To specify the transform to be applied, set "xsl1" or
+"xsl2" on the form when submitting a request. 
+
+I've included a few sample pages in the distribution to provide a starting
+point for creating simple and complex pages:
+  *  change_info.html - a simple form to change fixed fields
+  *  ldap_query.html - a more advanced form to search for and review records
+  *  DSML_editform.xsl - allows for editing of a record via an HTML form -
+                         with fields limited to those processed by the XSL -
+                         representing a fairly extensive selection.
+  *  DSML_cards.xsl - allows the user to view only those fields that are
+                      populated in a card type of format.
+  *  DSML_table.xsl - allows the user to view specified fields that are
+                      visible in a tabular format.
+
+In order to enable form processing, the following segment must be added to your
+httpd.conf:
+
+    <Location /ldapupdate>
+      SetHandler application/x-ldap-update
+      AuthType Basic
+      AuthName "LDAP Update"
+      <Limit GET POST>
+        Order Deny,Allow
+        Deny from all
+        # Allow from local network only:
+        Allow from 192 10
+      </Limit>
+    </Location>
+
+Note that we set the AuthType to "Basic". It could also be set to "cookie", but
+it should never be set to "form" as the credentials may get confused with
+data that is being inserted or modified on any forms.
+
 
 LIMITATIONS: The multipart/form-data Content-Type is not yet handled.
 

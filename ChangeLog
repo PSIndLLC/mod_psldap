@@ -1,3 +1,9 @@
+Revision 0.79
+===================
+Repaired compilation error in Apache 2.XX
+
+Disabled cache implementation on Apache2.XX
+	
 Revision 0.78
 ===================
 Adjust DSML_psldap.js to address IE failure to implement importNode - fixes updates to records through DSML_editform.xsl

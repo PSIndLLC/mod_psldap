@@ -23,14 +23,12 @@
 #define PSLDAP_VERSION_LABEL "0.78"
 
 #include "httpd.h"
-#include "http_conf_globals.h"
 #include "http_config.h"
 #include "http_core.h"
 #include "http_log.h"
 #include "http_protocol.h"
 #include "http_request.h"
 #include "ap_compat.h"
-#include "ap_mm.h"
 #include "ap_config.h"
 
 #if 0
@@ -41,17 +39,52 @@
 
 #ifdef MPM20_MODULE_STUFF
  #define APACHE_V2
+ #include "apr_anylock.h"
  #include "apr_compat.h"
  #include "apr_errno.h"
  #include "apr_general.h"
  #include "apr_hooks.h"
+ #include "apr_lib.h"
  #include "apr_pools.h"
+ #include "apr_shm.h"
+ #include "apr_rmm.h"
  #include "apr_sha1.h"
+ #include "apr_shm.h"
  #include "apr_strings.h"
  #define XtOffsetOf APR_OFFSETOF
  #define DEBUG_ERRNO ,APR_SUCCESS
  #define ap_log_reason(a,b,c)
  #define ap_sha1_base64 apr_sha1_base64
+ typedef apr_shm_t psldap_shm_mgr;
+ #define AP_MM apr_rmm_t
+ #define AP_MM_LOCK_RD apr_anylock_readlock
+ #define AP_MM_LOCK_RW apr_anylock_writelock
+ #define ap_mm_calloc(rm,c,s)	apr_rmm_addr_get((rm),apr_rmm_calloc((rm),((c)*(s))))
+ #define ap_mm_destroy	apr_shm_destroy
+
+/* TODO - DJP - The next 2 macros must be verified */
+ #define ap_mm_error()	NULL
+ #define ap_mm_permission(a,b,c,d) 0
+
+
+ #define ap_mm_free(rm,ptr)	apr_rmm_free((rm), apr_rmm_offset_get((rm),(ptr))) 
+ #define ap_mm_malloc(rm,c,s)	apr_rmm_addr_get((rm),apr_rmm_malloc((rm),((c)*(s))))
+ #define ap_mm_realloc(rm,ptr,s) apr_rmm_addr_get((rm),apr_rmm_realloc((rm),(ptr),(s)))
+ static char* ap_mm_strdup(apr_rmm_t *rm, const char *str)
+ {
+    char *result = NULL;
+    int len = (NULL == str) ? 0 : strlen(str);
+
+    result = ap_mm_calloc(rm, 1, len + 1);
+    if (NULL == str) {
+        strncpy(result, str, len);
+    }
+    result[len] = '\0';
+
+    return result;
+ }
+ #define ap_mm_lock(g,l) 
+ #define ap_mm_unlock(g) 
  typedef apr_pool_t pool;
  typedef apr_table_t table;
  typedef apr_array_header_t array_header;
@@ -61,11 +94,19 @@
  #define ap_soft_timeout(n, r)
  #define add_version_component(p,v)	ap_add_version_component(p, v)
  #define sub_req_lookup_uri(uri, r, p) ap_sub_req_lookup_uri(uri, r, p)
+ static apr_uid_t ap_user_id;
+ static apr_gid_t ap_group_id;
  extern module MODULE_VAR_EXPORT psldap_module;
 #else
  #define add_version_component(p,v)	ap_add_version_component(v)
  #define sub_req_lookup_uri(uri, r, p) ap_sub_req_lookup_uri(uri, r)
  typedef const char *(*cmd_func) (cmd_parms*, void*, const char*);
+ typedef int apr_status_t;
+ typedef AP_MM psldap_shm_mgr;
+ #define APR_SUCCESS 0
+ #define apr_rmm_destroy(rm) NULL
+ #include "http_conf_globals.h"
+ #include "ap_mm.h"
  #include "ap_sha1.h"
  #define DEBUG_ERRNO 
  module MODULE_VAR_EXPORT psldap_module;
@@ -152,7 +193,7 @@ typedef struct psldap_cache_item_struct {
 #ifdef CACHE_USE_SEMAPHORE
  typedef sem_t psldap_guard;
  #define psldap_guard_init(g,pshr,max)	sem_init(g,pshr,max)
- #define psldap_guard_destroy(g)		sem_destroy(g)
+ #define psldap_guard_destroy(g)	sem_destroy(g)
 #else
  typedef AP_MM* psldap_guard;
  #define psldap_guard_init(g,pshr,max)	*(g) = dataview.mem_mgr
@@ -180,7 +221,11 @@ typedef struct
 
 typedef struct {
     server_rec *s;
+    psldap_shm_mgr *shm_mgr;
     AP_MM *mem_mgr;
+#ifdef APACHE_V2
+    apr_anylock_t lock;
+#endif
     int count;
     psldap_shared_data *collection;
     int (***psldap_compares_item)(const void *item1, const void *item2);
@@ -188,7 +233,11 @@ typedef struct {
 } psldap_shared_dataview;
 
 
-static psldap_shared_dataview dataview = {NULL, NULL, 0, NULL, NULL, NULL};
+static psldap_shared_dataview dataview = {NULL, NULL, NULL,
+#ifdef APACHE_V2
+					  {apr_anylock_none, NULL},
+#endif
+					  0, NULL, NULL, NULL};
 
 /** Lock the specified array for read requests, concurrent read operations
     are allowed up to the specified limit on the number of servers. If a
@@ -697,9 +746,31 @@ static AP_MM* alloc_shared_data(server_rec *s, pool *p,
 {
     psldap_shared_data *result = NULL;
     dataview.s = s;
+#ifdef APACHE_V2
+    /* TODO - The memory model has changed to such an extent that caching is
+       no longer functional in Apache V2. Return immediately and do not
+       initialize the cache - remove the return from here when caching is
+       again functional. */
+    return dataview.mem_mgr;
+
+    if (NULL != s) {
+      apr_shm_t *tmp = NULL;
+      apr_current_userid(&ap_user_id, &ap_group_id, p);
+      if (APR_SUCCESS != apr_shm_attach(&tmp, get_shared_filename(s), p) ) {
+	  apr_shm_create(&tmp, get_shared_size(s, width),
+			 get_shared_filename(s), p); 
+      }
+      dataview.shm_mgr = tmp;
+      apr_rmm_init(&(dataview.mem_mgr), &(dataview.lock),
+		   apr_shm_baseaddr_get(dataview.shm_mgr),
+		   get_shared_size(s, width), p);
+    }
+#else
     dataview.mem_mgr = ap_mm_create(get_shared_size(s, width),
                                     get_shared_filename(s)); 
-   if (NULL == dataview.mem_mgr) {
+#endif
+
+    if (NULL == dataview.mem_mgr) {
         /* log error */
         char *strError = ap_mm_error();
         ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
@@ -743,7 +814,7 @@ static AP_MM* alloc_shared_data(server_rec *s, pool *p,
  *  the apache server process.
  *  @param server - the server instance
  **/
-static void psldap_server_cleanup(void *server)
+static apr_status_t psldap_server_cleanup(void *server)
 {
     int j;
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
@@ -755,15 +826,17 @@ static void psldap_server_cleanup(void *server)
             free_shared_data(&(dataview.collection[j]), j);
         }
         ap_mm_free(dataview.mem_mgr, dataview.collection);
-        ap_mm_destroy(dataview.mem_mgr);
+        apr_rmm_destroy(dataview.mem_mgr);
+        ap_mm_destroy(dataview.shm_mgr);
         dataview.count = 0;
     }
+    return APR_SUCCESS;
 }
 
-static void psldap_child_cleanup(void *server)
+static apr_status_t psldap_child_cleanup(void *server)
 {
     /* Nothing to do here */
-    return;
+    return APR_SUCCESS;
 }
 
 void psldap_cache_add_item(request_rec *r, int collectionIndex, void *item)
@@ -792,13 +865,13 @@ void psldap_cache_add_item(request_rec *r, int collectionIndex, void *item)
  *  @return an instance to the apache memory manager used to create the
  *          requested cache collection.
  **/
-static AP_MM* psldap_cache_start(server_rec *s, pool *p,
+static AP_MM* psldap_cache_start(server_rec *s, pool *sp, pool *p,
                                  void (*a_free_item)(void* item),
                                  int (**a_compares_item)(const void *item1,
                                                          const void *item2),
                                  int cache_width)
 {
-    ap_register_cleanup(s->ctx->cr_pool, s, psldap_server_cleanup,
+    ap_register_cleanup(sp, s, psldap_server_cleanup,
                         psldap_child_cleanup);
     return alloc_shared_data(s, p, a_free_item, a_compares_item,
                              cache_width);
@@ -1025,12 +1098,23 @@ int (*psldap_compares_item[CACHE_WIDTH])(const void *item1, const void *item2) =
     compare_key, compare_dn
 };
 
+#ifdef APACHE_V2
+static int module_initV2(pool *pconf, pool *plog, pool *ptemp, server_rec *s)
+{
+    add_version_component(pconf, "mod_psldap/" PSLDAP_VERSION_LABEL);
+    cache_mem_mgr = psldap_cache_start(s, pconf, pconf, psldap_cache_item_free,
+                                       psldap_compares_item, CACHE_WIDTH);
+    return APR_SUCCESS;
+}
+#else
 static void module_init(server_rec *s, pool *p)
 {
     add_version_component(p, "mod_psldap/" PSLDAP_VERSION_LABEL);
-    cache_mem_mgr = psldap_cache_start(s, p, psldap_cache_item_free,
+    cache_mem_mgr = psldap_cache_start(s, s->ctx->cr_pool, p,
+				       psldap_cache_item_free,
                                        psldap_compares_item, CACHE_WIDTH);
 }
+#endif
 
 static void *create_ldap_auth_dir_config (pool *p, char *d)
 {
@@ -3325,7 +3409,7 @@ static int ldap_update_handlerV2(request_rec *r)
 static void register_hooks(pool *p)
 {
     /* Hook in the module initialization */
-    ap_hook_post_config(module_init, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_post_config(module_initV2, NULL, NULL, APR_HOOK_MIDDLE);
     /* [9]  content handlers */
     ap_hook_handler(ldap_update_handlerV2, NULL, NULL, APR_HOOK_MIDDLE);	
     /* [5]  check/validate user_id        */

@@ -923,7 +923,7 @@ static void psldap_cache_item_free(void *a_item)
 static LDAP* ps_ldap_init(psldap_config_rec *conf, LDAP_CONST char *host,
 			  int port)
 {
-    int connectVersion = 3;
+    int connectVersion = conf->psldap_ldap_version;
     LDAP *ld = ldap_init(host, port);
     ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &connectVersion);
     return ld;

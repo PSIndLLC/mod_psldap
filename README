@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.80
+Version 0.83
 by David Picard
 
 This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
@@ -176,6 +176,9 @@ PsLDAPAuthUseCache - Set to 'on' if authentication will check the cache prior
 
 PsLDAPBindMethod   - Set to 'simple', 'krbv41', or 'krbv42' to determine
       binding to server
+
+PsLDAPConnectVersion - The connection version for the ldap server.
+      Default value is 2
 
 PsLDAPSecureAuthCookie - Set to 'off' if cookies are allowed to be sent
       across an unsecure connection
@@ -385,6 +388,12 @@ Note that more than one LDAP server can be specified by separating each server
 in the list with a space character. Also, an alternative port can be identified
 for a server by following the server name/IP address with a ':' and the
 alternative port number.
+
+It's also important to note that the LDAP protocol is significantly different
+between versions 2 and 3. We can specify which version of the protocol to use
+via the PsLDAPConnectVersion, which should be set to a value of either 2 or 3.
+The default value is 2 for backwards compatibility, however this will not work
+with most new servers.
 
 Next we'll address how to connect to the LDAP servers listed in the PsLDAPHosts
 configuration setting.

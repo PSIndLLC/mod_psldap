@@ -161,6 +161,34 @@ function showProcessDocument(bForceShow) {
     }
 }
 
+/** Implementation of the document importNode function to fix IE's broken 
+ *  implementation of the DOM 2 spec. This function must be applied to a
+ *  document object.
+ *  @param objNode the node to be imported into the current document
+ *  @param bDeep (optional) boolean value to indicate if the node is to be
+ *               copied recursively default value is false.
+ *  @return the newly imported node.
+ **/
+function psldapImportNode(objNode, bDeep)
+{
+    var i;
+    var result = this.createElement(objNode.tagName);
+    for (i = objNode.attributes.length - 1; i >= 0; i--) {
+        var objAttr = objNode.attributes.item(i);
+        result.setAttribute(objAttr.name, objAttr.value);
+    }
+    if (bDeep) {
+/*
+        for (i = 0; i < objNode.childNodes.length; i++) {
+            var objChild = this.importNode(objNode.childNodes[i], bDeep);
+            result.appendChild(objChild);
+        }
+*/
+        result.innerHTML = objNode.innerHTML;
+    }
+    return result;
+}
+
 /** Copies the visible form into an iframe labeled as "processWindow" in the
  *  current document and submits the cloned item, capturing the result in the
  *  iframe and maintaining the integrity of the pending form.
@@ -205,11 +233,20 @@ function submitVisibleRecord(action) {
     }
     
     if (wt.confirm("Are you sure you wish to change this record?") ) {
+	if (!(wt.document.importNode)) {
+            /* IE does not support import node - the work arounds seem to
+               be deficient when used with forms, so just submit the form
+               in the context of the current page */
+            /*wt.document.importNode = psldapImportNode;*/
+            objForm.submit();
+            return;
+        }
         var objClone = wt.document.importNode(objForm, true);
+        var objBody = wt.document.getElementsByTagName("BODY")[0];
         objClone.target = "_self";
-        objClone.style.display = "none";
-        wt.document.body.replaceChild(objClone,
-                                      wt.document.body.childNodes[0]);
+	/* Force rendering */
+	objClone.style.display = "block";
+        wt.document.body.replaceChild(objClone, objBody.childNodes[0]);
         /* Copy over all the entered data */
         for (i = 0; i < objForm.elements.length; i++) {
             if ((objForm.elements[i].value) ||
@@ -233,6 +270,7 @@ function submitVisibleRecord(action) {
         }
         showProcessDocument(true);
         objClone.submit();
+        }
     }
 }
 

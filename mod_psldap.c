@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.80"
+#define PSLDAP_VERSION_LABEL "0.81"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -183,6 +183,7 @@ typedef struct {
 #define PSLDAP_SHM_SIZE		81920
 #define PSLDAP_SHM_SIZE_STR	"81920"
 #define PSCACHE_ITEM_FIELDS()	time_t last_access
+#define PSLDAP_REDIRECT_URI "PS_Redirect_URI"
 
 typedef struct psldap_array_struct psldap_array;
 
@@ -1228,7 +1229,6 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, b, psldap_grp_mbr_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_grp_nm_attr);
     set_cfg_str_if_n_set(p, result, b, psldap_cookiedomain);
-
     set_cfg_int_if_n_set(result, b, psldap_auth_enabled, INT_UNSET, 1);
     set_cfg_int_if_n_set(result, b, psldap_searchscope, INT_UNSET,
                          LDAP_SCOPE_BASE);
@@ -1399,6 +1399,7 @@ command_rec ldap_auth_cmds[] = {
       " using an LDAP user record's attribute to identify the group directly."
       " Default value is 'off'."
     },
+
     /* Authentication methods */
     { "PsLDAPAuthSimple", (cmd_func)ap_set_flag_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_authsimple),
@@ -2513,6 +2514,31 @@ static int log_table_values(void *data, const char *key,
     return 1;
 }
 
+/** Sends an HTML page with a META REFRESH to the browser / client to force
+ *  it to perform a redirect to the specified URL.
+ *  @param r the request_rec instance pointer
+ *  @param sec the configuration struct instance pointer
+ *  @param redirect_uri the URI to be forwarded to on this server
+ *  @return 0 if successful, non-zero otherwise
+ **/
+static int ldap_redirect_handler(request_rec *r)
+{
+    psldap_config_rec *conf =
+        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                   &psldap_module);
+    const char *redirect_uri = ap_table_get(r->notes, PSLDAP_REDIRECT_URI);
+
+    r->content_type = "text/html";
+    ap_table_add(r->err_headers_out, "Location", redirect_uri);
+
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                 r->server,
+                 "Redirecting to URI %s of type %s", redirect_uri,
+                 r->content_type);
+    
+    return HTTP_MOVED_TEMPORARILY;
+}
+
 static int auth_form_redirect(request_rec *r, psldap_config_rec *sec,
                               const char *redirect_uri,
                               const char *user, const char *password)
@@ -2523,35 +2549,38 @@ static int auth_form_redirect(request_rec *r, psldap_config_rec *sec,
     if ((NULL != user) && (NULL != password))
     {
         set_psldap_auth_cookie(r, sec, user, password);
+        ap_table_set(r->notes, PSLDAP_REDIRECT_URI, redirect_uri);
+        r->handler = ap_pstrdup(r->pool, "ldap-send-redirect");
+        res = OK;
+    } else {
+        sr = sub_req_lookup_uri(redirect_uri, r, NULL);
+        sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
+        r->content_type = sr->content_type;
+        
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     r->server,
+                     "Executing subrequest %s of type %s", redirect_uri,
+                     sr->content_type);
+        ap_table_do(log_table_values, r, r->headers_in, NULL);
+        
+        ap_soft_timeout("update ldap data", r);
+        ap_send_http_header(r);
+        res = ap_run_sub_req(sr);
+        if (!ap_is_HTTP_SUCCESS(res) && !ap_is_HTTP_SUCCESS(sr->status))  {
+            ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
+                         "LDAP update sub request had problems (%d:%d): %s",
+                         res, sr->status, redirect_uri);
+        }
+        res = DONE;
+        ap_destroy_sub_req(sr);
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     r->server,
+                     "...subrequest destroyed");
+        ap_kill_timeout(r);
+        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
+                     r->server,
+                     "...request timeout killed");
     }
-    sr = sub_req_lookup_uri(redirect_uri, r, NULL);
-    sr->subprocess_env = ap_copy_table(sr->pool, r->subprocess_env);
-    r->content_type = sr->content_type;
-    
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 r->server,
-                 "Executing subrequest %s of type %s", redirect_uri,
-                 sr->content_type);
-    ap_table_do(log_table_values, r, r->headers_in, NULL);
-
-    ap_soft_timeout("update ldap data", r);
-    ap_send_http_header(r);
-    res = ap_run_sub_req(sr);
-    if (!ap_is_HTTP_SUCCESS(res) && !ap_is_HTTP_SUCCESS(sr->status))  {
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-                     "LDAP update sub request had problems (%d:%d): %s",
-                     res, sr->status, redirect_uri);
-    }
-    res = DONE;
-    ap_destroy_sub_req(sr);
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 r->server,
-                 "...subrequest destroyed");
-    ap_kill_timeout(r);
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 r->server,
-                 "...request timeout killed");
-
     return res;
 }
 
@@ -2562,8 +2591,6 @@ static int auth_form_redirect_handler(request_rec *r)
                                                    &psldap_module);
     ap_internal_redirect(conf->psldap_credential_uri, r);
     return OK;
-    return auth_form_redirect(r, conf, conf->psldap_credential_uri,
-                       NULL, NULL);
 }
 
 static int ldap_authenticate_user (request_rec *r)
@@ -3379,8 +3406,9 @@ static int ldap_update_handler(request_rec *r)
         {
             const char *post_login_uri = get_post_login_uri(r);
 
-            auth_form_redirect(r, conf, post_login_uri, user, password);
-            return res;
+            set_psldap_auth_cookie(r, conf, user, password);
+            ap_table_set(r->notes, PSLDAP_REDIRECT_URI, post_login_uri);
+            res = ldap_redirect_handler(r);
         }
         else
         {
@@ -3456,8 +3484,10 @@ static int ldap_update_handler(request_rec *r)
 #ifdef APACHE_V2
 static int ldap_update_handlerV2(request_rec *r)
 {
-    if (0 != strcmp(r->handler, "ldap-update") ) {
-        return DECLINED;
+    if ((0 != strcmp(r->handler, "ldap-update")) &&
+        (0 != strcmp(r->handler, "ldap-auth-form")) &&
+        (0 != strcmp(r->handler, "ldap-send-redirect")) ) {
+           return DECLINED;
     }
     
     return ldap_update_handler(r);
@@ -3491,6 +3521,7 @@ handler_rec ldap_handlers [] =
 {
     {"ldap-update", ldap_update_handler},
     {"ldap-auth-form", auth_form_redirect_handler},
+    {"ldap-send-redirect", ldap_redirect_handler},
     {NULL}
 };
 

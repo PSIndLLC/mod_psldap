@@ -1,3 +1,16 @@
+Revision 0.81
+===================
+Changed auth form internal redirect to send 302 response - fixes pages with relative
+references to other resources and authenticated directory requests.
+
+Revision 0.80
+===================
+Resolved defect with cookie processing on authentication when the server is misconfigured
+
+Fixed minor syntax error in JS example files.
+
+Updated user documentation.
+	
 Revision 0.79
 ===================
 Repaired compilation error in Apache 2.XX

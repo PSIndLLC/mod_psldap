@@ -276,7 +276,7 @@ file.
       # Bind a query handler
       <Location /ldapupdate>
         SetHandler ldap-update
-        AuthType Form
+        AuthType Basic
         AuthName "LDAP Query"
         require valid-user
       </Location>

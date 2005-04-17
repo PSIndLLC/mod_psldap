@@ -375,11 +375,7 @@ function showRecord(current) {
         pvt_setRecordDisplay(objForm, currentRecord, "inline");
     }
     if (objForm.length > 1) {
-        if (null == recordNbrElmt) {
-            alert("Please wait. The results are not yet completely loaded.");
-        } else {
-            recordNbrElmt.value = currentRecord;
-        }
+        recordNbrElmt.value = currentRecord;
     }
 }
 
@@ -391,10 +387,15 @@ function showPrevRecord() {
     showRecord(currentRecord - 1);
 }
 
-function loadRecordUrl(sel) {
+function loadRecordUrl(sel, target) {
     var objWindow = null;
     if (sel != "") {
-        objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=739, width=669");
+        if ((arguments.length < 2) || (null == target)) {
+            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=739, width=669");
+        } else {
+            var objFrame = document.getElementById(target);
+            objFrame.src = sel;
+        }
     }
     return objWindow;
 }
@@ -486,13 +487,13 @@ function showNextSiblingAndHide(myElmt, argBChangeName, strParentTagName) {
 
 }
 
-function getEditableRecord(dn) {
+function getEditableRecord(dn, target) {
     var getUrl = ldapupdateUri + "?FormAction=Search&" +
 	"search=(objectClass=*)&dn=" + dn +
         "&BinaryHRef=on" +
         "&xsl1=" + psldapRootUri + "/DSML_editform.xsl" +
         "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
-    loadRecordUrl(getUrl);
+    loadRecordUrl(getUrl, target);
 }
 
 function getWindowHeight(objWindow) {
@@ -588,4 +589,114 @@ function initialize() {
 
     showRecord(1);
     window.status = getAllFormElements().length + " records loaded";
+}
+
+function sortByTreeParentId(objItem1, objItem2)
+{
+    if (!objItem1.parentElmtCount) {
+        objItem1.parentElmtCount = objItem1.treeParentId.split(",").length;
+    }
+    if (!objItem2.parentElmtCount) {
+        objItem2.parentElmtCount = objItem2.treeParentId.split(",").length;
+    }
+    var result = objItem1.parentElmtCount - objItem2.parentElmtCount;
+    if (0 == result) {
+        result = objItem1.treeParentId.localeCompare(objItem2.treeParentId);
+    }
+    if (0 == result) {
+        result = objItem1.id.localeCompare(objItem2.id);
+    }
+    return result;
+}
+
+function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
+{
+    // TODO - incorporate parentDelimStr
+    var objTable = document.getElementById(tableIdStr);
+
+    if (null != objTable) {
+        var objElmtArray;
+        if (objTable.rows) {
+            objElmtArray = objTable.rows;
+        } else {
+            objElmtArray = document.getElementsByName(recordNameStr);
+        }
+        var objRecord;
+        var objRecordArray = new Array();
+        var parentRegex = /([^,]*,)/;
+        for (var i = 0; i < objElmtArray.length; i++) {
+            var reNormal = /\s*,\s*/g;
+            objRecord = objElmtArray[i];
+            objRecord.treeParentId = objRecord.getAttribute(rowIdStr).replace(parentRegex, "");
+
+            // Assign parent and normalize white space in id attributes
+            objRecord.treeParentId = objRecord.treeParentId.replace(reNormal, ", ");
+            objRecord.setAttribute(rowIdStr,
+                   objRecord.getAttribute(rowIdStr).replace(reNormal, ", "));
+            objRecord.id = objRecord.id.replace(reNormal, ", ");
+
+            objRecordArray.push(objRecord);
+        }
+        objRecordArray.sort(sortByTreeParentId);
+
+        // Iterate in reverse, identify each child group, removing it from
+        //   the array and moving those tr nodes under a table within the
+        //   tr node of the parent record.
+        while (--i >= 0) {
+            var j = i;
+            var grandparentLength = objRecordArray[i].parentElmtCount - 1;
+            var objParentRecord = null;
+            var childGroup = new Array(objRecordArray[i]);
+            while ((--j >= 0) &&
+                   (0 == objRecordArray[j].treeParentId.localeCompare(
+                                           objRecordArray[i].treeParentId))
+                  ) {
+                childGroup.push(objRecordArray[j]);
+            }
+            i = j + 1;
+
+            // Find the parent record
+            while ((j >= 0) && (null == objParentRecord) &&
+                   (objRecordArray[j].parentElmtCount >= grandparentLength)) {
+                if ((objRecordArray[j].parentElmtCount == grandparentLength) &&
+                    (0 == objRecordArray[j].getAttribute(rowIdStr).localeCompare(
+                                           childGroup[0].treeParentId) ) ) {
+                    objParentRecord = objRecordArray[j];
+                }
+                j--;
+            }
+
+            // Add nodes in childGroup as DOM children of a table element
+            //   under the parent record. If there is no parent, leave them
+            //   at the top level
+            if (null != objParentRecord) {
+                var objTableElmt = document.createElement("TABLE");
+                var objTableBody = document.createElement("TBODY");
+                var objParentCell = objParentRecord;
+                objTableElmt.appendChild(objTableBody);
+
+                while ((null != objParentCell) &&
+                       (0 != objParentCell.tagName.indexOf("TD"))) {
+                    objParentCell = objParentCell.firstChild;
+                }
+
+                objParentCell = objParentCell.nextSibling;
+                objParentCell.appendChild(document.createElement("BR"));
+                objParentCell.appendChild(objTableElmt);
+                while (0 < childGroup.length) {
+                    var childRecord = childGroup.pop();
+                    objTableBody.appendChild(childRecord);
+
+                    var strNewLabel = childRecord.getAttribute(rowIdStr).replace(/([^=]*)=([^,]*),.*/,"$2");
+                    var newTextNode = document.createTextNode(strNewLabel);
+                    var objAnchor = childRecord.firstChild.nextSibling.firstChild;
+                    while (objAnchor.hasChildNodes()) {
+                        objAnchor.removeChild(objAnchor.firstChild);
+                    }
+                    objAnchor.appendChild(newTextNode);
+                }
+            }
+        }
+        addNavigationToTree(tableIdStr);
+    }
 }

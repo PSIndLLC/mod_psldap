@@ -1,0 +1,47 @@
+<html>
+  <head>
+    <style>
+      p.question { font-weight: bold; font-style: italic; }
+      p.answer { }
+    </style>
+  </head>
+  <body>
+    <div id='toc'>
+    </div>
+
+    <ol>
+      <li>
+        <p class='question'>I have psldap globally configured with PsLDAPEnableAuth turned off, but I'm still confronted with an "Authorization Required" message when I try to access a resource. What's wrong?</p>
+        <p class='answer'>
+        I suspect that was has happened is that you have defined one of the following in a parent directory:<br />
+<br />
+        &nbsp;AuthType cookie<br />
+        &nbsp;AuthName "Some Auth"<br />
+        &nbsp;require valid-user<br />
+        <br />
+        When we set the PsLDAPEnableAuth to 'off', psldap will decline the request for authentication and allow another authentication mechanism to handle the authentication / authorization request processing. If no other mechanism is present, the server will correctly deny access to the user. What you really need to do to completely turn off authentication is to ensure the AuthType, AuthName, and require  settings are not present.<br />
+        <br />
+        If you really want to disable authentication and authorization completely in Apache for a given resource / directory under a protected location, add the following line to the configuration:<br />
+        <br />
+        &nbsp;Satisfy any
+        </p>
+      </li>
+      <li>
+        <p class='question'>Authentication doesn't work in my configuration. I get a message as a notice in my syslog stating the following: "LDAP user XXX not found or password invalid." What is happening?</p>
+        <p class='answer'>mod_psldap authenticates the user by opening up a LDAP connection using the provided credentials. One of the credentials is an attribute in the user's record. In order to get the dn to perform a login, mod_psldap must first search the LDAP store for the records with an attribute value that matches the one provided by the user. It will perform this search first using the parameters provided in the PsLDAPBind* attributes and then attempt an anonymous search of the LDAP store. A failure to autheticate indicates one of two conditions:<br />
+          <ol>
+            <li>The account specified with PsLDAPBindDN and PsLDAPBindPassword does not have search rights on the LDAP store for the attribute specified in PsLDAPUserKey.</li>
+            <li>The LDAP server does not allow anonymous search of all records for the value defined in PsLDAPUserKey</li>
+          </ol>
+          <br />
+          To resolve the situation, you must either configure mod_psldap with a username and password to access the LDAP store or configure the LDAP server to allow anonymous access to the attribute defined in PsLDAPUserKey.<br />
+          <br />
+        </p>
+      </li>
+      <li>
+        <p class='question'></p>
+        <p class='answer'></p>
+      </li>
+    </ol>
+  </body>
+</html>

@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.85"
+#define PSLDAP_VERSION_LABEL "0.86"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -946,8 +946,9 @@ static psldap_cache_item* psldap_cache_item_create(request_rec *r,
     server_rec *s = r->server;
     const char *dn = a_dn;
     const char *groups = a_groups;
-    psldap_cache_item *result = ap_mm_calloc(cache_mem_mgr, 1,
-                                             sizeof(psldap_cache_item));
+    psldap_cache_item *result = (NULL == cache_mem_mgr) ? NULL :
+        ap_mm_calloc(cache_mem_mgr, 1, sizeof(psldap_cache_item));
+
     if (NULL != result) {
 
         /* Insert the values retrieved from LDAP into the cache */
@@ -990,7 +991,7 @@ static psldap_cache_item* psldap_cache_item_create(request_rec *r,
         } else {
             psldap_cache_add_item(r, 0, result);
         }
-    } else {
+    } else if (NULL == cache_mem_mgr) {
       	ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
                      "Error creating cache item <%s:%s>",
                      (NULL == dn) ? "NULL" : dn,
@@ -1360,6 +1361,10 @@ static const char* set_ldap_slot(cmd_parms *parms, void *mconfig,
     {
         lac->psldap_bindmethod = LDAP_AUTH_SASL;
     }
+    else if((NULL != to) && (0 == strcasecmp("none", to)) )
+    {
+        lac->psldap_bindmethod = LDAP_AUTH_NONE;
+    }
     else
     {
         lac->psldap_bindmethod = LDAP_AUTH_SIMPLE;
@@ -1388,7 +1393,8 @@ command_rec ldap_auth_cmds[] = {
       OR_AUTHCFG, TAKE1, 
       "DN used to bind to the LDAP directory, if binding with provided"
       " credentials is not desired. This value is also used to initially bind"
-      " to acquire the DN of the authenticating user."
+      " to acquire the DN of the authenticating user. If this is unset, the"
+      " value for PsLDAPBindMethod is forced to 'none' "
     },
     { "PsLDAPBindPassword", (cmd_func)ap_set_string_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_bindpassword),
@@ -1485,7 +1491,8 @@ command_rec ldap_auth_cmds[] = {
     { "PsLDAPBindMethod", (cmd_func)set_ldap_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_bindmethod),
       OR_AUTHCFG, TAKE1, 
-      "Set to 'simple', 'krbv41', or 'krbv42' to determine binding to server"
+      "Set to 'none', 'simple', 'sasl', 'krbv41', or 'krbv42' to determine"
+      "    binding to server"
     },
     { "PsLDAPSecureAuthCookie", (cmd_func)ap_set_flag_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_secure_auth_cookie),
@@ -1576,16 +1583,18 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
         goto AbortDNAcquisition;
     }
 
-    if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap, conf->psldap_binddn,
-                                               conf->psldap_bindpassword,
-                                               (NULL != conf->psldap_binddn) ?
-					       conf->psldap_bindmethod :
-					       LDAP_AUTH_NONE) )
+    if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap,
+					       (conf->psldap_binddn == NULL) ?
+					       "" : conf->psldap_binddn,
+					       (conf->psldap_bindpassword == NULL) ?
+                                               "" : conf->psldap_bindpassword,
+					       conf->psldap_bindmethod) )
        )
     {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_bind as user <%s> to get username for <%s> failed:"
-		     " %s", conf->psldap_binddn, user,
+		     " %s", (NULL != conf->psldap_binddn) ?
+		     conf->psldap_binddn : "N/A", user,
                      ldap_err2string(err_code));
         /* Don't abort - try to get the username anyway if anonymous access is
 	   available ***
@@ -1650,12 +1659,7 @@ static int set_bind_params(request_rec *r, LDAP **ldap,
 {
     int result = TRUE;
 
-    if(conf->psldap_authsimple)
-    {
-        *user = conf->psldap_binddn;
-        *password = conf->psldap_bindpassword;
-    }
-    else if (conf->psldap_authexternal)
+    if (conf->psldap_authexternal)
     {
         /* Should we really check for empty passwords? What if the password in
            the LDAP server is blank, like for a guest account? Also note that
@@ -1672,7 +1676,11 @@ static int set_bind_params(request_rec *r, LDAP **ldap,
         {
             *user = get_user_dn(r, ldap, *user, *password, conf);
         }
+    } else if(conf->psldap_authsimple) {
+        *user = conf->psldap_binddn;
+        *password = conf->psldap_bindpassword;
     }
+
 
     return result;
 }
@@ -1973,11 +1981,16 @@ static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
     if(set_bind_params(r, ldap, conf, &bindas, &bindpass))
     {
         int err_code;
-        if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap, bindas, bindpass,
+        if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap,
+						   (NULL == bindas) ? "" :
+						   bindas,
+						   (NULL == bindpass) ? "" :
+						   bindpass,
 						   conf->psldap_bindmethod)))
-        {
+	{
             ap_log_error(APLOG_MARK, APLOG_WARNING DEBUG_ERRNO, r->server,
-                         "ldap_bind as user <%s> failed: %s", bindas,
+                         "ldap_bind as user <%s> failed: %s",
+			 (NULL != bindas) ? bindas : "N/A",
 			 ldap_err2string(err_code));
             if(freeLdap) ldap_unbind_s(*ldap);
             *ldap = NULL;
@@ -3033,7 +3046,7 @@ ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
         } else {
             res = DECLINED;
         }
-    } else if ((OK == res) && cacheResultMissing) {
+    } else if ((OK == res) && cacheResultMissing && (NULL != cache_mem_mgr)) {
         ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                      "Cached user credentials and info for user %s: %s",
                      sec->psldap_hosts, sent_user);
@@ -3998,7 +4011,8 @@ static int ldap_update_handler(request_rec *r)
         ) {
         ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
                      "ldap_bind as user <%s> failed on ldap update: %s",
-                     bindas, ldap_err2string(err_code));
+                     (NULL != bindas) ? bindas : "N/A",
+		     ldap_err2string(err_code));
         res = HTTP_INTERNAL_SERVER_ERROR;
     } else {
         const char *action = NULL;

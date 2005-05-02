@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.86"
+#define PSLDAP_VERSION_LABEL "0.87"
 
 #include "httpd.h"
 #include "http_config.h"

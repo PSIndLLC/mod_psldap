@@ -94,7 +94,6 @@
                 </xsl:element>
               </xsl:element>
 
-
               <xsl:if test="$recordCount &gt; 1">
                 <xsl:element name="span">
                   <xsl:element name="a">
@@ -159,7 +158,7 @@
         <xsl:sort select="attr[@name='ou']/value" />
         <xsl:with-param name='heading'>Unit</xsl:with-param>
       </xsl:apply-templates>
-      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalPerson')]/ancestor::searchResultEntry" mode="organizationalPerson">
+      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')]/ancestor::searchResultEntry" mode="organizationalPerson">
         <xsl:sort select="attr[@name='sn']/value" />
         <xsl:sort select="attr[@name='givenName']/value" />
         <xsl:sort select="attr[@name='cn']/value" />
@@ -500,7 +499,7 @@
           <table>
             <tr>
               <xsl:choose>
-                 <xsl:when test="(attribute::dn='')" >
+                <xsl:when test="(attribute::dn='')" >
                   <xsl:comment>
                     The template XML should contain a userPassword entry
                   </xsl:comment>
@@ -508,6 +507,12 @@
                 <xsl:otherwise>
                 </xsl:otherwise>
               </xsl:choose>
+              <xsl:if test="((0 = count(attr[@name='userPassword'])) and (not (0 = count(attr[@name='objectClass']/value[text()='person']))))">
+                <xsl:call-template name="genericAttribute">
+                  <xsl:with-param name='label'>Password</xsl:with-param>
+                  <xsl:with-param name='attrType'>userPassword</xsl:with-param>
+                </xsl:call-template>
+              </xsl:if>  
               <xsl:apply-templates select="attr[@name='userPassword']" >
                 <xsl:with-param name='label'>Password</xsl:with-param>
               </xsl:apply-templates>
@@ -520,6 +525,32 @@
                 <xsl:with-param name="maxwidth">64</xsl:with-param>
               </xsl:call-template>
             </tr>
+            <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">yahooId</xsl:with-param>
+                <xsl:with-param name="label">Yahoo</xsl:with-param>
+                <xsl:with-param name="width">32</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">aimId</xsl:with-param>
+                <xsl:with-param name="label">AIM</xsl:with-param>
+                <xsl:with-param name="width">32</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">skypeId</xsl:with-param>
+                <xsl:with-param name="label">Skype</xsl:with-param>
+                <xsl:with-param name="width">32</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+            </xsl:if>
             <tr>
               <xsl:call-template name="editableAttr">
                 <xsl:with-param name="attrType">o</xsl:with-param>
@@ -769,13 +800,14 @@
   <xsl:param name="width" select="20" />
   <xsl:param name="maxwidth" select="64" />
   <xsl:param name='attrType' select="ancestor-or-self::attr/attribute::name" />
+  <xsl:param name='default' select="." />
 
   <xsl:element name="input">
     <xsl:attribute name="type">password</xsl:attribute>
     <xsl:attribute name="name"><xsl:value-of select='$attrType' /><xsl:value-of select='$suffix' /></xsl:attribute>
     <xsl:attribute name="size"><xsl:value-of select='$width' /></xsl:attribute>
     <xsl:attribute name="maxlength"><xsl:value-of select='$maxwidth' /></xsl:attribute>
-    <xsl:attribute name="value"><xsl:value-of select='.' /></xsl:attribute>
+    <xsl:attribute name="value"><xsl:value-of select='$default' /></xsl:attribute>
   </xsl:element>
 </xsl:template>
 
@@ -977,11 +1009,11 @@
   </xsl:for-each>
 </xsl:template>
 
-<xsl:template match="attr">
+<xsl:template match="attr" name="genericAttribute">
   <xsl:param name="label" select="@name" />
   <xsl:param name="width" select="20" />
   <xsl:param name="maxwidth" select="64" />
-  <xsl:variable name='attrType' select='@name' />
+  <xsl:param name='attrType' select='@name' />
 
   <td class="label">
     <xsl:element name="label">
@@ -989,6 +1021,26 @@
     </xsl:element>
   </td>
   <td class="data">
+    <xsl:if test="(not (@name=$attrType))">
+      <xsl:choose>
+        <xsl:when test="($label = 'Password')" >
+          <xsl:call-template name="password">
+            <xsl:with-param name='width'><xsl:value-of select='$width' /></xsl:with-param>
+            <xsl:with-param name='maxwidth'><xsl:value-of select='$maxwidth' /></xsl:with-param>
+            <xsl:with-param name='suffix'>-1</xsl:with-param>
+            <xsl:with-param name='attrType'><xsl:value-of select='$attrType' /></xsl:with-param>
+            <xsl:with-param name='default'></xsl:with-param>
+          </xsl:call-template>
+        </xsl:when>
+        <xsl:otherwise>
+          <xsl:call-template name="textinput">
+            <xsl:with-param name="suffix"><xsl:number value="1" format="-1" /></xsl:with-param>
+            <xsl:with-param name='width'><xsl:value-of select='$width' /></xsl:with-param>
+            <xsl:with-param name='maxwidth'><xsl:value-of select='$maxwidth' /></xsl:with-param>
+          </xsl:call-template>
+        </xsl:otherwise>
+      </xsl:choose>
+    </xsl:if>
     <xsl:for-each select='./value'>
       <xsl:sort select='.' />
       <xsl:choose>
@@ -1012,7 +1064,7 @@
 
 <xsl:template match="searchResultEntry" mode="recordHead">
   <xsl:param name="oClass" select="attr[@name='objectClass']/value[(position()=1)]" />
-  <table class="menubar"><tr>
+  <table width='100%' cellspacing='0'><tr>
     <td class="menubar_left" />
     <td class="menubar">
       <table width='100%'><tr>

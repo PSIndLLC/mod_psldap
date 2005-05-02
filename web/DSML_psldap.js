@@ -609,6 +609,18 @@ function sortByTreeParentId(objItem1, objItem2)
     return result;
 }
 
+function sortByTreeParentIdManager(objItem1, objItem2)
+{
+    var result = 0;
+    if (0 == result) {
+        result = objItem1.treeParentId.localeCompare(objItem2.treeParentId);
+    }
+    if (0 == result) {
+        result = objItem1.id.localeCompare(objItem2.id);
+    }
+    return result;
+}
+
 function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
 {
     // TODO - incorporate parentDelimStr
@@ -624,10 +636,17 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
         var objRecord;
         var objRecordArray = new Array();
         var parentRegex = /([^,]*,)/;
+        var managerTree = (0 == parentDelimStr.indexOf("manager"));
+
         for (var i = 0; i < objElmtArray.length; i++) {
+            var manager = null;
             var reNormal = /\s*,\s*/g;
             objRecord = objElmtArray[i];
-            objRecord.treeParentId = objRecord.getAttribute(rowIdStr).replace(parentRegex, "");
+            if (managerTree) {
+                objRecord.treeParentId = objRecord.getAttribute("manager");
+            } else  {
+                objRecord.treeParentId = objRecord.getAttribute(rowIdStr).replace(parentRegex, "");
+            }
 
             // Assign parent and normalize white space in id attributes
             objRecord.treeParentId = objRecord.treeParentId.replace(reNormal, ", ");
@@ -637,63 +656,73 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
 
             objRecordArray.push(objRecord);
         }
-        objRecordArray.sort(sortByTreeParentId);
 
-        // Iterate in reverse, identify each child group, removing it from
-        //   the array and moving those tr nodes under a table within the
-        //   tr node of the parent record.
-        while (--i >= 0) {
-            var j = i;
-            var grandparentLength = objRecordArray[i].parentElmtCount - 1;
-            var objParentRecord = null;
-            var childGroup = new Array(objRecordArray[i]);
-            while ((--j >= 0) &&
-                   (0 == objRecordArray[j].treeParentId.localeCompare(
+        if (managerTree) {
+            objRecordArray.sort(sortByTreeParentIdManager);
+        }  else {
+            objRecordArray.sort(sortByTreeParentId);
+
+            // Iterate in reverse, identify each child group, removing it from
+            //   the array and moving those tr nodes under a table within the
+            //   tr node of the parent record.
+            while (--i >= 0) {
+                var j = i;
+                var grandparentLength = objRecordArray[i].parentElmtCount - 1;
+                var objParentRecord = null;
+                var childGroup = new Array(objRecordArray[i]);
+                while ((--j >= 0) &&
+                       (0 == objRecordArray[j].treeParentId.localeCompare(
                                            objRecordArray[i].treeParentId))
-                  ) {
-                childGroup.push(objRecordArray[j]);
-            }
-            i = j + 1;
-
-            // Find the parent record
-            while ((j >= 0) && (null == objParentRecord) &&
-                   (objRecordArray[j].parentElmtCount >= grandparentLength)) {
-                if ((objRecordArray[j].parentElmtCount == grandparentLength) &&
-                    (0 == objRecordArray[j].getAttribute(rowIdStr).localeCompare(
-                                           childGroup[0].treeParentId) ) ) {
-                    objParentRecord = objRecordArray[j];
+                      ) {
+                    childGroup.push(objRecordArray[j]);
                 }
-                j--;
-            }
-
-            // Add nodes in childGroup as DOM children of a table element
-            //   under the parent record. If there is no parent, leave them
-            //   at the top level
-            if (null != objParentRecord) {
-                var objTableElmt = document.createElement("TABLE");
-                var objTableBody = document.createElement("TBODY");
-                var objParentCell = objParentRecord;
-                objTableElmt.appendChild(objTableBody);
-
-                while ((null != objParentCell) &&
-                       (0 != objParentCell.tagName.indexOf("TD"))) {
-                    objParentCell = objParentCell.firstChild;
-                }
-
-                objParentCell = objParentCell.nextSibling;
-                objParentCell.appendChild(document.createElement("BR"));
-                objParentCell.appendChild(objTableElmt);
-                while (0 < childGroup.length) {
-                    var childRecord = childGroup.pop();
-                    objTableBody.appendChild(childRecord);
-
-                    var strNewLabel = childRecord.getAttribute(rowIdStr).replace(/([^=]*)=([^,]*),.*/,"$2");
-                    var newTextNode = document.createTextNode(strNewLabel);
-                    var objAnchor = childRecord.firstChild.nextSibling.firstChild;
-                    while (objAnchor.hasChildNodes()) {
-                        objAnchor.removeChild(objAnchor.firstChild);
+                i = j + 1;
+    
+                // Find the parent record
+                while ((j >= 0) && (null == objParentRecord) &&
+                       (objRecordArray[j].parentElmtCount >= grandparentLength)) {
+                    if ((objRecordArray[j].parentElmtCount == grandparentLength) &&
+                        (0 == objRecordArray[j].getAttribute(rowIdStr).localeCompare(
+                                               childGroup[0].treeParentId) ) ) {
+                        objParentRecord = objRecordArray[j];
                     }
-                    objAnchor.appendChild(newTextNode);
+                    j--;
+                }
+    
+                // Add nodes in childGroup as DOM children of a table element
+                //   under the parent record. If there is no parent, leave them
+                //   at the top level
+                if (null != objParentRecord) {
+                    var objTableElmt = document.createElement("TABLE");
+                    var objTableBody = document.createElement("TBODY");
+                    var objParentCell = objParentRecord;
+                    objTableElmt.appendChild(objTableBody);
+                    objTableBody.style.width = "100%";
+                    objTableElmt.style.width = "100%";
+    
+                    while ((null != objParentCell) &&
+                           (0 != objParentCell.tagName.indexOf("TD"))) {
+                        objParentCell = objParentCell.firstChild;
+                    }
+    
+                    objParentCell = objParentCell.nextSibling;
+                    objParentCell.appendChild(document.createElement("BR"));
+                    objParentCell.appendChild(objTableElmt);
+                    while (0 < childGroup.length) {
+                        var childRecord = childGroup.pop();
+                        objTableBody.appendChild(childRecord);
+    
+                        var strNewLabel = childRecord.getAttribute(rowIdStr).replace(/([^=]*)=([^,]*),.*/,"$2");
+                        var newTextNode = document.createTextNode(strNewLabel);
+                        var objAnchor = childRecord.firstChild.nextSibling.firstChild;
+                        //if (objAnchor.tagName != "A") {
+                        //    objAnchor = objAnchor.nextSibling;
+                        //}
+                        while (objAnchor.hasChildNodes()) {
+                            objAnchor.removeChild(objAnchor.firstChild);
+                        }
+                        objAnchor.appendChild(newTextNode);
+                    }
                 }
             }
         }

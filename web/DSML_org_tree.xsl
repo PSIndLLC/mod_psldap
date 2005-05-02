@@ -52,8 +52,15 @@
             <xsl:attribute name="name">LDAPRecord</xsl:attribute>
             <xsl:attribute name="recordid"><xsl:value-of select="@dn"/></xsl:attribute>
             <xsl:attribute name="id"><xsl:value-of select="@dn"/></xsl:attribute>
-            <td width="12px">&nbsp;</td>
-            <td>
+            <xsl:element name="td" />
+            <xsl:element name="td">
+              <xsl:attribute name="width">*</xsl:attribute>
+              <xsl:attribute name="objectclass"><xsl:choose>
+                  <xsl:when test="(attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')])" >organizationalPerson</xsl:when>
+                  <xsl:when test="(attr[@name='objectClass']/value[(text()='organization')])" >organization</xsl:when>
+                  <xsl:when test="(attr[@name='objectClass']/value[(text()='organizationalUnit')])" >organizationalUnit</xsl:when>
+                  <xsl:when test="(attr[@name='objectClass']/value[(text()='groupOfUniqueNames')])" >groupOfUniqueNames</xsl:when>
+              </xsl:choose></xsl:attribute>
               <xsl:element name="a">
                 <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>", "editFrame");</xsl:attribute>
                 <xsl:choose>
@@ -71,7 +78,7 @@
                   </xsl:when>
                 </xsl:choose>
               </xsl:element>
-            </td>
+            </xsl:element>
           </xsl:element>
         </xsl:for-each>
       </table>

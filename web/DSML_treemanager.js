@@ -4,13 +4,11 @@
  */
 
 function generateExpandNodeString(navNode, treeNode) {
-  return "<a class=\"plainlink\" style=\"border-width: 2px; border-style: outset; background-color: blue; color: white;\" href=\"javascript:void(0);\" onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">+</a>"
-  //return "<span onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">+</span>";
+  return "<a style=\"padding-right: 1px; padding-left: 1px; font-type: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none;\" href=\"javascript:void(0);\" onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">+</a>"
 }
 
 function generateCollapseNodeString(navNode, treeNode) {
-  return "<a class=\"plainlink\" style=\"border-width: 2px; border-style: outset; background-color: blue; color: white;\" href=\"javascript:void(0);\" onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">-</a>"
-  //return "<span onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">-</span>";
+  return "<a style=\"padding-right: 2px; padding-left: 2px; font-type: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none; \" href=\"javascript:void(0);\" onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">-</a>"
 }
 
 function collapseTreeNode(navNodeId, treeNodeId) {
@@ -123,6 +121,15 @@ function runAnchorHref(selectedNode) {
   }
 }
 
+function getLastRowOfTable(objTable)
+{
+    var result = objTable.lastChild;
+    if (0 != result.tagName.indexOf("TR")) {
+        result = objTable.lastChild.lastChild;
+    }
+    return result;
+}
+
 /**
  * This method adds tree navigation capabilities to a recursive HTML table
  * based structure. This assumes that each row in the table maintains two
@@ -154,7 +161,10 @@ function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs) {
     navElement.id="nav" + i;
     navElement.name="treeNavigationElement"
     navElement.style.verticalAlign="top";
+    navElement.style.width="12px";
     navElement.innerHTML = generateCollapseNodeString(navElement, nodeList[i]);
+    var lastRow = getLastRowOfTable(nodeList[i]);
+    lastRow.setAttribute("lastnode", "true");
   }
   collapseAllTreeNodes(nodeId);
   if (arguments.length > 2) {
@@ -164,7 +174,7 @@ function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs) {
       requestArgList = requestArgList[1].split("&");
       for (var i = 0; i < requestArgList.length; i++) {
         var thisArg = decodeURIComponent(requestArgList[i]);
-        if ((0 == thisArg.indexOf("album=")) && (thisArg.length > 6) ) {
+        if ((0 == thisArg.indexOf("node=")) && (thisArg.length > 5) ) {
           passedNodeId = thisArg.split("=")[1];
           break;
         }

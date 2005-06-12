@@ -129,6 +129,56 @@
   </tr>
 </xsl:template>
 
+<xsl:template match="attr[@name='imId' or @name='yahooId' or @name='aimId' or @name='skypeId' ]">
+  <xsl:param name='label' select='@name' />
+  <xsl:param name='imtype' select='@name' />
+  <tr>
+    <td class="label" noWrap="true" >
+      <xsl:value-of select='$label' />
+    </td>
+    <td class="data">
+      <xsl:for-each select="./value">
+        <xsl:sort select="." />
+        <xsl:if test="(not (position() = 1))">
+          <br />
+        </xsl:if>
+        <xsl:element name="a">
+          <xsl:attribute name="target">im_window</xsl:attribute>
+          <xsl:value-of select="."/>&nbsp;
+        <xsl:if test="($imtype = 'skypeId')">
+          <xsl:attribute name="href">callto://<xsl:value-of select="."/></xsl:attribute>
+          <xsl:element name="img">
+            <xsl:attribute name="width">80</xsl:attribute>
+            <xsl:attribute name="src">http://goodies.skype.com/graphics/skypeme_btn_small_green.gif</xsl:attribute>
+            <xsl:attribute name="border">0</xsl:attribute>
+          </xsl:element>
+        </xsl:if>
+        <xsl:if test="($imtype = 'yahooId')">
+          <xsl:attribute name="href">http://edit.yahoo.com/config/send_webmesg?.target=<xsl:value-of select="."/>&amp;.src=pg</xsl:attribute>
+          <xsl:element name="img">
+            <xsl:attribute name="width">80</xsl:attribute>
+            <xsl:attribute name="border">0</xsl:attribute>
+            <xsl:attribute name="src">http://opi.yahoo.com/online?u=cptdjpicard&amp;m=g&amp;t=2</xsl:attribute>
+          </xsl:element>
+        </xsl:if>
+        <xsl:if test="($imtype = 'aimId')">
+          <xsl:attribute name="href">aim:goim?screenname=<xsl:value-of select="."/>&amp;message=hi.+are+you+there?</xsl:attribute>
+          <xsl:element name="img">
+            <xsl:attribute name="src">http://big.oscar.aol.com/cptdpicard?on_url=http://www.aim.com/remote/gr/MNB_online.gif&amp;off_url=http://www.aim.com/remote/gr/MNB_offline.gif</xsl:attribute>
+            <xsl:attribute name="border">0</xsl:attribute>
+            <xsl:attribute name="width">11</xsl:attribute>
+            <xsl:attribute name="height">13</xsl:attribute>
+          </xsl:element>
+        </xsl:if>
+        <xsl:if test="($imtype = 'imId')">
+          <xsl:attribute name="href">im://<xsl:value-of select="."/></xsl:attribute>
+        </xsl:if>
+        </xsl:element>
+      </xsl:for-each>
+    </td>
+  </tr>
+</xsl:template>
+
 <xsl:template match="searchResultEntry" mode="searchResultEntryTitle">
   <xsl:choose>
     <xsl:when test="(attr[@name='sn']/value) and (attr[@name='givenName']/value)" >
@@ -157,8 +207,8 @@
   </xsl:if>
   <table name='cardInstance' width='100%' border='0' cellspacing='0'>
     <tr><td noWrap="true" >
-      <table class="menubar"><tr>
-        <td class="menubar_left" ><img src="images/left_header.gif" /></td>
+      <table width='100%' cellspacing='0'><tr>
+        <td class="menubar_left" ></td>
         <td class="menubar" noWrap="true" >
           <table width="100%"><tr>
             <td noWrap="true" >
@@ -195,7 +245,7 @@
             </td>
           </tr></table>
         </td>
-        <td class="menubar_right" ><img src="images/right_header.gif" /></td>
+        <td class="menubar_right" ></td>
       </tr></table>
     </td></tr>
     <tr><td>
@@ -212,6 +262,18 @@
         </xsl:if>
         <xsl:apply-templates select="attr[@name='mail']" >
           <xsl:with-param name='label'>e-Mail</xsl:with-param>
+        </xsl:apply-templates>
+        <xsl:apply-templates select="attr[@name='imId']" >
+          <xsl:with-param name='label'>IM</xsl:with-param>
+        </xsl:apply-templates>
+        <xsl:apply-templates select="attr[@name='yahooId']" >
+          <xsl:with-param name='label'>Yahoo</xsl:with-param>
+        </xsl:apply-templates>
+        <xsl:apply-templates select="attr[@name='aimId']" >
+          <xsl:with-param name='label'>AIM</xsl:with-param>
+        </xsl:apply-templates>
+        <xsl:apply-templates select="attr[@name='skypeId']" >
+          <xsl:with-param name='label'>Skype</xsl:with-param>
         </xsl:apply-templates>
         <xsl:apply-templates select="attr[@name='telephoneNumber']" >
 	  <xsl:with-param name='label'>Work Phone</xsl:with-param>

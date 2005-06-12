@@ -9,6 +9,11 @@ a.headerlink:link { color: black ; text-decoration: none; }
 a.headerlink:visited { color: black ; text-decoration: none; }
 a.plainlink:link { color: #00FF00; }
 
+TR.personal_info { display: none; }
+TR.work_info { display: block; }
+TR.other_info { display: none; }
+TR.im_info { display: none; }
+
 td.menubar input { margin-top: 3px; margin-bottom: 3px; font-family: arial; font-size: 12px; }
 
 pre, input, textarea { margin-top: 0px; margin-bottom: 0px; font-family: arial; font-size: 12px; }
@@ -32,9 +37,9 @@ td.label { padding-left: 10px; padding-right: 5px; padding-top: 3px; vertical-al
 
 td.menubar { background: url(/psldap/images/header_bg.gif); }
 td.menubar, td.menubar a, td.menubar td { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; }
-td.menubar_left { background: url(/psldap/images/left_header.gif); background-repeat: no-repeat; width: 21px; padding-right: 0px; }
+td.menubar_left { background: url(/psldap/images/left_header.gif); background-repeat: no-repeat; width: 20px; }
 td.menubar_left img { width: 21px; }
-td.menubar_right { background: url(/psldap/images/right_header.gif); background-repeat: no-repeat; width: 21px; padding-left: 0px; }
+td.menubar_right { background: url(/psldap/images/right_header.gif); background-repeat: no-repeat; width: 20px; }
 td.menubar_right img { width: 21px; }
 
 table#orgTable tr td a {

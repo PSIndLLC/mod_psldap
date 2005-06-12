@@ -31,6 +31,7 @@
         <attr name="objectClass">
           <value>top</value>
           <value>organizationalUnit</value>
+          <value>OpenLDAPou</value>
           <value>labeledURIObject</value>
         </attr>
       </searchResultEntry>

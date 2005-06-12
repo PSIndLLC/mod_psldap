@@ -1,0 +1,57 @@
+# The following schema applies to the PSInd object structure
+
+objectIdentifier PSIndRoot 1.3.6.1.4.1.22788
+
+# The following schema applies to the definition of instant message
+#  service addresses and their handling
+objectIdentifier PSIndCore PSIndRoot:1
+objectIdentifier PSIndCoreAttributeType PSIndCore:1
+objectIdentifier PSIndCoreObjectClass PSIndCore:2
+
+objectclass ( PSIndCoreObjectClass:1
+    NAME 'psldapOrganizationalUnit'
+    DESC 'Organizational supplement to unit'
+    SUP top AUXILIARY
+    MAY ( o ) )
+
+# The following schema applies to the definition of instant message
+#  service addresses and their handling
+objectIdentifier PSIndIM PSIndRoot:2
+objectIdentifier PSIndIMattributeType PSIndIM:1
+objectIdentifier PSIndIMobjectClass PSIndIM:2
+
+attributetype ( PSIndIMattributeType:10
+    NAME ('imId' 'imIdentifier')
+    DESC 'Instant messenger identifier'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndIMattributeType:11
+    NAME ('yahooId' 'yahooIdentifier')
+    DESC 'Yahoo Instant messenger identifier'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndIMattributeType:12
+    NAME ('aimId' 'aimIdentifier')
+    DESC 'AOL Instant messenger identifier'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndIMattributeType:13
+    NAME ('skypeId' 'skypeIdentifier')
+    DESC 'Skype Instant messenger identifier'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+objectclass ( PSIndIMobjectClass:1
+    NAME 'imIdObject'
+    DESC 'IM Identifier object'
+    SUP top AUXILIARY
+    MAY ( imId $ yahooId $ aimId $ skypeId ) )
+
+

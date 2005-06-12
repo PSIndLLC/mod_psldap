@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.87
+Version 0.88
 by David Picard
 
 This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
@@ -17,7 +17,7 @@ This module allows the web user to authenticate against an LDAP store and
 manage information in the LDAP store.
 
 For history of this module, review the ChangeLog file. The latest version of
-this module can be acquired at http://www.psind.com:8080/projects/mod_psldap/
+this module can be acquired at http://www.psind.com/projects/mod_psldap/
 
 Feature Summary
 ================

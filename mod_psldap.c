@@ -20,7 +20,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.87"
+#define PSLDAP_VERSION_LABEL "0.88"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -1049,6 +1049,7 @@ typedef struct
     char *fieldName;
     char *responseType;
     int binaryAsHref;
+    int searchScope;
 } psldap_status;
 
 static void psldap_status_init(psldap_status *ps, request_rec *r, LDAP *ldap,
@@ -1069,6 +1070,7 @@ static void psldap_status_init(psldap_status *ps, request_rec *r, LDAP *ldap,
     ps->fieldName = NULL;
     ps->responseType = NULL;
     ps->binaryAsHref = 0;    
+    ps->searchScope = LDAP_SCOPE_DEFAULT;    
     set_lderrno(ps->ldap, LDAP_SUCCESS);
 }
 
@@ -2794,7 +2796,16 @@ static int get_provided_authvalue(request_rec *r, const char* field,
         } else if (0 == strcmp("cookie", authType)) {
             return get_cookie_fieldvalue(r, fieldKey, sent_value) ? OK:
                 HTTP_UNAUTHORIZED;
-        }
+        } else {
+	    /* Default handling assumes the request has the user info...
+	       From where do we get the password? This is only useful on
+	       authorization - but an unauthenticated user might be able to
+	       gain access in a poorly configured server */
+	    if (fieldKey == sec->psldap_userkey) {
+                *sent_value = ap_pstrdup(r->pool, get_user_name(r) );
+                return OK;
+            }
+	}
     } else {
         table *env = r->subprocess_env;
         *sent_value = ap_pstrdup(r->pool, ap_table_get(env, fieldKey) );
@@ -3082,12 +3093,13 @@ static int ldap_check_authz(request_rec *r)
     }
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
                  "Checking LDAP user authorization");
-    if (!reqs_arr || 
-        (OK != get_provided_credentials (r, sec, &sent_pw, &user)) )
+    if (!reqs_arr ||
+	((OK != get_provided_credentials (r, sec, &sent_pw, &user)) &&
+	 !sec->psldap_authsimple)
+	)
     {
         return DECLINED;
     }
-    
 
     /* Check the membership in any required groups.*/
     for(x=0; x < reqs_arr->nelts; x++)
@@ -3583,9 +3595,9 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
  **/
 static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
                                         LDAP *ldap, psldap_status *ps,
-                                        char *ldap_base, char *ldap_query,
-                                        const char *attr, const char* mimeType,
-                                        int binaryAsHref)
+                                        char *ldap_base, int scope,
+					char *ldap_query, const char *attr,
+					const char* mimeType, int binaryAsHref)
 {
     LDAPMessage *ld_result = NULL, *ld_entry = NULL;
     const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
@@ -3597,8 +3609,12 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
                  "%s / %d / %s ...",
                  ldap_base, conf->psldap_searchscope, ldap_query);
     ldap_attrs[0] = attr;
+    if (LDAP_SCOPE_DEFAULT == scope)
+    {
+	scope = conf->psldap_searchscope;
+    }
     if(LDAP_SUCCESS !=
-       (err_code = ldap_search_s(ldap, ldap_base, conf->psldap_searchscope,
+       (err_code = ldap_search_s(ldap, ldap_base, scope,
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
@@ -3638,6 +3654,7 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
     char *response_type = ps->responseType;
     char *xslUri1 = ps->xslPrimaryUri;
     char *xslUri2 = ps->xslSecondaryUri;
+    int ldap_scope = ps->searchScope;
     int binaryHRef = ps->binaryAsHref;
 
     if (NULL == key) {
@@ -3666,7 +3683,9 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
                           " <batchResponse>\n",
                           NULL);
             }
-            write_dsml_sr_to_connection(r, conf, ldap, ps, ldap_base, ldap_query,
+            write_dsml_sr_to_connection(r, conf, ldap, ps, ldap_base,
+					LDAP_SCOPE_DEFAULT,
+					ldap_query,
                                         ps->fieldName, ps->responseType, 
                                         ps->binaryAsHref);
             if (NULL == ps->responseType) {
@@ -3685,6 +3704,16 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
             ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
                           "LDAP query pattern set to %s",
                           ldap_query);
+        } else if(0 == strcmp("scope", key + LDAP_KEY_PREFIX_LEN)) {
+	    if (0 == strcmp("subtree", val)) {
+	        ldap_scope = ps->searchScope = LDAP_SCOPE_SUBTREE;
+	    } else if (0 == strcmp("onelevel", val)) {
+	        ldap_scope = ps->searchScope = LDAP_SCOPE_ONELEVEL;
+	    } else if (0 == strcmp("base", val)) {
+	        ldap_scope = ps->searchScope = LDAP_SCOPE_BASE;
+	    }
+            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
+                          "LDAP searchScope set to %d", ldap_scope);
         } else if (0 == strcmp("xsl1", key + LDAP_KEY_PREFIX_LEN)) {
             xslUri1 = ps->xslPrimaryUri = ap_pstrdup(r->pool, val);
             ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,

@@ -489,7 +489,7 @@ function showNextSiblingAndHide(myElmt, argBChangeName, strParentTagName) {
 
 function getEditableRecord(dn, target) {
     var getUrl = ldapupdateUri + "?FormAction=Search&" +
-	"search=(objectClass=*)&dn=" + dn +
+	"search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
         "&BinaryHRef=on" +
         "&xsl1=" + psldapRootUri + "/DSML_editform.xsl" +
         "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";

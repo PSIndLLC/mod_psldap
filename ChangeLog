@@ -1,3 +1,13 @@
+Revision 0.88
+===================
+Fixed load of editable forms for dn's containing an '&'
+
+Addressed minor defect in authorization when psldap authentication is not used.
+
+Addition of scope to URI based search to improve edit form link performance
+
+Addition of links to yahoo, aim, and skype when using the PSInd LDAP objects defined in psldap.schema
+	
 Revision 0.87
 ===================
 Addition of management based tree for person records

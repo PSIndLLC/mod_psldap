@@ -25,6 +25,62 @@
         <xsl:attribute name="language">JavaScript</xsl:attribute>
         <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/DSML_psldap.js</xsl:attribute>
       </xsl:element>
+      <xsl:element name="script">
+        <xsl:attribute name="language">JavaScript</xsl:attribute>
+        function showInfo(personal, work, other, im )
+        {
+            var i = document.styleSheets.length;
+            while (i-- > 0) {
+                var ss = document.styleSheets[i];
+                var rules = ss.cssRules;
+                var j;
+                if (undefined == rules) rules = ss.rules;
+                j = rules.length;
+
+                while ( j-- > 0) {
+                    var rule = rules[j];
+                    if (undefined == ss.cssRules) rule = rules.item(j);
+                    if ((0 == rule.selectorText.indexOf("TR.personal_info")) ||
+                        (0 == rule.selectorText.indexOf("tr.personal_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.personal_info", "display: " + personal + ";", j);
+                        } else {
+                            ss.insertRule("tr.personal_info { display: " + personal + "; }", j);
+                        }
+                    } else if ((0 == rule.selectorText.indexOf("TR.work_info")) ||
+                               (0 == rule.selectorText.indexOf("tr.work_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.work_info", "display: " + work + ";", j);
+                        } else {
+                            ss.insertRule("tr.work_info { display: " + work + "; }", j);
+                        }
+                    } else if ((0 == rule.selectorText.indexOf("TR.other_info")) ||
+                               (0 == rule.selectorText.indexOf("tr.other_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.other_info", "display: " + other + ";", j);
+                        } else {
+                            ss.insertRule("tr.other_info { display: " + other + "; }", j);
+                        }
+                    } else if ((0 == rule.selectorText.indexOf("TR.im_info")) ||
+                               (0 == rule.selectorText.indexOf("tr.im_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.im_info", "display: " + im + ";", j);
+                        } else {
+                            ss.insertRule("tr.im_info { display: " + im + "; }", j);
+                        }
+                    }
+                }
+            }
+        }
+      </xsl:element>
     </xsl:element>
     <xsl:element name="body">
       <xsl:attribute name="onload">initialize()</xsl:attribute>
@@ -268,11 +324,23 @@
                 </table>
               </td></tr>
       
-              <tr><td>
+              <tr class="work_info"><td>
                 <xsl:apply-templates select="." mode="orgAddress">
                 </xsl:apply-templates>
               </td></tr>
-              <tr><td>
+
+              <tr class="other_info"><td>
+                <xsl:element name="fieldset">
+                <xsl:element name="Legend">
+                  <a href="javascript: void showInfo('none', 'none','block', 'none');">Other Info</a> | 
+                  <xsl:if test="attr[@name='objectClass']/value='person'">
+                    <a href="javascript: void showInfo('block', 'none','none','none');">Personal Info</a> | 
+                  </xsl:if>
+                  <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+                    <a href="javascript: void showInfo('none', 'none','none','block');">IM Info</a> | 
+                  </xsl:if>
+                  <a href="javascript: void showInfo('none', 'block','none','none');">Work Info</a>
+                </xsl:element>
                 <table>
                   <tr>
                     <xsl:call-template name="editableAttr">
@@ -284,6 +352,7 @@
                   </tr>
                   <xsl:call-template name="editableAdditionalAddr" />
                 </table>
+                </xsl:element>
                 <br />
               </td></tr>
             </table>
@@ -384,12 +453,23 @@
                 </table>
               </td></tr>
 
-              <tr><td>
+              <tr class="work_info"><td>
                 <xsl:apply-templates select="." mode="orgAddress">
                 </xsl:apply-templates>
               </td></tr>
 
-              <tr><td>
+              <tr class="other_info"><td>
+                <xsl:element name="fieldset">
+                <xsl:element name="Legend">
+                  <a href="javascript: void showInfo('none', 'none','block','none');">Other Info</a> | 
+                  <xsl:if test="attr[@name='objectClass']/value='person'">
+                    <a href="javascript: void showInfo('block', 'none','none','none');">Personal Info</a> | 
+                  </xsl:if>
+                  <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+                    <a href="javascript: void showInfo('none', 'none','none','block');">IM Info</a> | 
+                  </xsl:if>
+                  <a href="javascript: void showInfo('none', 'block','none','none');">Work Info</a>
+                </xsl:element>
                 <table>
                   <tr>
                     <xsl:call-template name="editableAttr">
@@ -402,6 +482,7 @@
                   <xsl:call-template name="editableAdditionalAddr" />
                 </table>
                 <br />
+                </xsl:element>
               </td></tr>
             </table>
 
@@ -525,32 +606,6 @@
                 <xsl:with-param name="maxwidth">64</xsl:with-param>
               </xsl:call-template>
             </tr>
-            <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
-            <tr>
-              <xsl:call-template name="editableAttr">
-                <xsl:with-param name="attrType">yahooId</xsl:with-param>
-                <xsl:with-param name="label">Yahoo</xsl:with-param>
-                <xsl:with-param name="width">32</xsl:with-param>
-                <xsl:with-param name="maxwidth">64</xsl:with-param>
-              </xsl:call-template>
-            </tr>
-            <tr>
-              <xsl:call-template name="editableAttr">
-                <xsl:with-param name="attrType">aimId</xsl:with-param>
-                <xsl:with-param name="label">AIM</xsl:with-param>
-                <xsl:with-param name="width">32</xsl:with-param>
-                <xsl:with-param name="maxwidth">64</xsl:with-param>
-              </xsl:call-template>
-            </tr>
-            <tr>
-              <xsl:call-template name="editableAttr">
-                <xsl:with-param name="attrType">skypeId</xsl:with-param>
-                <xsl:with-param name="label">Skype</xsl:with-param>
-                <xsl:with-param name="width">32</xsl:with-param>
-                <xsl:with-param name="maxwidth">64</xsl:with-param>
-              </xsl:call-template>
-            </tr>
-            </xsl:if>
             <tr>
               <xsl:call-template name="editableAttr">
                 <xsl:with-param name="attrType">o</xsl:with-param>
@@ -602,9 +657,18 @@
           </table>
         </td></tr>
         <xsl:comment>Home information</xsl:comment>
-        <tr id="personal_info"><td>
+        <tr class="personal_info"><td>
           <xsl:element name="fieldset">
-          <xsl:element name="Legend">Personal Info</xsl:element>
+          <xsl:element name="Legend">
+            <xsl:if test="attr[@name='objectClass']/value='person'">
+              <a href="javascript: void showInfo('block', 'none','none','none');">Personal Info</a> | 
+            </xsl:if>
+            <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+              <a href="javascript: void showInfo('none', 'none','none','block');">IM Info</a> | 
+            </xsl:if>
+            <a href="javascript: void showInfo('none', 'block','none','none');">Work Info</a> | 
+            <a href="javascript: void showInfo('none', 'none','block','none');">Other Info</a>
+          </xsl:element>
           <table>
             <tr>
               <xsl:call-template name="editableAttrTA">
@@ -634,18 +698,71 @@
         </td></tr>
 
         <xsl:comment>Work information</xsl:comment>
-        <tr id="work_info"><td>
-        <xsl:apply-templates select="." mode="orgAddress">
-        </xsl:apply-templates>
+        <tr class="work_info"><td>
+          <xsl:apply-templates select="." mode="orgAddress">
+          </xsl:apply-templates>
         </td></tr>
 
-        <tr id="other_info"><td>
+        <tr class="other_info"><td>
+          <xsl:element name="fieldset">
+          <xsl:element name="Legend">
+            <a href="javascript: void showInfo('none', 'none','block','none');">Other Info</a> | 
+            <xsl:if test="attr[@name='objectClass']/value='person'">
+              <a href="javascript: void showInfo('block', 'none','none','none');">Personal Info</a> | 
+            </xsl:if>
+            <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+              <a href="javascript: void showInfo('none', 'none','none','block');">IM Info</a> | 
+            </xsl:if>
+            <a href="javascript: void showInfo('none', 'block','none','none');">Work Info</a>
+          </xsl:element>
           <table>
             <xsl:call-template name="editableAdditionalAddr" />
           </table>
           <br />
+          </xsl:element>
         </td></tr>
 
+        <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+        <tr class="im_info"><td>
+          <xsl:element name="fieldset">
+          <xsl:element name="Legend">
+            <a href="javascript: void showInfo('none', 'none','none','block');">IM Info</a> | 
+            <a href="javascript: void showInfo('none', 'block','none','none');">Work Info</a> | 
+            <a href="javascript: void showInfo('none', 'none','block','none');">Other Info</a> | 
+            <xsl:if test="attr[@name='objectClass']/value='person'">
+              <a href="javascript: void showInfo('block', 'none','none','none');">Personal Info</a>
+            </xsl:if>
+          </xsl:element>
+          <table>
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">yahooId</xsl:with-param>
+                <xsl:with-param name="label">Yahoo</xsl:with-param>
+                <xsl:with-param name="width">32</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">aimId</xsl:with-param>
+                <xsl:with-param name="label">AIM</xsl:with-param>
+                <xsl:with-param name="width">32</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+            <tr>
+              <xsl:call-template name="editableAttr">
+                <xsl:with-param name="attrType">skypeId</xsl:with-param>
+                <xsl:with-param name="label">Skype</xsl:with-param>
+                <xsl:with-param name="width">32</xsl:with-param>
+                <xsl:with-param name="maxwidth">64</xsl:with-param>
+              </xsl:call-template>
+            </tr>
+          </table>
+          <br />
+          </xsl:element>
+        </td></tr>
+        </xsl:if>
       </table>
     </td></tr>
   </table><br />
@@ -761,7 +878,7 @@
 </xsl:template>
 
 <xsl:template name="editableAdditionalAddr">
-  <tr>
+  <tr otherInfo="x121Address">
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">x121Address</xsl:with-param>
       <xsl:with-param name="label">X121 Address</xsl:with-param>
@@ -769,7 +886,7 @@
       <xsl:with-param name="maxwidth">64</xsl:with-param>
     </xsl:call-template>
   </tr>
-  <tr>
+  <tr otherInfo="registeredAddress">
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">registeredAddress</xsl:with-param>
       <xsl:with-param name="label">Registered Address</xsl:with-param>
@@ -777,7 +894,7 @@
       <xsl:with-param name="maxwidth">64</xsl:with-param>
     </xsl:call-template>
   </tr>
-  <tr>
+  <tr otherInfo="destinationIndicator">
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">destinationIndicator</xsl:with-param>
       <xsl:with-param name="label">Destination Indicator</xsl:with-param>
@@ -785,7 +902,7 @@
       <xsl:with-param name="maxwidth">64</xsl:with-param>
     </xsl:call-template>
   </tr>
-  <tr>
+  <tr otherInfo="labeledURI">
     <xsl:call-template name="editableAttr">
       <xsl:with-param name="attrType">labeledURI</xsl:with-param>
       <xsl:with-param name="label">Web Site</xsl:with-param>
@@ -1109,12 +1226,21 @@
 </xsl:template>
 
 <xsl:template match="searchResultEntry" mode="orgAddress">
-  <xsl:element name="fieldset">
-  <xsl:element name="Legend">Office Information</xsl:element>
+   <xsl:element name="fieldset">
+   <xsl:element name="Legend">
+     <a href="javascript: void showInfo('none', 'block','none','none');">Work Info</a> | 
+     <a href="javascript: void showInfo('none', 'none','block','none');">Other Info </a>
+     <xsl:if test="attr[@name='objectClass']/value='person'">
+       <a href="javascript: void showInfo('block', 'none','none','none');">| Personal Info </a>
+     </xsl:if>
+     <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
+       <a href="javascript: void showInfo('none', 'none','none','block');">| IM Info</a> 
+     </xsl:if>
+  </xsl:element>
   <table width='100%'>
     <tr><td>
     <table width='100%'>
-    <tr>
+    <tr workInfo="physicalDeliveryOfficeName">
       <xsl:call-template name="editableAttr">
         <xsl:with-param name="attrType">physicalDeliveryOfficeName</xsl:with-param>
         <xsl:with-param name="label">Bldg</xsl:with-param>
@@ -1123,7 +1249,7 @@
         <xsl:with-param name="maxwidth">64</xsl:with-param>
       </xsl:call-template>
     </tr>
-    <tr>
+    <tr workInfo="street">
       <xsl:call-template name="editableAttr">
         <xsl:with-param name="attrType">street</xsl:with-param>
         <xsl:with-param name="label">Street</xsl:with-param>
@@ -1140,7 +1266,7 @@
         <xsl:with-param name="multirow">no</xsl:with-param>
       </xsl:call-template>
     </tr>
-    <tr>
+    <tr workInfo="l">
        <xsl:call-template name="editableAttr">
          <xsl:with-param name="attrType">l</xsl:with-param>
          <xsl:with-param name="label">City</xsl:with-param>
@@ -1168,7 +1294,7 @@
 
     <tr><td>
       <table>
-        <tr>
+        <tr workInfo="postalAddress">
           <xsl:call-template name="editableAttrTA">
             <xsl:with-param name="attrType">postalAddress</xsl:with-param>
             <xsl:with-param name="label">Address</xsl:with-param>
@@ -1177,7 +1303,7 @@
             <xsl:with-param name="cols">56</xsl:with-param>
           </xsl:call-template>
         </tr>
-    <tr>
+    <tr workInfo="telephoneNumber">
        <xsl:call-template name="editableAttr">
          <xsl:with-param name="attrType">telephoneNumber</xsl:with-param>
          <xsl:with-param name="label">Phone</xsl:with-param>
@@ -1194,7 +1320,7 @@
       </table>
     </td></tr>
 
-    <tr><td>
+    <tr workInfo="telexNumber"><td>
     <table width='100%'>
       <tr>
         <xsl:apply-templates select="attr[@name='telexNumber']" >
@@ -1206,7 +1332,7 @@
     </table>
     </td></tr>
 
-    <tr><td>
+    <tr workInfo="telexTerminalIdentifier"><td>
     <table width='100%'>
       <tr>
         <xsl:apply-templates select="attr[@name='teletexTerminalIdentifier']" >
@@ -1218,7 +1344,7 @@
     </table>
     </td></tr>
 
-    <tr><td>
+    <tr workInfo="internationaliSDNNumber"><td>
     <table width='100%'>
       <tr>
         <xsl:apply-templates select="attr[@name='internationaliSDNNumber']" >

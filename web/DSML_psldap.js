@@ -1,3 +1,26 @@
+/*
+ * mod_psldap
+ *
+ * User Authentication against and maintenance of an LDAP database
+ *
+ * Copyright (C) 2004 David Picard dpicard@psind.com
+ *
+ * http://www.psind.com/projects/mod_psldap/
+ *
+ *   This program is free software; you can redistribute it and/or modify
+ *   it under the terms of version 2 of the GNU General Public License as
+ *   published by the Free Software Foundation
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program; if not, write to the Free Software
+ *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+
 var isNav, isIE;
 
 if (parseInt(navigator.appVersion) >= 4) {
@@ -487,11 +510,61 @@ function showNextSiblingAndHide(myElmt, argBChangeName, strParentTagName) {
 
 }
 
-function getEditableRecord(dn, target) {
+function getXmlNodeByDN(xmlDom) {
+    var result = xmlDom;
+    var candidates = xmlDom.getElementsByTagName("searchResultEntry");
+    for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        if (0 == c.getAttribute("dn").indexOf(getXmlNodeByDN.dn)) {
+            window.status = "Found XML element for " + getXmlNodeByDN.dn;
+            result = c;
+            i = candidates.length;
+        }
+    }
+    return result;
+}
+
+/** This function write the editable record to the target frame and requires
+    psajax functionality...
+ **/
+function writeEditableRecord(dn, target, xslName, xslUri, xslManager,
+                             docTargetId) {
+    var theMgr = (arguments.length > 3) ? xslManager : xslmgr;
+    theMgr.addStylesheet(xslName, xslUri);
+    getXmlNodeByDN.dn = dn;
+    theMgr.transform(xslName, getXmlNodeByDN, target, docTargetId);
+}
+
+function getEditableRecord(dn, target, xmgr) {
+    if (arguments.length < 3) {
+        var getUrl = ldapupdateUri + "?FormAction=Search&" +
+	    "search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
+            "&BinaryHRef=on" +
+            "&xsl1=" + psldapRootUri + "/DSML_editform.xsl" +
+            "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
+        loadRecordUrl(getUrl, target);
+    } else {
+        window.status = "Targeting window / iframe " + top.document.getElementById(target).id;
+        var targetDoc = top.document.getElementById(target);
+        var targetNode = "editableRecords";
+        if ((null != target) && (undefined != target.contentWindow)) {
+            targetDoc = target.contentWindow.document;
+        } else {
+            targetDoc = top.document;
+            targetNode = "editFrame";
+        }
+        writeEditableRecord(dn, targetDoc, "edit",
+                            psldapRootUri + "/DSML_editform.xsl",
+                            xmgr, targetNode);
+    }
+}
+
+function getVCard(dn, target) {
+    //    "&BinaryType=text/x-vcard" +
     var getUrl = ldapupdateUri + "?FormAction=Search&" +
 	"search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
         "&BinaryHRef=on" +
-        "&xsl1=" + psldapRootUri + "/DSML_editform.xsl" +
+        "&xsl1=" + psldapRootUri + "/DSML_vcard.xsl" +
         "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
     loadRecordUrl(getUrl, target);
 }
@@ -626,7 +699,9 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
     // TODO - incorporate parentDelimStr
     var objTable = document.getElementById(tableIdStr);
 
-    if (null != objTable) {
+    if (null == objTable) {
+        alert("Could not find table " + tableIdStr + " to build tree");
+    } else {
         var objElmtArray;
         if (objTable.rows) {
             objElmtArray = objTable.rows;

@@ -1,0 +1,268 @@
+<?xml version="1.0" standalone="yes"?>
+<!doctype html public "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1l/DTD/transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+    <meta name="Author" content="David J. Picard" />
+    <meta name="keywords" lang="us-en" content="" />
+    <meta name="description" content="" />
+    <meta name="robots" content="NOINDEX" />
+    <meta name="copyright" content="&copy; 2006 PSInd, LLC" />
+    <meta name="date" content="2006-02-11T20:00:00-05:00" />
+    <title>PSInd - PsAJAX Test Page</title>
+    <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
+    <link rel="STYLESHEET" type="text/css" media="print" href="/psldap/DSML_psldap.css" />
+
+    <style>
+      fieldset { margin-bottom: 6px; }
+    </style>
+    <script language="JavaScript" src="/psldap/psajax_core.js" ></script>
+    <script language="JavaScript" src="/psldap/psajax_docmgr.js" ></script>
+    <script language="JavaScript" src="/psldap/DSML_psldap.js" ></script>
+    <script language="JavaScript" src="/psldap/DSML_treemanager.js" ></script>
+
+    <script language="JavaScript">
+        var xslmgr;
+        function synchCompareSelect() {
+            var strQuery = "";
+            var searchByElement = document.queryForm.searchby;
+            var searchCompareElement = document.queryForm.searchcompare;
+            var searchValueElement = document.queryForm.searchvalue;
+            strQuery = searchByElement.options[searchByElement.selectedIndex].value;
+            if ("" == strQuery) {
+                // Advanced choice selected
+                searchCompareElement.selectedIndex = 4;
+            } else if (4 == searchCompareElement.selectedIndex) {
+                searchCompareElement.selectedIndex = 3;
+            }
+        }
+        function generateQueryString() {
+            var searchElement = document.queryForm.search;
+            var searchByElement = document.queryForm.searchby;
+            var searchCompareElement = document.queryForm.searchcompare;
+            var searchValueElement = document.queryForm.searchvalue;
+            var strQuery = searchByElement.options[searchByElement.selectedIndex].value;
+            searchElement.value = "(" + strQuery +
+                searchCompareElement.options[searchCompareElement.selectedIndex].value.replace(/\?/i, searchValueElement.value) + ")";
+            strQuery = document.queryForm.action + "?FormAction=Search&scope=subtree&search=" + encodeURI(searchElement.value) + "&dn=" + encodeURI(getLDAPBase());
+            window.status = "Acquiring XML " + strQuery;
+            xslmgr.setXmXML(strQuery);
+            xslmgr.addMgrParameter("xslManager", "xslmgr");
+            if (!xslmgr.transform(getTransformMode(), getSearchResponse, document, "tree")) {
+                window.alert("Failed to render search results");
+            }
+            window.defaultStatus = "LDAP records for filter = " + strQuery + " acquired";
+            return false;
+        }
+        function getLDAPBase() {
+            var searchBase = document.queryForm.dn;
+            return searchBase.value;
+        }
+        function getTransformMode() {
+            var result = document.getElementById("xsl1");
+            return result.value;
+        }
+        function setFormBaseDN() {
+            alert("Loaded window - new dn is ");
+        }
+        function loadDNInitializationFormUrl(objUrl) {
+            var objWindow = loadRecordUrl(objUrl + "?dn=" +
+                                          document.queryForm.dn.value);
+            objWindow.onload='setFormBaseDN';
+        }
+        function resizeResultIframe() {
+            var objIframe = document.getElementById("resultSet");
+            var winHeight = getWindowHeight(window);
+            var ifHeight = 1600;
+            if (null != objIframe) {
+                objIframe.style.height = ifHeight + "px";
+            }
+            if (document.body.scrollHeight > winHeight) {
+                ifHeight -= document.body.scrollHeight - winHeight + 25;
+                objIframe.style.height = ifHeight + "px";
+            }
+        }
+
+        var resizeTimeOutId = 0;
+        function getTopOffset(elmt) {
+            var result = elmt.offsetTop;
+            if (null != elmt.offsetParent) {
+                result += getTopOffset(elmt.offsetParent)
+            }
+            return result;
+        }
+        function resizeTopTable() {
+            if (0 == arguments.length) {
+                if (0 != resizeTimeOutId) {
+                    window.clearTimeout(resizeTimeOutId);
+                }
+                resizeTimeOutId = window.setTimeout("resizeTimeOutId = 0; resizeTopTable(true);", 500);
+            } else {
+                var treeDiv = document.getElementById("tree");
+                var winHeight = getWindowHeight(window);
+                var cellHeight = winHeight - 10 - getTopOffset(treeDiv);
+                if (document.body.scrollHeight > winHeight) {
+                    cellHeight -= 20;
+                }
+                if (cellHeight < 128) cellHeight = 128;
+                treeDiv.style.height = cellHeight + "px";
+                treeDiv.style.width = "auto";
+                treeDiv.style.overflow = "auto";
+            }
+        }
+
+        function getSearchResponse(myxml) {
+            var result = myxml.getElementsByTagName("searchResponse");
+            if (0 < result.length) {
+                return  result[0];
+            } else {
+                return myxml;
+            }
+        }
+        function LoadData() {
+            xslmgr = new XSLManager("/psldap/DSML_new_o.xml");
+            xslmgr.addStylesheet("orgtree", "/psldap/DSML_org_tree.xsl");
+            xslmgr.addStylesheet("mgmttree", "/psldap/DSML_mgmt_tree.xsl");
+            xslmgr.addMgrParameter("xslManager", "xslmgr");
+            //document.getElementById("editFrame").src="DSML_new_o.xml"
+            resizeTopTable(true);
+        }
+
+        function showInfo(personal, work, other, im )
+        {
+            var i = document.styleSheets.length;
+            while (i-- > 0) {
+                var ss = document.styleSheets[i];
+                var rules = ss.cssRules;
+                var j;
+                if (undefined == rules) rules = ss.rules;
+                j = rules.length;
+
+                while ( j-- > 0) {
+                    var rule = rules[j];
+                    if (undefined == ss.cssRules) rule = rules.item(j);
+                    if ((0 == rule.selectorText.indexOf("TR.personal_info")) ||
+                        (0 == rule.selectorText.indexOf("tr.personal_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.personal_info", "display: " + personal + ";", j);
+                        } else {
+                            ss.insertRule("tr.personal_info { display: " + personal + "; }", j);
+                        }
+                    } else if ((0 == rule.selectorText.indexOf("TR.work_info")) ||
+                               (0 == rule.selectorText.indexOf("tr.work_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.work_info", "display: " + work + ";", j);
+                        } else {
+                            ss.insertRule("tr.work_info { display: " + work + "; }", j);
+                        }
+                    } else if ((0 == rule.selectorText.indexOf("TR.other_info")) ||
+                               (0 == rule.selectorText.indexOf("tr.other_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.other_info", "display: " + other + ";", j);
+                        } else {
+                            ss.insertRule("tr.other_info { display: " + other + "; }", j);
+                        }
+                    } else if ((0 == rule.selectorText.indexOf("TR.im_info")) ||
+                               (0 == rule.selectorText.indexOf("tr.im_info")) ) {
+                        if (undefined != ss.removeRule) { ss.removeRule(j); }
+                        else { ss.deleteRule(j); }
+                        if (undefined != ss.addRule) {
+                            ss.addRule("tr.im_info", "display: " + im + ";", j);
+                        } else {
+                            ss.insertRule("tr.im_info { display: " + im + "; }", j);
+                        }
+                    }
+                }
+            }
+        }
+
+    </script>
+    <title>Search Results</title>
+</head>
+
+<body onload="LoadData()" onresize="resizeTopTable();">
+<!--#include virtual="/header.html" -->
+
+<table width="100%">
+  <tr width="100%">
+    <td align="left" width="*" style="padding-top: 12px;">
+      <form id="queryForm" name="queryForm" onsubmit="return generateQueryString();" method="POST" action="/ldapupdate" target="_new">
+        <table width="100%">
+          <tr>
+            <td align="left">
+              <input type="submit" name="FormAction" value="Search" tabindex="5">&nbsp;
+              <select size="1" id="dn" name="dn" style="font-weight: bold; margin-left: 6px; " tabindex="1">
+                <option selected value="dc=some, dc=com">Some .com</option>
+                <option value="dc=another, dc=com">Another .com</option>
+              </select>
+              &nbsp; for &nbsp;
+              <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" >
+              <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" ></label>
+              <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;" tabindex="2">
+                    <option selected value="mail">eMail</option>
+                    <option value="givenName">First Name</option>
+                    <option value="sn">Last Name</option>
+                    <option value="o">Organization</option>
+                    <option value="ou">Org Unit</option>
+                    <option value="">Advanced...</option>
+              </select>
+    	      <select onchange="synchCompareSelect();" size="1" name="searchcompare" style="margin-right: 3px;" tabindex="3">
+                    <option value="=?*">begins with</option>
+                    <option selected value="=*?*">contains</option>
+                    <option value="=*?">ends with</option>
+                    <option value="=?">equals</option>
+                    <option value="?">...</option>
+              </select>
+    	      <input type="text" name="searchvalue" size="32" maxlength="128" value="@" tabindex="4">
+            </td>
+          </tr>
+        </table>
+      </form>
+    </td>
+    <td align="right" width="5px">
+      <fieldset>
+        <legend>Create a New ...</legend>
+        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(this.value); this.value='';" tabindex="6">
+          <option selected value="">Select One ...</option>
+          <option value="DSML_new_o.xml">Organization</option>
+          <option value="DSML_new_ou.xml">Organizational Unit</option>
+          <option value="DSML_new_group.xml">Group</option>
+          <option value="DSML_new_person.xml">Person</option>
+          <option value="DSML_new_user.xml">User</option>
+        </select>
+      </fieldset>
+    </td>
+  </tr>
+</table>
+
+<fieldset>
+  <legend>
+    Search Results styled as &nbsp;
+    <select size="1" id="xsl1" name="xsl1" style="font-size: 10px; margin-right: 3px;" onchange="xslmgr.transform(getTransformMode(), getSearchResponse, document, 'tree')" >
+      <option value="mgmttree">Management Tree</option>
+      <option value="orgtree">Organizational Tree</option>
+    </select>
+  </legend>
+  <table id="contentTable" width="100%" height="150px" style="margin-top: 6px; " >
+    <tr>
+      <td width="25%" style="padding-top: 0; padding-bottom: 0;">
+        <div id="tree">
+        </div>
+      </td>
+      <td width="*" style="padding-top: 0; padding-bottom: 0;">
+        <div id="editFrame" name="editableRecords" width="100%" height="47%" />
+      </td>
+    </tr>
+  </table>
+</fieldset>
+
+<!--#include virtual="/footer.html" -->
+</body>
+</html>

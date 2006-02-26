@@ -1,3 +1,17 @@
+Revision 0.89
+===================
+Fixed lack of recognition of URI search scope in ldap scope execution
+
+Implemented AJAX framework for Mozilla and IE Browsers and integrated with tree based transforms on alt_index.html page.
+
+Creation and integration of a vcard stylesheet - writes text in vcard format to new browser window.
+
+Updated apache module to send XML without specifying stylesheets
+
+Altered existing stylesheets for tree based rendering to allow for node directed processing through JS calls to transform xml nodes.
+
+Update of license terms under the GPL within the distribution.
+
 Revision 0.88
 ===================
 Fixed load of editable forms for dn's containing an '&'

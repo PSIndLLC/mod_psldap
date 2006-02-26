@@ -6,7 +6,7 @@
 
 <xsl:variable name="psldapRoot" select="'/psldap'" />
 
-<xsl:template match="/">
+<xsl:template match="/dsml">
   <xsl:variable name="recordCount" select="count(//searchResponse/searchResultEntry)" />
   <xsl:element name="html">
     <xsl:element name="head">
@@ -205,27 +205,33 @@
 <xsl:template name="searchResults" match="searchResponse">
   <xsl:element name="tr">
     <xsl:element name="td">
+      <xsl:attribute name="id">editableRecords</xsl:attribute>
       <xsl:attribute name="valign">top</xsl:attribute>
-      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organization')]/ancestor::searchResultEntry" mode="organization">
+
+      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organization')]/ancestor::searchResultEntry">
+        <xsl:with-param name='hidden'>on</xsl:with-param>
         <xsl:sort select="attr[@name='o']/value" />
-        <xsl:with-param name='heading'>Organization</xsl:with-param>
       </xsl:apply-templates>
-      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalUnit')]/ancestor::searchResultEntry" mode="organizationalUnit">
+
+      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalUnit')]/ancestor::searchResultEntry">
+        <xsl:with-param name='hidden'>on</xsl:with-param>
         <xsl:sort select="attr[@name='ou']/value" />
-        <xsl:with-param name='heading'>Unit</xsl:with-param>
       </xsl:apply-templates>
-      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')]/ancestor::searchResultEntry" mode="organizationalPerson">
+
+      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')]/ancestor::searchResultEntry">
+        <xsl:with-param name='hidden'>on</xsl:with-param>
         <xsl:sort select="attr[@name='sn']/value" />
         <xsl:sort select="attr[@name='givenName']/value" />
         <xsl:sort select="attr[@name='cn']/value" />
-        <xsl:with-param name='heading'>People</xsl:with-param>
       </xsl:apply-templates>
-      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='groupOfUniqueNames')]/ancestor::searchResultEntry" mode="groupOfUniqueNames">
+
+      <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='groupOfUniqueNames')]/ancestor::searchResultEntry">
+        <xsl:with-param name='hidden'>on</xsl:with-param>
         <xsl:sort select="attr[@name='sn']/value" />
         <xsl:sort select="attr[@name='givenName']/value" />
         <xsl:sort select="attr[@name='cn']/value" />
-        <xsl:with-param name='heading'>People</xsl:with-param>
       </xsl:apply-templates>
+
     </xsl:element>
   </xsl:element>
 </xsl:template>
@@ -243,7 +249,31 @@
   </xsl:element>
 </xsl:template>
 
+<xsl:template match="searchResultEntry">
+      <xsl:param name="hidden" select="off" />
+      <xsl:apply-templates select="attr[@name='objectClass']/value[(text()='organization')]/ancestor::searchResultEntry" mode="organization">
+        <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
+        <xsl:with-param name='heading'>Organization</xsl:with-param>
+      </xsl:apply-templates>
+
+      <xsl:apply-templates select="attr[@name='objectClass']/value[(text()='organizationalUnit')]/ancestor::searchResultEntry" mode="organizationalUnit">
+        <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
+        <xsl:with-param name='heading'>Unit</xsl:with-param>
+      </xsl:apply-templates>
+
+      <xsl:apply-templates select="attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')]/ancestor::searchResultEntry" mode="organizationalPerson">
+        <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
+        <xsl:with-param name='heading'>People</xsl:with-param>
+      </xsl:apply-templates>
+
+      <xsl:apply-templates select="attr[@name='objectClass']/value[(text()='groupOfUniqueNames')]/ancestor::searchResultEntry" mode="groupOfUniqueNames">
+        <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
+        <xsl:with-param name='heading'>People</xsl:with-param>
+      </xsl:apply-templates>
+</xsl:template>
+
 <xsl:template match="searchResultEntry" mode="organization">
+  <xsl:param name="hidden" select="off" />
   <xsl:param name="heading" select="attr[((@name='objectClass') and (position() = 1))]" />
   <xsl:comment>
   <xsl:if test="(not ($heading = '')) and (position() = 1)">
@@ -252,8 +282,10 @@
   </xsl:comment>
   <xsl:element name="tr">
     <xsl:attribute name="id"><xsl:value-of select="generate-id(.)" /></xsl:attribute>
+    <xsl:if test="($hidden = 'on')">
     <xsl:attribute name="style">display: none;</xsl:attribute>
-    <td>
+    </xsl:if>
+    <xsl:element name="td">
       <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
         <xsl:if test="(attribute::dn='')">
           <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
@@ -359,11 +391,12 @@
           </td></tr>
         </table><br />
       </form>
-    </td>
+    </xsl:element>
   </xsl:element>
 </xsl:template>
 
 <xsl:template match="searchResultEntry" mode="organizationalUnit">
+  <xsl:param name="hidden" select="off" />
   <xsl:param name="heading" select="attr[@name='objectClass' and position() = 1]" />
   <xsl:comment>
     <xsl:if test="(not ($heading = '')) and (position() = 1)">
@@ -373,8 +406,10 @@
 
   <xsl:element name="tr">
     <xsl:attribute name="id"><xsl:value-of select="generate-id(.)" /></xsl:attribute>
+    <xsl:if test="($hidden = 'on')">
     <xsl:attribute name="style">display: none;</xsl:attribute>
-    <td>
+    </xsl:if>
+    <xsl:element name="td">
       <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
         <xsl:if test="(attribute::dn='')">
           <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
@@ -489,11 +524,12 @@
           </td></tr>
         </table><br />
       </form>
-    </td>
+    </xsl:element>
   </xsl:element>
 </xsl:template>
 
 <xsl:template match="searchResultEntry" mode="organizationalPerson">
+  <xsl:param name="hidden" select="off" />
   <xsl:param name="heading" select="attr[@name='objectClass' and position() = 1]" />
   <xsl:comment>
   <xsl:if test="(not ($heading = '')) and (position() = 1)">
@@ -502,8 +538,10 @@
   </xsl:comment>
   <xsl:element name="tr">
   <xsl:attribute name="nodeid"><xsl:value-of select="generate-id()" /></xsl:attribute>
+  <xsl:if test="($hidden = 'on')">
   <xsl:attribute name="style">display: none;</xsl:attribute>
-  <td>
+  </xsl:if>
+  <xsl:element name="td">
   <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow" enctype="multipart/form-data" >
   <!-- <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow" > -->
   <xsl:if test="(attribute::dn='')">
@@ -767,11 +805,12 @@
     </td></tr>
   </table><br />
   </form>
-  </td>
+  </xsl:element>
   </xsl:element>
 </xsl:template>
 
 <xsl:template match="searchResultEntry" mode="groupOfUniqueNames">
+  <xsl:param name="hidden" select="off" />
   <xsl:param name="heading" select="attr[((@name='objectClass') and (position() = 1))]" />
   <xsl:comment>
     <xsl:if test="(not ($heading = '')) and (position() = 1)">
@@ -780,8 +819,10 @@
   </xsl:comment>
   <xsl:element name="tr">
     <xsl:attribute name="id"><xsl:value-of select="generate-id(.)" /></xsl:attribute>
+    <xsl:if test="($hidden = 'on')">
     <xsl:attribute name="style">display: none;</xsl:attribute>
-    <td>
+    </xsl:if>
+    <xsl:element name="td">
       <form name="ChangeInfo" method="post" action="/ldapupdate" target="processWindow">
         <xsl:if test="(attribute::dn='')">
           <xsl:apply-templates select="attr[@name='objectClass']" mode="hidden" />
@@ -873,7 +914,7 @@
           </td></tr>
         </table><br />
       </form>
-    </td>
+    </xsl:element>
   </xsl:element>
 </xsl:template>
 

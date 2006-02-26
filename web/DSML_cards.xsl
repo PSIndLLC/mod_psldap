@@ -5,7 +5,7 @@
 
 <xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
 
-<xsl:template match="/">
+<xsl:template match="/dsml">
   <html>
    <head>
     <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
@@ -229,7 +229,7 @@
                 </xsl:otherwise>
               </xsl:choose>
             </td>
-            <td width="34" noWrap="true" >
+            <td width="53" noWrap="true" >
               <xsl:element name="a">
                 <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>");</xsl:attribute>
                 <xsl:element name="img">
@@ -237,6 +237,15 @@
                   <xsl:attribute name="style">margin-top: 3px; margin-bottom 0px;</xsl:attribute>
                 </xsl:element>
               </xsl:element>
+              <xsl:comment />
+              <xsl:element name="a">
+                <xsl:attribute name="href">javascript: void getVCard("<xsl:value-of select="@dn"/>");</xsl:attribute>
+                <xsl:element name="img">
+                  <xsl:attribute name="src">/psldap/images/vcard.gif</xsl:attribute>
+                  <xsl:attribute name="style">margin-top: 3px; margin-bottom 0px;</xsl:attribute>
+                </xsl:element>
+              </xsl:element>
+              <xsl:comment />
               <xsl:element name="input">
                 <xsl:attribute name="type">checkbox</xsl:attribute>
                 <xsl:attribute name="name">member</xsl:attribute>

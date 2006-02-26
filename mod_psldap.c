@@ -3,10 +3,22 @@
  *
  * User Authentication against and maintenance of an LDAP database
  *
- * David Picard dpicard@psind.com
+ * Copyright (C) 2004 David Picard dpicard@psind.com
  *
  * http://www.psind.com/projects/mod_psldap/
  *
+ *   This program is free software; you can redistribute it and/or modify
+ *   it under the terms of version 2 of the GNU General Public License as
+ *   published by the Free Software Foundation
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program; if not, write to the Free Software
+ *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 /* 
@@ -20,7 +32,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.88"
+#define PSLDAP_VERSION_LABEL "0.89"
 
 #include "httpd.h"
 #include "http_config.h"
@@ -3660,10 +3672,7 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
     if (NULL == key) {
         if (NULL != val) strncpy((char*)val, "queryResponse", 15);
         if ((NULL != ldap_query) &&
-            ( ((NULL != xslUri1) && (NULL != xslUri2) && (NULL != ps->mod_dn))
-              ||
-              (NULL != ps->responseType)
-              )
+            ( (NULL != ps->mod_dn) || (NULL != ps->responseType) )
             )
         {
             /* Use ldap_modify_s here to directly modify the entries. Possibly
@@ -3673,18 +3682,18 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
             get_provided_username(r, &user);
             if (NULL == ps->responseType) {
                 ap_rvputs(r,
-                          "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"",
-                          xslUri1,
-                          "\"?>\n",
-                          "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"",
-                          xslUri2,
-                          "\"?>\n",
+                          (NULL != xslUri1) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
+                          (NULL != xslUri1) ? xslUri1 : "",
+                          (NULL != xslUri1) ? "\"?>\n": "",
+                          (NULL != xslUri2) ? "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"" : "",
+                          (NULL != xslUri2) ? xslUri2 : "",
+                          (NULL != xslUri2) ? "\"?>\n" : "",
                           "<dsml>\n",
                           " <batchResponse>\n",
                           NULL);
             }
             write_dsml_sr_to_connection(r, conf, ldap, ps, ldap_base,
-					LDAP_SCOPE_DEFAULT,
+				        ps->searchScope,
 					ldap_query,
                                         ps->fieldName, ps->responseType, 
                                         ps->binaryAsHref);
@@ -3981,12 +3990,12 @@ static void write_dsml_err_response(request_rec *r, psldap_status *ps,
                                     const char *opName)
 {
     ap_rvputs(r,
-              "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"",
+              (NULL != ps->xslPrimaryUri) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
               (NULL != ps->xslPrimaryUri) ? ps->xslPrimaryUri : "",
-              "\"?>\n",
-              "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"",
+              (NULL != ps->xslPrimaryUri) ? "\"?>\n" : "",
+              (NULL != ps->xslSecondaryUri) ? "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"" : "",
               (NULL != ps->xslSecondaryUri) ? ps->xslSecondaryUri : "",
-              "\"?>\n",
+              (NULL != ps->xslSecondaryUri) ? "\"?>\n" : "",
               "<dsml>\n",
               " <batchResponse id='",
               (NULL != ps->mod_dn) ? ps->mod_dn : "NULL_DN",
@@ -4076,6 +4085,10 @@ static int ldap_update_handler(request_rec *r)
                 /* Setup the HTTP response ...*/
                 if (ps.responseType != NULL) {
                     r->content_type = ps.responseType;
+		    /* Add ContentDisposition to r->headers_out table to force
+		       download ... */
+		    /*ap_table_add(r->err_headers_out, "ContentDisposition",
+		      "attachment;filename=\"foo\"");*/
                     sendXml = 0;
                 } else {
                     r->content_type = (sendXml) ? "text/xml" : "text/html";

@@ -2,7 +2,9 @@
 
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML">
-<xsl:template match="/">
+<xsl:output method="html"/>
+<xsl:param name="xslManager" />
+<xsl:template match="/dsml">
   <html>
     <head>
       <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
@@ -37,17 +39,44 @@
       </xsl:element>
       <title>Search Results</title>
     </head>
-    <body onload="buildOrgTree('orgTable', 'LDAPRecord', 'recordid', ','); resizeTopTable(true);" onresize="resizeTopTable();">
+    <body onload="resizeTopTable(true);" onresize="resizeTopTable();">
       <table width="100%" height="100%">
       <tr>
       <td id="treeCell" style="width: 256px; ">
       <div style="overflow: auto; height: 100%; ">
-      <table id="orgTable" cellpadding="2" width="100%">
-        <xsl:for-each select="dsml/batchResponse/searchResponse/searchResultEntry">
-          <xsl:sort select="attr[@name='sn']/value" />
-          <xsl:sort select="attr[@name='givenName']/value" />
-          <xsl:sort select="attr[@name='o']/value" />
-          <xsl:sort select="attr[@name='ou']/value" />
+      <xsl:apply-templates select="batchResponse/searchResponse" />
+      </div>
+      </td>
+      <td id="editCell" style="width: *; ">
+        <iframe id="editFrame" width="100%" height="100%"/>
+      </td>
+      </tr>
+      </table>
+    </body>
+  </html>
+</xsl:template>
+
+<xsl:template match="searchResponse">
+  <xsl:element name="table">
+    <xsl:attribute name="id">orgTable</xsl:attribute>
+    <xsl:attribute name="cellpadding">2</xsl:attribute>
+    <xsl:attribute name="width">100%</xsl:attribute>
+    <xsl:for-each select="searchResultEntry">
+      <xsl:sort select="attr[@name='sn']/value" />
+      <xsl:sort select="attr[@name='givenName']/value" />
+      <xsl:sort select="attr[@name='o']/value" />
+      <xsl:sort select="attr[@name='ou']/value" />
+      <xsl:apply-templates select="." />
+    </xsl:for-each>
+  </xsl:element>
+  <xsl:element name="script">
+    <xsl:attribute name="language">JavaScript</xsl:attribute>
+    <xsl:attribute name="defer">true</xsl:attribute>
+      buildOrgTree('orgTable', 'LDAPRecord', 'recordid', ','); 
+  </xsl:element>
+</xsl:template>
+
+<xsl:template match="searchResultEntry">
           <xsl:element name="tr">
             <xsl:attribute name="name">LDAPRecord</xsl:attribute>
             <xsl:attribute name="recordid"><xsl:value-of select="@dn"/></xsl:attribute>
@@ -62,7 +91,7 @@
                   <xsl:when test="(attr[@name='objectClass']/value[(text()='groupOfUniqueNames')])" >groupOfUniqueNames</xsl:when>
               </xsl:choose></xsl:attribute>
               <xsl:element name="a">
-                <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>", "editFrame");</xsl:attribute>
+                <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>", "editFrame" <xsl:if test="(not ($xslManager = ''))">, <xsl:value-of select="$xslManager" /></xsl:if>);</xsl:attribute>
                 <xsl:choose>
                   <xsl:when test="(attr[@name='cn'])" >
                     <xsl:apply-templates select="attr[@name='cn']" />
@@ -80,17 +109,6 @@
               </xsl:element>
             </xsl:element>
           </xsl:element>
-        </xsl:for-each>
-      </table>
-      </div>
-      </td>
-      <td id="editCell" style="width: *; ">
-        <iframe id="editFrame" width="100%" height="100%"/>
-      </td>
-      </tr>
-      </table>
-    </body>
-  </html>
 </xsl:template>
 
 <xsl:template match="attr[@name='mail']">

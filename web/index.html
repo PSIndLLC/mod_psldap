@@ -12,8 +12,10 @@
     <meta name="date" content="2004-06-11T20:00:00-05:00" />
     <title>PSInd - LDAP Management Page</title>
     <link rel="STYLESHEET" type="text/css" href="/psldap/DSML_psldap.css" />
-    <script language="JavaScript" src="/psldap/DSML_psldap.js" ></script>
-    <script language="JavaScript">
+
+    <script type="text/javascript" language="JavaScript" src="/psldap/psldap_config.js" ></script>
+    <script type="text/javascript" language="JavaScript" src="/psldap/DSML_psldap.js" ></script>
+    <script type="text/javascript" language="JavaScript" >
         function synchCompareSelect() {
             var strQuery = "";
             var searchByElement = document.queryForm.searchby;
@@ -38,11 +40,6 @@
             searchElement.value = strQuery;
             window.defaultStatus = "Getting LDAP records for filter = " + strQuery;
             return true;
-        }
-        function encodeChar() {
-            alert("Encoding of char " + document.encodeForm.encChar.value + " is " +
-                  encodeURI(document.encodeForm.encChar.value));
-            alert("decoded uri is : " + String('/ldapupdate?FormAction=Search&search=(objectClass=*)&dn=cn=Kris%20Canekaratne,%20ou=eRUNWAY,%20dc=psind,%20dc=com&BinaryData=jpegPhoto&BinaryType=image/jpeg') );
         }
         function setLDAPBase(objBaseDN) {
             var searchBase = document.queryForm.dn;
@@ -76,6 +73,7 @@
 </head>
 
 <body onload="resizeResultIframe()" onresize="resizeResultIframe()">
+<!--#include virtual="/header.html" -->
 
 <!-- Add body of page here -->
 <table width="100%">
@@ -83,8 +81,11 @@
     <td align="left" width="*">
       <h2>Manage Directory 
         <select size="1" name="dn" style="font-size: 14px; font-weight: bold; margin-left: 6px; " onchange="setLDAPBase(this.value)">
-          <option selected value="dc=some, dc=com">Some .com</option>
-          <option value="dc=another, dc=com">Another .com</option>
+	    <script type="text/javascript" language="JavaScript" >
+	        for (var i=0; i<ldapDomains.length; i++) {
+		    document.write('<option ' + ((ldapDomains[i].defaultDomain==1)?"selected ":"") + 'value="' + ldapDomains[i].dn + '">' + ldapDomains[i].label + '</option>');
+		}
+	    </script>
         </select>
       </h2>
     </td>
@@ -93,6 +94,7 @@
         <legend>Create a New ...</legend>
         <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(this.value); this.value='';">
           <option selected value="">Select One ...</option>
+          <option value="DSML_new_v_o.xml">Vendor Organization</option>
           <option value="DSML_new_o.xml">Organization</option>
           <option value="DSML_new_ou.xml">Organizational Unit</option>
           <option value="DSML_new_group.xml">Group</option>
@@ -106,67 +108,73 @@
 
 <fieldset style="margin-bottom: 6px; ">
   <legend>Search for a Record</legend>
-  <label><input type="checkbox" name="resultsInFrame" style="margin-right: 5px; " checked onchange="setInternalTarget(this.checked)" />Show results on this page (use new window if unchecked)</label>
   <div style="margin-top: 6px;" >
   <form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/ldapupdate" target="resultSet">
-    <input type="hidden" name="dn" value="dc=psind, dc=com" >
-    <table width="100%">
-        <tr>
-          <td align="left"><label>Style results as
-	    <select size="1" name="xsl1" style="margin-right: 3px;">
-                <option value="/psldap/DSML_mgmt_tree.xsl">Mgmt Tree</option>
-                <option value="/psldap/DSML_org_tree.xsl">Org Tree</option>
-                <option selected value="/psldap/DSML_cards.xsl">Card View</option>
-                <option value="/psldap/DSML_table.xsl">Table View</option>
-                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
-            </select>
-            or alternatively as 
-	    <select size="1" name="xsl2" style="margin-right: 3px;">
-                <option value="/psldap/DSML_mgmt_tree.xsl">Mgmt Tree</option>
-                <option value="/psldap/DSML_org_tree.xsl">Org Tree</option>
-                <option value="/psldap/DSML_cards.xsl">Card View</option>
-                <option selected value="/psldap/DSML_table.xsl">Table View</option>
-                <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
-            </select>
-            <hr />
-          </td>
-        </tr>
-        <tr><td align="left"><label><span style="margin-right: 18px; margin-left : 50px; ">Search For</span>
-	    <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" >
-	    <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" ></label>
+    <script type="text/javascript" language="JavaScript" >
+      var defaultDomain = 0;
+      for (var i=0; i<ldapDomains.length; i++) {
+        if (ldapDomains[i].defaultDomain==1) { defaultDomain = i; }
+      }
+      document.write('<input type="hidden" name="dn" value="' + ldapDomains[defaultDomain].dn + '" >');
+    </script>
 
-	    <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;">
-                <option selected value="mail">eMail</option>
-                <option value="givenName">First Name</option>
-                <option value="sn">Last Name</option>
-                <option value="o">Organization</option>
-                <option value="ou">Org Unit</option>
-                <option value="">Advanced...</option>
-            </select>
-	    <select onchange="synchCompareSelect();" size="1" name="searchcompare" style="margin-right: 3px;">
-                <option value="=?*">begins with</option>
-                <option selected value="=*?*">contains</option>
-                <option value="=*?">ends with</option>
-                <option value="=?">equals</option>
-                <option value="?">...</option>
-            </select>
-	    <input type="text" name="searchvalue" size="32" maxlength="128" value="@" >
-        </td></tr>
-
-        <tr style="padding-top: 6px;" >
-	    <td align="CENTER">
-              <hr />
-              <input type="submit" name="FormAction" value="Search"> &nbsp; &nbsp;
-              <input type="reset">
-            </td>
-	</tr>
-    </table>
-</form>
-</div>
+    <table style=" width: 100%; ">
+        <tr><td align="left">
+	  <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" />
+	  <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" />
+	  <input type="submit" name="FormAction" value="Search" />
+	  <label>
+	    <span style="margin-right: 6px; margin-left: 6px;">for</span>
+	  </label>
+	  <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;">
+	    <option selected value="mail">eMail</option>
+	    <option value="givenName">First Name</option>
+	    <option value="sn">Last Name</option>
+	    <option value="o">Organization</option>
+	    <option value="ou">Org Unit</option>
+	    <option value="">Advanced...</option>
+	  </select>
+	  <select onchange="synchCompareSelect();" size="1" name="searchcompare" style="margin-right: 3px;">
+	    <option value="=?*">begins with</option>
+	    <option selected value="=*?*">contains</option>
+	    <option value="=*?">ends with</option>
+	    <option value="=?">equals</option>
+	    <option value="?">...</option>
+	  </select>
+	  <input type="text" name="searchvalue" size="32" maxlength="128" value="@" />
+	  <label><span  style="margin-right: 6px; margin-left: 6px;">styled as</span>
+	  <select size="1" name="xsl1" style="margin-right: 3px;">
+	    <option value="/psldap/DSML_mgmt_tree.xsl">Mgmt Tree</option>
+	    <option value="/psldap/DSML_org_tree.xsl">Org Tree</option>
+	    <option selected value="/psldap/DSML_cards.xsl">Card View</option>
+	    <option value="/psldap/DSML_table.xsl">Table View</option>
+	    <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+	  </select>
+	  </label>
+	  <label><span  style="margin-right: 6px; margin-left: 6px;">/</span>
+	  <select size="1" name="xsl2" style="margin-right: 3px;">
+	    <option selected value="">&lt;None&gt;</option>
+	    <option value="/psldap/DSML_mgmt_tree.xsl">Mgmt Tree</option>
+	    <option value="/psldap/DSML_org_tree.xsl">Org Tree</option>
+	    <option value="/psldap/DSML_cards.xsl">Card View</option>
+	    <option value="/psldap/DSML_table.xsl">Table View</option>
+	    <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+	  </select>
+	  </label>
+	  </td><td>
+	  <input type="reset">
+	  </td></tr>
+	</table>
+      </form>
+    </div>
+    <hr />
+    <label><input type="checkbox" name="resultsInFrame" style="margin-right: 5px; " checked onchange="setInternalTarget(this.checked)" />Show results on this page (use new window if unchecked)</label>
+    
 </fieldset>
 
 
-<iframe id="resultSet" name="resultSet" src="" style="height: 0px; width: 100%; border-width: 0px;" ></iframe>
+<iframe id="resultSet" name="resultSet" src="" frameborder="0" style="height: 0px; width: 100%; margin-top: 0px; margin-bottom: 0px; border: none; " ></iframe>
 
+<!--#include virtual="/footer.html" -->
 </body>
 </html>

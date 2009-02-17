@@ -55,6 +55,8 @@ Maintenance Features:
 3.  Allow the LDAP administrator to edit any record in the LDAP server.
 4.  Optionally denies access to all LDAP maintenance functionality if the web
     user is not accessing this module through an https connection.
+5.  Move records from one node to another in the directory tree - accomodating
+    organizational restructuring or relocation without recreating records
 
 
 
@@ -122,8 +124,8 @@ utility:
    % apxs -i -a -n psldap mod_psldap.la
 
 
-Summary Description of Configuration Parameters
-===============================================
+Summary Description of Apache Configuration Parameters
+=======================================================
 
 PsLDAPHosts        - List of LDAP hosts which should be queried
 
@@ -369,6 +371,29 @@ through the settings indicated by PsLDAPAuthoritative - 'off' indicates yes -
     PsLDAPAuthoritative on
     ...
 
+Configuring the client pages
+=============================
+
+Starting in version 0.90, the directory configurations on the client are managed
+through a javascript based configuration to identify the base DN groups to which
+the application will apply. In order to use the standard index, psldap_config.js must be modified to contain your domains. The initial configuration looks something like this:
+
+ldapDomains[0] = {dn:"dc=some,dc=com", label:"Some .com", defaultDomain:0};
+ldapDomains[1] = {dn:"dc=another,dc=us", label:"Another Domain", defaultDomain:1};
+
+To manage your own base DNs, either change the above records or copy the line
+beginning with ldapDomains[0] and change the '0' to the next highest number in
+the sequence in the copied line. Then change the string litteral after the dn:
+to your base DN, the literal after the label: to the label you want people to
+see, and ensure that only one of the ldapDomain items has a defaultDomain:
+setting of 1. The defaultDomain will appear as the default value in the dropdown
+on the index page and will be used as the base DN from the browser if no other
+DN has been selected.
+
+Example:
+
+ldapDomains[2] = {dn:"dc=mydomain,dc=com", label:"My Domain", defaultDomain:0};
+
 
 Additional Filtering on Authentication
 ========================================
@@ -567,7 +592,8 @@ records and purges every fifteen minutes, removing any records from cache
 that are older than 15 minutes. Future versions of this module will allow
 for some configurability of this behavior.
 
-
+NOTE: Caching is no longer compiled in by default pending a more robust
+      implementation of the cache management capability
 
 Setting Up Forms
 ================
@@ -592,6 +618,7 @@ and set the value attribute to one of three strings:
   *  "Login" - performs authentication, sets a auth cookie, and sends the user
               back to the referring page (which should have rejected
               access based on missing credentials).
+  *  "modDNRequest" - modifies the DN of the record passed
 
 PsLDAP provides a partial measure of DSML support, it will return a DSML
 document (this is an XML document) in response to a form post, to which an
@@ -642,9 +669,6 @@ Note that we set the AuthType to "Basic". It could also be set to "cookie", but
 it should never be set to "form" as the credentials may get confused with
 data that is being inserted or modified on any forms.
 
-
-LIMITATIONS: The multipart/form-data Content-Type is not yet handled - neither
-is binary content in the directory such as pictures.
 
 
 

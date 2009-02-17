@@ -8,21 +8,22 @@
     <meta name="keywords" lang="us-en" content="" />
     <meta name="description" content="" />
     <meta name="robots" content="NOINDEX" />
-    <meta name="copyright" content="&copy; 2006 PSInd, LLC" />
-    <meta name="date" content="2006-02-11T20:00:00-05:00" />
+    <meta name="copyright" content="&copy; 2004 PSInd, LLC" />
+    <meta name="date" content="2004-06-11T20:00:00-05:00" />
     <title>PSInd - PsAJAX Test Page</title>
-    <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
     <link rel="STYLESHEET" type="text/css" media="print" href="/psldap/DSML_psldap.css" />
+    <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
 
     <style>
       fieldset { margin-bottom: 6px; }
     </style>
-    <script language="JavaScript" src="/psldap/psajax_core.js" ></script>
-    <script language="JavaScript" src="/psldap/psajax_docmgr.js" ></script>
-    <script language="JavaScript" src="/psldap/DSML_psldap.js" ></script>
-    <script language="JavaScript" src="/psldap/DSML_treemanager.js" ></script>
+    <script type="text/javascript" language="JavaScript" src="/psldap/psldap_config.js" ></script>
+    <script type="text/javascript" language="JavaScript" src="/psldap/psajax_core.js" ></script>
+    <script type="text/javascript" language="JavaScript" src="/psldap/psajax_docmgr.js" ></script>
+    <script type="text/javascript" language="JavaScript" src="/psldap/DSML_psldap.js" ></script>
+    <script type="text/javascript" language="JavaScript" src="/psldap/DSML_treemanager.js" ></script>
 
-    <script language="JavaScript">
+    <script type="text/javascript" language="JavaScript" >
         var xslmgr;
         function synchCompareSelect() {
             var strQuery = "";
@@ -45,7 +46,7 @@
             var strQuery = searchByElement.options[searchByElement.selectedIndex].value;
             searchElement.value = "(" + strQuery +
                 searchCompareElement.options[searchCompareElement.selectedIndex].value.replace(/\?/i, searchValueElement.value) + ")";
-            strQuery = document.queryForm.action + "?FormAction=Search&scope=subtree&search=" + encodeURI(searchElement.value) + "&dn=" + encodeURI(getLDAPBase());
+            strQuery = document.queryForm.action + "?FormAction=Search&scope=subtree&search=" + encodeURIComponent(searchElement.value) + "&dn=" + encodeURIComponent(getLDAPBase()) + "&BinaryHRef=" + (isIE?"on":"off");
             window.status = "Acquiring XML " + strQuery;
             xslmgr.setXmXML(strQuery);
             xslmgr.addMgrParameter("xslManager", "xslmgr");
@@ -99,9 +100,11 @@
                 }
                 resizeTimeOutId = window.setTimeout("resizeTimeOutId = 0; resizeTopTable(true);", 500);
             } else {
+                var contentTbl = document.getElementById("contentTable");
                 var treeDiv = document.getElementById("tree");
+                var editDiv = document.getElementById("editFrame");
                 var winHeight = getWindowHeight(window);
-                var cellHeight = winHeight - 10 - getTopOffset(treeDiv);
+                var cellHeight = winHeight - 60 - 6 - getTopOffset(treeDiv);
                 if (document.body.scrollHeight > winHeight) {
                     cellHeight -= 20;
                 }
@@ -109,6 +112,10 @@
                 treeDiv.style.height = cellHeight + "px";
                 treeDiv.style.width = "auto";
                 treeDiv.style.overflow = "auto";
+
+                editDiv.style.height = cellHeight + "px";
+                editDiv.style.width = "auto";
+                editDiv.style.overflow = "auto";
             }
         }
 
@@ -124,65 +131,18 @@
             xslmgr = new XSLManager("/psldap/DSML_new_o.xml");
             xslmgr.addStylesheet("orgtree", "/psldap/DSML_org_tree.xsl");
             xslmgr.addStylesheet("mgmttree", "/psldap/DSML_mgmt_tree.xsl");
+            xslmgr.addStylesheet("rocards", "/psldap/DSML_cards.xsl");
+            xslmgr.addStylesheet("rwcards", "/psldap/DSML_editform.xsl");
             xslmgr.addMgrParameter("xslManager", "xslmgr");
             //document.getElementById("editFrame").src="DSML_new_o.xml"
             resizeTopTable(true);
         }
 
-        function showInfo(personal, work, other, im )
-        {
-            var i = document.styleSheets.length;
-            while (i-- > 0) {
-                var ss = document.styleSheets[i];
-                var rules = ss.cssRules;
-                var j;
-                if (undefined == rules) rules = ss.rules;
-                j = rules.length;
-
-                while ( j-- > 0) {
-                    var rule = rules[j];
-                    if (undefined == ss.cssRules) rule = rules.item(j);
-                    if ((0 == rule.selectorText.indexOf("TR.personal_info")) ||
-                        (0 == rule.selectorText.indexOf("tr.personal_info")) ) {
-                        if (undefined != ss.removeRule) { ss.removeRule(j); }
-                        else { ss.deleteRule(j); }
-                        if (undefined != ss.addRule) {
-                            ss.addRule("tr.personal_info", "display: " + personal + ";", j);
-                        } else {
-                            ss.insertRule("tr.personal_info { display: " + personal + "; }", j);
-                        }
-                    } else if ((0 == rule.selectorText.indexOf("TR.work_info")) ||
-                               (0 == rule.selectorText.indexOf("tr.work_info")) ) {
-                        if (undefined != ss.removeRule) { ss.removeRule(j); }
-                        else { ss.deleteRule(j); }
-                        if (undefined != ss.addRule) {
-                            ss.addRule("tr.work_info", "display: " + work + ";", j);
-                        } else {
-                            ss.insertRule("tr.work_info { display: " + work + "; }", j);
-                        }
-                    } else if ((0 == rule.selectorText.indexOf("TR.other_info")) ||
-                               (0 == rule.selectorText.indexOf("tr.other_info")) ) {
-                        if (undefined != ss.removeRule) { ss.removeRule(j); }
-                        else { ss.deleteRule(j); }
-                        if (undefined != ss.addRule) {
-                            ss.addRule("tr.other_info", "display: " + other + ";", j);
-                        } else {
-                            ss.insertRule("tr.other_info { display: " + other + "; }", j);
-                        }
-                    } else if ((0 == rule.selectorText.indexOf("TR.im_info")) ||
-                               (0 == rule.selectorText.indexOf("tr.im_info")) ) {
-                        if (undefined != ss.removeRule) { ss.removeRule(j); }
-                        else { ss.deleteRule(j); }
-                        if (undefined != ss.addRule) {
-                            ss.addRule("tr.im_info", "display: " + im + ";", j);
-                        } else {
-                            ss.insertRule("tr.im_info { display: " + im + "; }", j);
-                        }
-                    }
-                }
-            }
+        function transformTemplateChange() {
+            xslmgr.addMgrParameter("xslManager", "xslmgr");
+            xslmgr.transform(getTransformMode(), getSearchResponse, document, 'tree');
+            resizeTopTable(true);
         }
-
     </script>
     <title>Search Results</title>
 </head>
@@ -197,14 +157,17 @@
         <table width="100%">
           <tr>
             <td align="left">
-              <input type="submit" name="FormAction" value="Search" tabindex="5">&nbsp;
+              <input type="submit" name="FormAction" value="Search" tabindex="5" />&nbsp;
               <select size="1" id="dn" name="dn" style="font-weight: bold; margin-left: 6px; " tabindex="1">
-                <option selected value="dc=some, dc=com">Some .com</option>
-                <option value="dc=another, dc=com">Another .com</option>
+		<script type="text/javascript" language="JavaScript">
+		    for (var i=0; i<ldapDomains.length; i++) {
+		        document.write('<option ' + ((i==0)?"selected ":"") + 'value="' + ldapDomains[i].dn + '">' + ldapDomains[i].label + '</option>');
+		    }
+		</script>
               </select>
               &nbsp; for &nbsp;
-              <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" >
-              <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" ></label>
+              <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" />
+              <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" />
               <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;" tabindex="2">
                     <option selected value="mail">eMail</option>
                     <option value="givenName">First Name</option>
@@ -220,7 +183,7 @@
                     <option value="=?">equals</option>
                     <option value="?">...</option>
               </select>
-    	      <input type="text" name="searchvalue" size="32" maxlength="128" value="@" tabindex="4">
+    	      <input type="text" name="searchvalue" size="32" maxlength="128" value="@" tabindex="4" />
             </td>
           </tr>
         </table>
@@ -245,19 +208,46 @@
 <fieldset>
   <legend>
     Search Results styled as &nbsp;
-    <select size="1" id="xsl1" name="xsl1" style="font-size: 10px; margin-right: 3px;" onchange="xslmgr.transform(getTransformMode(), getSearchResponse, document, 'tree')" >
+    <select size="1" id="xsl1" name="xsl1" style="font-size: 10px; margin-right: 3px;" onchange="transformTemplateChange()" >
       <option value="mgmttree">Management Tree</option>
       <option value="orgtree">Organizational Tree</option>
+      <option value="rocards">Bus. Cards</option>
+      <option value="rwcards">Editable Forms</option>
     </select>
   </legend>
   <table id="contentTable" width="100%" height="150px" style="margin-top: 6px; " >
     <tr>
-      <td width="25%" style="padding-top: 0; padding-bottom: 0;">
-        <div id="tree">
+      <td id="tree_cell" width="25%" onmousedown="" onmouseup="" onmousemove="">
+        <div id="tree" >
         </div>
       </td>
+      <td width="50px" style="padding-top: 0; padding-bottom: 0;">
+	<div id="editNavControls">
+	  <script type="text/javascript" language="JavaScript">
+	    /* The second form element on this page is the record form */
+	    currentRecord = 2;
+	  </script>
+	  <span>
+	    <a href="javascript: void submitVisibleRecord('Modify')" title="Modify this record"><img src="/psldap/images/editRecord.gif" alt="Edit Record" ></a>
+	  </span>
+	  <span>
+	    <a href="javascript: void submitVisibleRecord('Delete')" title="Delete this record"><img src="/psldap/images/delRecord.gif" alt="Delete Record" ></a>
+	  </span>
+	  <span>
+	    <a href="javascript: void resetVisibleRecord()" title="Reset changes on current form"><img src="/psldap/images/resetRec.gif" alt="Reset Record" ></a>
+	  </span>
+	  <span>
+	    <a href="javascript: void toggleClassInfo()" title="Change record classification"><img src="/psldap/images/showClass.gif" alt="Show record type" ></a>
+	  </span>
+	</div>
+	<br />
+	<div id="processDiv">
+	  <iframe id="processWindow" name="processWindow" src="/psldap/statusPage.html" cleanSrc="/psldap/statusPage.html" width="50px" style="display: none; border: none" onload="showProcessDocument();" >
+	  </iframe>
+	</div>
+      </td>
       <td width="*" style="padding-top: 0; padding-bottom: 0;">
-        <div id="editFrame" name="editableRecords" width="100%" height="47%" />
+	<div id="editFrame" name="editableRecords" width="*" height="100%" />
       </td>
     </tr>
   </table>

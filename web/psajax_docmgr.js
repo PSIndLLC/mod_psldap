@@ -20,7 +20,6 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 function docmgr_unsupported(txt) {
     alert("DOM functionality not implemented to support this script " + txt);
 }
@@ -52,8 +51,8 @@ RequestWrapper.prototype.initActiveX = function()
             window.status = "Trying iframe request object - XMLHTTP failed: " + e1.message;
             this.reqObj = new IFrameRequest();
         }
-    } 
-}
+    }
+};
 
 RequestWrapper.prototype.initDOMImpl = function()
 {
@@ -63,7 +62,7 @@ RequestWrapper.prototype.initDOMImpl = function()
     } else {
         this.reqObj = new IFrameRequest();
     }
-}
+};
 
 RequestWrapper.prototype.init = function()
 {
@@ -74,7 +73,12 @@ RequestWrapper.prototype.init = function()
     } else {
         this.reqObj = new DummyDOM();
     }
-}
+    this.getResponse = function() {
+	return ((undefined != this.reqObj.responseText) ? this.reqObj.responseText :
+		((undefined != this.reqObj.responseXML) ? this.reqObj.responseXML : 
+		 this.reqObj.documentElement.xml) );
+    }
+};
 
 DocumentManager.prototype = new RequestWrapper();
 DocumentManager.prototype.reqObj = null;
@@ -85,7 +89,7 @@ DocumentManager.prototype.setAsynchronous = function(asynch) {
         alert("Synchronous acquisition of data is not supported by " +
               "your browser. You may experience unexpected behavior");
     }
-}
+};
 DocumentManager.prototype.onload = null;
 DocumentManager.prototype.loadinfo = null;
 DocumentManager.superclass = RequestWrapper.prototype;
@@ -113,9 +117,12 @@ function DocumentManager(docref, onload, load_info, is_html)
             this.reqObj.async = false;
             this.reqObj.validateOnParse = false;
             // For some reason this is failing with the freethreadeddomdocument...
-            if (this.reqObj.load(docref))
+	    if ((undefined == this.reqObj.load) ||
+		(!this.reqObj.load(docref))){ 
+		throw("load undefined on Request Object");
+	    } else {
                 window.status = "docref loaded " + docref;
-            else alert("docref " + docref + " load failed");
+	    }
         } catch(e1) {
             window.status = "Exception raise loading docref: " + e1.message;
             this.reqObj.open("GET", docref, false);
@@ -135,25 +142,25 @@ XSLDocumentManager.prototype.initActiveX = function()
         window.status = "Trying iframe request object - freethreaded dom load failed: " + e1.message;
         this.reqObj = new IFrameRequest();
     } 
-}
+};
 
 function XSLDocumentManager(xslid,uri,onload,load_info)
 {
+    this.style_id = xslid;
     this.base = DocumentManager
     this.base(uri, onload, load_info);
-    this.style_id = xslid;
 }
 
 function LoadXSLOnManager(e)
 {
     this.loadinfo.txstyles[this.style_id] = this;
-    var resp = (undefined != this.reqObj.responseXML) ? this.reqObj.responseXML : this.reqObj.documentElement.xml;
+    var resp = this.getResponse();
     window.status = "Loaded xsl processed ..." + resp;
 }
 
 function LoadXMLOnManager(e)
 {
-    var resp = (undefined != this.reqObj.responseXML) ? this.reqObj.responseXML : this.reqObj.documentElement.xml;
+    var resp = this.getResponse();
     this.loadinfo.xmldoc = resp;
     window.status = "Loaded xml processed ..." + resp;
 }
@@ -213,15 +220,17 @@ XSLManager.prototype.txstyles = [];
 XSLManager.prototype.tximpstyles = [];
 XSLManager.prototype.addMgrParameter = function(paramName, paramValue) {
         this.params.push(new XSLMgrParam(paramName, paramValue));
-    }
+};
 XSLManager.prototype.addStylesheet = function(id,uri) {
-        this.txstyles[id] = new XSLDocumentManager(id, uri, LoadXSLOnManager, this);
+    if (this.txstyles[id]==undefined) {
+	this.txstyles[id] = new XSLDocumentManager(id, uri, LoadXSLOnManager, this);
     }
+};
 XSLManager.prototype.setXmXML = function(xml_uri) {
         this.xmldoc = new DocumentManager(xml_uri, LoadXMLOnManager, this);
-        var resp = (undefined != this.xmldoc.reqObj.responseXML) ? this.xmldoc.reqObj.responseXML : this.xmldoc.reqObj.documentElement.xml;
+        var resp = this.xmldoc.getResponse();
         this.xmldoc = resp;
-    }
+};
 
 XSLManager.prototype.transform = function(xsl_id,getXMLNodeFunc,doc,append_to_id) {
     var selStyle = this.txstyles[xsl_id];
@@ -237,7 +246,7 @@ XSLManager.prototype.transform = function(xsl_id,getXMLNodeFunc,doc,append_to_id
         txNode = getXMLNodeFunc(txNode);
     }
     if (null != txNode) {
-        this.xsl = (undefined != selStyle.reqObj.responseXML) ? selStyle.reqObj.responseXML : selStyle.reqObj.documentElement.xml;
+        this.xsl = selStyle.getResponse();
         this.reset();
         this.importStylesheet(this.xsl, selStyle.reqObj, xsl_id);
         while (this.params.length > 0) {
@@ -271,7 +280,7 @@ XSLManager.prototype.transform = function(xsl_id,getXMLNodeFunc,doc,append_to_id
         }
     }
     return true;
-}
+};
 
 function XSLManager(xml_uri)
 {

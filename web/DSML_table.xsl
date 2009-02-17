@@ -37,7 +37,7 @@
                   <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>");</xsl:attribute>
                   <xsl:element name="img">
                     <xsl:attribute name="src">/psldap/images/editRecord_sm.gif</xsl:attribute>
-                    <xsl:attribute name="style">margin-left: 8px; margin-top: 0px; margin-bottom 0px;</xsl:attribute>
+                    <xsl:attribute name="style">margin-left: 8px; margin-top: 0px; margin-bottom: 0px;</xsl:attribute>
                   </xsl:element>
                 </xsl:element>
               </td>

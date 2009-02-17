@@ -20,18 +20,17 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 /*************************************************************************
  * Tree navigation functions
  *************************************************************************
  */
 
 function generateExpandNodeString(navNode, treeNode) {
-  return "<a style=\"padding-right: 1px; padding-left: 1px; font-type: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none;\" href=\"javascript:void(0);\" onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">+</a>"
+  return "<a style=\"padding-right: 1px; padding-left: 1px; font-family: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none;\" href=\"javascript:void(0);\" onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">+</a>"
 }
 
 function generateCollapseNodeString(navNode, treeNode) {
-  return "<a style=\"padding-right: 2px; padding-left: 2px; font-type: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none; \" href=\"javascript:void(0);\" onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">-</a>"
+  return "<a style=\"padding-right: 2px; padding-left: 2px; font-family: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none; \" href=\"javascript:void(0);\" onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">-</a>"
 }
 
 function collapseTreeNode(navNodeId, treeNodeId) {
@@ -187,7 +186,7 @@ function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs) {
     navElement.style.width="12px";
     navElement.innerHTML = generateCollapseNodeString(navElement, nodeList[i]);
     var lastRow = getLastRowOfTable(nodeList[i]);
-    lastRow.setAttribute("lastnode", "true");
+    if (null != lastRow) lastRow.setAttribute("lastnode", "true");
   }
   collapseAllTreeNodes(nodeId);
   if (arguments.length > 2) {

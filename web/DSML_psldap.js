@@ -20,7 +20,6 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-
 var isNav, isIE;
 
 if (parseInt(navigator.appVersion) >= 4) {
@@ -65,6 +64,71 @@ function showNodeManagementImages(objSpan, bShow) {
             (cNode.tagName == "IMG") && (cNode.name != "delete") ) {
             cNode.style.display = (bShow) ? "inline" : "none";
         }
+    }
+}
+
+/** Internal function - changes style display settings to show/hide elements
+ *  @param ss - style sheet reference
+ *  @param j - position of rule to change
+ *  @param rule - rule reference to change
+ *  @param dispStyle - string containing block, none, or inline
+ **/
+function changeDisplayStyle(ss, j, rule, dispStyle)
+{
+    var selectorText = rule.selectorText;
+    if (undefined != ss.removeRule) { ss.removeRule(j); }
+    else { ss.deleteRule(j); }
+    if (undefined != ss.addRule) {
+	ss.addRule(selectorText, "display: " + dispStyle + ";", j);
+    } else {
+	ss.insertRule(selectorText + " { display: " + dispStyle + "; }", j);
+    }
+}
+
+/** Resets the personal, work, other, and im styles to be visible as indicated
+ *  @param personal - use 'none' to hide or 'block' to show
+ *  @param work - use 'none' to hide or 'block' to show
+ *  @param other - use 'none' to hide or 'block' to show
+ *  @param im - use 'none' to hide or 'block' to show
+ **/
+function showInfo(personal, work, other, im, vendor )
+{
+    var i = document.styleSheets.length;
+    while (i-- > 0) {
+	var ss = document.styleSheets[i];
+	var rules = ss.cssRules;
+	var j;
+	if (undefined == rules) rules = ss.rules;
+	j = rules.length;
+
+	while ( j-- > 0) {
+	    var rule = rules[j];
+	    if (undefined == ss.cssRules) {
+		rule = rules.item(j);
+	    }
+	    switch(rule.selectorText) {
+	    case "DIV.personal_info":
+	    case "div.personal_info":
+		changeDisplayStyle(ss, j, rule, personal);
+		break;
+	    case "DIV.work_info":
+	    case "div.work_info":
+		changeDisplayStyle(ss, j, rule, work);
+		break;
+	    case "DIV.other_info":
+	    case "div.other_info":
+		changeDisplayStyle(ss, j, rule, other);
+		break;
+	    case "DIV.im_info":
+	    case "div.im_info":
+		changeDisplayStyle(ss, j, rule, im);
+		break;
+	    case "DIV.vendor_info":
+	    case "div.vendor_info":
+		changeDisplayStyle(ss, j, rule, vendor);
+		break;
+	    }
+	}
     }
 }
 
@@ -180,20 +244,22 @@ function resetProcessWindow() {
 }
 
 function showProcessDocument(bForceShow) {
-    var wt = document.getElementById("processWindow");
+    var processDivObj = document.getElementById("processDiv");
     var bForce = false;
     if (arguments.length > 0) bForce = bForceShow; 
 
-    if (null == wt) {
-        wt = parent.document.getElementById("processWindow");
+    if (null == processDivObj) {
+        processDivObj = parent.document.getElementById("processDiv");
     }
-    if (null != wt) {
-        var objXml = wt.contentWindow.document.getElementsByTagName("XML");
-        if (bForce || (0 < objXml.length) ) {
-            wt.height = "35px";
-            wt.style.display = "block";
+    if (null != processDivObj) {
+        //var objXml = processDivObj.processWindow.contentWindow.document.getElementsByTagName("XML");
+        //if (bForce || (0 < objXml.length) ) {
+	if (bForce) {
+	    processDivObj.style.display = "block";
+	    processDivObj.style.zIndex = 99;
         } else {
-            wt.style.display = "none";
+	    processDivObj.style.display = "none";
+	    processDivObj.style.zIndex = 0;
         }
     }
 }
@@ -251,6 +317,109 @@ function getBaseDNFromMyUrl() {
     return result;
 }
 
+/** Clones form to target window
+ *  @param objForm the Form element to clone
+ *  @param wt the target window in which to clone the form
+ *  @return cloned node element if clonable - else original form reference
+ **/
+function cloneFormToWindow(objForm, wt) {
+    var objClone = objForm;
+    if ((wt.document.importNode) &&
+	(objForm.encoding != "multipart/form-data") ) {
+	/* IE does not support import node - the work arounds seem to
+	   be deficient when used with forms, so just submit the form
+	   in the context of the current page. Also multipart forms
+	   tend to have file input elements which cannot be cloned. */
+	/*wt.document.importNode = psldapImportNode;*/
+	var objBody = wt.document.getElementsByTagName("BODY")[0];
+	objClone = wt.document.importNode(objForm, true);
+	objClone.target = "_self";
+	/* Force rendering */
+	objClone.style.display = "block";
+	wt.document.body.replaceChild(objClone, objBody.childNodes[0]);
+	/* Copy over all the entered data */
+	for (i = 0; i < objForm.elements.length; i++) {
+	    if ((objForm.elements[i].value) ||
+		((objForm.elements[i].name) &&
+		 (objClone.elements[objForm.elements[i].name].value)) ) {
+		objClone.elements[objForm.elements[i].name].value =
+		    objForm.elements[i].value;
+	    } else if ((objForm.elements[i].checked) ||
+		       ((objForm.elements[i].name) &&
+			(objClone.elements[objForm.elements[i].name].checked) ) ) {
+		objClone.elements[objForm.elements[i].name].checked =
+		    objForm.elements[i].checked;
+	    } else if ((objForm.elements[i].selectedIndex) ||
+		       ((objForm.elements[i].name) &&
+			(objClone.elements[objForm.elements[i].name].selectedIndex)) ) {
+		objClone.elements[objForm.elements[i].name].selectedIndex =
+		    objForm.elements[i].selectedIndex;
+	    } else {
+		window.status = "Not copying value " + i + ":" + objForm.elements[i].name;
+	    }
+	}
+    }
+    return objClone;
+}
+
+/** Sets the value of the distinguished name in the form based on the form
+ *  data.
+ *  @param objForm the form containing the data and the hidden dn input elmt
+ **/
+function setDNFromFormData(objForm) {
+    var objOrgElement = (objForm.elements["o"]) ? objForm.elements["o"] :
+	objForm.elements["o-1"];
+    var objOUElement = (objForm.elements["ou"]) ? objForm.elements["ou"] :
+	objForm.elements["ou-1"];
+    var objCNElement = (objForm.elements["cn"]) ? objForm.elements["cn"] :
+	objForm.elements["cn-1"];
+    
+    objForm.dn.value = getBaseDNFromMyUrl();
+    if ("" == objForm.dn.value) {
+	objForm.dn.value = prompt("Enter the base DN to contain this record");
+    }
+    
+    if (objOrgElement && (objOrgElement.value != "")) {
+	objForm.dn.value = "o=" + objOrgElement.value + ", " + objForm.dn.value;
+    }
+    
+    if (objOUElement && (objOUElement.value != "")) {
+	objForm.dn.value = "ou=" + objOUElement.value + ", " + objForm.dn.value;
+    }
+    
+    if (objCNElement) {
+	if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
+	    objCNElement.value = objForm.elements["givenName"].value + " " +
+		objForm.elements["sn"].value;
+	}
+	else if (objForm.elements["givenName-1"] && objForm.elements["sn-1"] ) {
+	    objCNElement.value = objForm.elements["givenName-1"].value + " " +
+		objForm.elements["sn-1"].value;
+	}
+	if (objCNElement.value != "") {
+	    objForm.dn.value = "cn=" + objCNElement.value + ", " + objForm.dn.value;
+	}
+    }
+    objForm.dn.value = window.prompt("Confirm the DN for this record:", objForm.dn.value);
+}
+
+function moveVisibleRecord(action) {
+    var objForm = getAllFormElements();
+    objForm = objForm[currentRecord-1];
+
+    if (objForm.elements["newrdn"]) {
+	objForm.newrdn.value = prompt("Enter the new RDN for this record", objForm.newrdn.value);
+    }
+    if (objForm.elements["newSuperior"]) {
+	objForm.newSuperior.value = prompt("Enter the new superior for this record", objForm.newSuperior.value);
+    }
+    if (objForm.elements["newrdn"] && objForm.elements["newSuperior"]) {
+	submitVisibleRecord(action);
+    } else {
+	alert("New RDN and new Superior are not defined - aborting move request");
+    }
+}
+
 /** Copies the visible form into an iframe labeled as "processWindow" in the
  *  current document and submits the cloned item, capturing the result in the
  *  iframe and maintaining the integrity of the pending form.
@@ -261,86 +430,19 @@ function submitVisibleRecord(action) {
     var wt = document.getElementById("processWindow");
     var i;
     if (null != wt) {
+	/* reset the content to the cleanSrc page to ensure submission ability */
         wt = wt.contentWindow;
     }
     
     objForm = objForm[currentRecord-1];
     objForm.FormAction.value = action;
     if (action == "Create") {
-        var objOrgElement = (objForm.elements["o"]) ? objForm.elements["o"] :
-	    objForm.elements["o-1"];
-        var objOUElement = (objForm.elements["ou"]) ? objForm.elements["ou"] :
-	    objForm.elements["ou-1"];
-        var objCNElement = (objForm.elements["cn"]) ? objForm.elements["cn"] :
-	    objForm.elements["cn-1"];
-
-        objForm.dn.value = getBaseDNFromMyUrl();
-        if ("" == objForm.dn.value) {
-            objForm.dn.value = prompt("Enter the base DN to contain this record");
-        }
-
-        if (objOrgElement && (objOrgElement.value != "")) {
-            objForm.dn.value = "o=" + objOrgElement.value + ", " + objForm.dn.value;
-        }
-
-        if (objOUElement && (objOUElement.value != "")) {
-            objForm.dn.value = "ou=" + objOUElement.value + ", " + objForm.dn.value;
-        }
-
-        if (objCNElement) {
-            if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
-                objCNElement.value = objForm.elements["givenName"].value + " " +
-                    objForm.elements["sn"].value;
-            }
-            else if (objForm.elements["givenName-1"] && objForm.elements["sn-1"] ) {
-                objCNElement.value = objForm.elements["givenName-1"].value + " " +
-                    objForm.elements["sn-1"].value;
-            }
-            if (objCNElement.value != "") {
-                objForm.dn.value = "cn=" + objCNElement.value + ", " + objForm.dn.value;
-            }
-        }
-        objForm.dn.value = wt.prompt("Confirm the DN for this record:", objForm.dn.value);
+	setDNFromFormData(objForm);
     }
     
-    if (wt.confirm("Are you sure you wish to change this record?") ) {
-	if (!(wt.document.importNode) ||
-             (objForm.encoding == "multipart/form-data") ) {
-            /* IE does not support import node - the work arounds seem to
-               be deficient when used with forms, so just submit the form
-               in the context of the current page. Also multipart forms
-	       tend to have file input elements which cannot be cloned. */
-            /*wt.document.importNode = psldapImportNode;*/
-            objForm.submit();
-            return;
-        }
-        var objClone = wt.document.importNode(objForm, true);
-        var objBody = wt.document.getElementsByTagName("BODY")[0];
-        objClone.target = "_self";
-	/* Force rendering */
-	objClone.style.display = "block";
-        wt.document.body.replaceChild(objClone, objBody.childNodes[0]);
-        /* Copy over all the entered data */
-        for (i = 0; i < objForm.elements.length; i++) {
-            if ((objForm.elements[i].value) ||
-                ((objForm.elements[i].name) &&
-                 (objClone.elements[objForm.elements[i].name].value)) ) {
-                objClone.elements[objForm.elements[i].name].value =
-                    objForm.elements[i].value;
-            } else if ((objForm.elements[i].checked) ||
-                       ((objForm.elements[i].name) &&
-                        (objClone.elements[objForm.elements[i].name].checked) ) ) {
-                objClone.elements[objForm.elements[i].name].checked =
-                    objForm.elements[i].checked;
-            } else if ((objForm.elements[i].selectedIndex) ||
-                       ((objForm.elements[i].name) &&
-                        (objClone.elements[objForm.elements[i].name].selectedIndex)) ) {
-                objClone.elements[objForm.elements[i].name].selectedIndex =
-                    objForm.elements[i].selectedIndex;
-            } else {
-                window.status = "Not copying value " + i + ":" + objForm.elements[i].name;
-            }
-        }
+    if (wt.confirm("Are you sure you wish to " + action + " this record?") ) {
+	//var objClone = cloneFormToWindow(objForm, wt);
+	var objClone = objForm;
         showProcessDocument(true);
         objClone.submit();
     }
@@ -352,7 +454,41 @@ function resetVisibleRecord() {
 }
 
 function toggleClassInfo() {
-    alert("Class info modification not yet supported");
+    var aForms = getAllFormElements();
+    var myForm = null;
+    var objClassDiv = null;
+    if ((currentRecord > 0) && (currentRecord <= aForms.length)) {
+        var i;
+        myForm = aForms[currentRecord-1];
+        for ( i = 0; i < myForm.elements.length; i++) {
+            if (myForm.elements[i].name == "objectClass-1") {
+                objClassDiv = myForm.elements[i];
+                break;
+            }
+        }
+    }
+    if (null != objClassDiv) {
+	while ((undefined == objClassDiv.tagName) ||
+	       !((objClassDiv.tagName.toUpperCase() == "DIV") &&
+		 (((undefined != objClassDiv.name) &&
+		   (objClassDiv.name.toUpperCase() == "OCEDIT")) ||
+		  ((undefined != objClassDiv.className) &&
+		   (objClassDiv.className.toUpperCase() == "OCEDIT")) ) )
+	       ) {
+	    objClassDiv = objClassDiv.parentNode;
+	}
+	if (undefined == objClassDiv) {
+	    alert("Could not find objectclass component");
+	} else if (objClassDiv.style.display != "block") {
+	    objClassDiv.style.display = "block";
+	} else if (objClassDiv.style.display != "none") {
+	    objClassDiv.style.display = "none";
+	} else {
+	    alert("Could not determine display style for classes: " + objClassDiv.style.display);
+	}
+    } else {
+        alert("Class info modification not supported for this record");
+    }
 }
 
 function getMyRow(objElement) {
@@ -373,15 +509,24 @@ function getMySpan(objElement) {
     return mySpan;
 }
 
+function getMyDiv(objElement) {
+    var myDiv = objElement;
+    while ((null != myDiv) && (myDiv.nodeType != 3) && /* not a text node */
+           (myDiv.tagName != "DIV")) {
+        myDiv = myDiv.parentNode;
+    }
+    return myDiv;
+}
+
 function pvt_setRecordDisplay(aForms, position, displayStyle)
 {
-    var myRow = null;
+    var myDiv = null;
     if ((position > 0) && (position <= aForms.length)) {
-        myRow = getMyRow(aForms[position-1]);
+        myDiv = getMyDiv(aForms[position-1]);
     }
-    if (null != myRow) {
-        if (myRow.style.display != displayStyle) {
-            myRow.style.display = displayStyle;
+    if (null != myDiv) {
+        if (myDiv.style.display != displayStyle) {
+            myDiv.style.display = displayStyle;
         }
     }
 }
@@ -414,7 +559,7 @@ function loadRecordUrl(sel, target) {
     var objWindow = null;
     if (sel != "") {
         if ((arguments.length < 2) || (null == target)) {
-            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=739, width=669");
+            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=448, width=512");
         } else {
             var objFrame = document.getElementById(target);
             objFrame.src = sel;
@@ -540,8 +685,8 @@ function getEditableRecord(dn, target, xmgr) {
         var getUrl = ldapupdateUri + "?FormAction=Search&" +
 	    "search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
             "&BinaryHRef=on" +
-            "&xsl1=" + psldapRootUri + "/DSML_editform.xsl" +
-            "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
+            "&xsl1=" + psldapRootUri + "/DSML_editform.xsl";
+	//+ "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
         loadRecordUrl(getUrl, target);
     } else {
         window.status = "Targeting window / iframe " + top.document.getElementById(target).id;
@@ -571,7 +716,7 @@ function getVCard(dn, target) {
 
 function getWindowHeight(objWindow) {
     var myHeight = 0;
-    if( typeof( objWindow.innerWidth ) == 'number' ) {
+    if( objWindow.innerWidth && typeof( objWindow.innerWidth ) == 'number' ) {
         //Non-IE
         myHeight = objWindow.innerHeight;
     } else if( document.documentElement &&
@@ -586,6 +731,17 @@ function getWindowHeight(objWindow) {
     return myHeight;
 }
 
+function getClientHeight(cellElmt)
+{
+    var ht = 0;
+    for (var j = 0; j < cellElmt.childNodes.length; j++) {
+	if (undefined != cellElmt.childNodes[j].clientHeight) {
+	    ht = ht + cellElmt.childNodes[j].clientHeight;
+	}
+    }
+    return ht;
+}
+
 function verticalWrapChildren(objCellElmt, reservedSize)
 {
     var nextChild;
@@ -593,51 +749,41 @@ function verticalWrapChildren(objCellElmt, reservedSize)
     var scrollThickness = 25;
     var wrapHeight = getWindowHeight(window) - scrollThickness - reservedSize;
     var currentElmt = objCellElmt;
-    var currentElmtHeight = currentElmt.scrollHeight;
-    var prevWrapHeight = objCellElmt.scrollHeight;
-    var previousHeight = objCellElmt.scrollHeight;
-    var brString = new String("BR");
 
     do {
-        if ((currentElmtHeight >= wrapHeight) &&
-            (currentElmt.firstChild != currentElmt.lastChild) ) {
-            if (currentElmt != objCellElmt) {
+        if (getClientHeight(currentElmt) >= wrapHeight) {
+            if ((currentElmt != objCellElmt) &&
+		(currentElmt.firstChild != currentElmt.lastChild) ) {
                 /* Shift the previously moved element back and remove any
                    trailing breaking space */
                 nextChild = currentElmt.removeChild(currentElmt.lastChild);
-                if (0 != brString.indexOf(nextChild.tagName) ) {
-                    objCellElmt.insertBefore(nextChild, objCellElmt.firstChild);
-                }
-                while (0 == brString.indexOf(currentElmt.lastChild.tagName) ) {
-                    currentElmt.removeChild(currentElmt.lastChild);
-                }
-            }
+            } else if (objCellElmt.firstChild != objCellElmt.lastChild) {
+		nextChild = objCellElmt.removeChild(objCellElmt.firstChild);
+	    }
 
-            currentElmt = document.createElement(objCellElmt.tagName);
-            currentElmt.name = "wrapElmt";
-
-            currentElmt.className = objCellElmt.className;
-            //psldapCopyAttributes(currentElmt, objCellElmt);
-
-            objCellElmt.parentNode.insertBefore(currentElmt, objCellElmt);
-
-            prevWrapHeight = objCellElmt.scrollHeight;
-        }
-	previousHeight = objCellElmt.scrollHeight;
-
-	if (currentElmt == objCellElmt) {
-            previousHeight -= 1;
-        } else {
-            nextChild = currentElmt.appendChild(objCellElmt.firstChild);
-            if (currentElmt.scrollHeight > previousHeight) {
-                currentElmtHeight = currentElmt.scrollHeight;
-                previousHeight = objCellElmt.scrollHeight;
-            } else {
-                currentElmtHeight = prevWrapHeight - objCellElmt.scrollHeight;
-            }
-        }
-    } while ( (null != objCellElmt.firstChild) &&
-              (objCellElmt.scrollHeight <= previousHeight ) );
+	    if ((currentElmt != objCellElmt) &&
+		(getClientHeight(objCellElmt) < wrapHeight) ) {
+		currentElmt = objCellElmt;
+	    } else {
+		currentElmt = document.createElement(objCellElmt.tagName);
+		currentElmt.name = "wrapElmt";
+		currentElmt.className = objCellElmt.className;
+		objCellElmt.parentNode.insertBefore(currentElmt, objCellElmt);
+	    }
+	} else if (currentElmt != objCellElmt) {
+	    nextChild = objCellElmt.removeChild(objCellElmt.firstChild);
+	} else {
+	    nextChild = undefined;
+	}
+	
+	if (undefined != nextChild) {
+	    if (currentElmt != objCellElmt) {
+		currentElmt.appendChild(nextChild);
+	    } else {
+		currentElmt.insertBefore(nextChild, currentElmt.firstChild);
+	    }
+	}
+    } while (undefined != nextChild);
 }
 
 function initializeCards(reservedSize) {

@@ -7,8 +7,8 @@
 <xsl:template match="/dsml">
   <html>
     <head>
-      <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
       <link rel="STYLESHEET" type="text/css" media="print" href="/psldap/DSML_psldap.css" />
+      <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
       <xsl:element name="script">
         <xsl:attribute name="language">JavaScript</xsl:attribute>
         <xsl:attribute name="src">/psldap/DSML_psldap.js</xsl:attribute>
@@ -39,16 +39,16 @@
       </xsl:element>
       <title>Search Results</title>
     </head>
-    <body onload="resizeTopTable(true);" onresize="resizeTopTable();">
+    <body onload="resizeTopTable(true);" onresize="resizeTopTable();" style="margin-top: 0px; margin-bottom: 0px;" >
       <table width="100%" height="100%">
       <tr>
-      <td id="treeCell" style="width: 256px; ">
+      <td id="treeCell" style="width: *; ">
       <div style="overflow: auto; height: 100%; ">
       <xsl:apply-templates select="batchResponse/searchResponse" />
       </div>
       </td>
-      <td id="editCell" style="width: *; ">
-        <iframe id="editFrame" width="100%" height="100%"/>
+      <td id="editCell" style="width: 512px; ">
+        <iframe id="editFrame" frameborder="0" width="100%" height="100%"/>
       </td>
       </tr>
       </table>

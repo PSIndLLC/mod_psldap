@@ -1,3 +1,49 @@
+Revision 0.91 (Future release)
+===================
+PENDING - complete the change to DSML response type for jpegPhoto inclusion in the stream to ensure requests from IE return a URL to the photo and not the binary stream while continuing to pass the encoded image to firefox / mozilla based browsers
+
+Enable mobile browsers capabilities to add, edit, lookup, email, sms, and dial contacts from a smartphone device given access to this application online
+
+Development of a registration page to allow users to self-register in the directory. Supplement with a registrations pending page to classify and move users based on their requests to the appropriate groups.
+
+Revision 0.90
+===================
+Change to alt_index page xsl transformations to enable embedded editing of records
+
+Enabled explicit mime type return setting through BinaryType parameter on the URI - enforced setting 'text/xml' type for dn based queries and create, update, delete operations.
+
+Fixes in XSL to accomodate latest browser releases of firefix and IE
+
+Cleanup alternative index page that leverages AJAX and client side application of XSL transforms to reduce server requests to render detail already available in the DSML response to the browser
+
+Switch alt_index with index to make AJAX processing the default
+
+Modification to basic index page to make display more compact - page layout modifications to reduce framed content
+
+Segregated base DNs for the application into a shared configuration - introduced psldap_config.js to hold configuration settings
+
+Minor CSS style sheet enhancements to accomodate browser changes
+
+Altered image rendering for Mozilla to take advantage of uuencoded jpeg images in the XML - directly embeds image in the transformed page within the image tag. This was disabled inline in the DSML_editform.xsl but can be re-enabled if you are adventurous ;-)
+
+Fixed compilation issues with Apache 2.2 - now compiles and runs. Regression of changes with 2.0 and 1.3 not tested, but believed to be compatible - any issues should be reported to the sourceforge project for mod_psldap.
+
+Repaired cache access error in Apache 2.XX
+
+Introduced ability to move records to other superior nodes in the edit form. This effectively allows for moving records when someone changes organizations or if an organization restructure occurs
+
+Addition of PSI vendor schema
+
+Fixes to column creation / alignment in card display
+
+XML results modified to be in closer alignment to DSML spec and ennabled XML result return and XSL specification / application on all responses
+
+Realignment of address fields to compact edit form display; auto populate postal address from street, city, state and postal code; eliminated form copy prior to submittal on edit form
+
+Introduction of skype calling and yahoo messaging in card view for contacts with skype or yahoo accounts
+
+Fixed display of ISDN and Telex info
+
 Revision 0.89
 ===================
 Fixed lack of recognition of URI search scope in ldap scope execution

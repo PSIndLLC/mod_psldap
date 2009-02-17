@@ -55,3 +55,43 @@ objectclass ( PSIndIMobjectClass:1
     MAY ( imId $ yahooId $ aimId $ skypeId ) )
 
 
+# The following schema definition applies to the cataloging of vendor
+#   organizations
+objectIdentifier PSIndVendorAcct PSIndRoot:4
+objectIdentifier PSIndVendorAcctAttributeType PSIndVendorAcct:1
+objectIdentifier PSIndVendorAcctObjectClass PSIndVendorAcct:2
+
+attributetype ( PSIndVendorAcctAttributeType:10
+    NAME ('vendorClass' 'psVendorClassification')
+    DESC 'Vendor classification'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndVendorAcctAttributeType:11
+    NAME ('acctNo' 'psVendorAccountNumber')
+    DESC 'Account number with vendor'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndVendorAcctAttributeType:12
+    NAME ('loginCred' 'psLoginCredentials')
+    DESC 'Login credentials for vendor website'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndVendorAcctAttributeType:13
+    NAME ('svcDescription' 'psServiceDescription')
+    DESC 'Description of vendor provided services'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+objectclass ( PSIndVendorAcctObjectClass:1
+    NAME 'psVendorAcctObject'
+    DESC 'IM Identifier object'
+    SUP top AUXILIARY
+    MUST ( vendorClass )
+    MAY ( acctNo $ loginCred $ svcDescription ) )

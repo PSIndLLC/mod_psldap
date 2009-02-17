@@ -35,6 +35,7 @@
           <value>inetOrgPerson</value>
           <value>labeledURIObject</value>
           <value>simpleSecurityObject</value>
+          <value>imIdObject</value>
         </attr>
         <attr name="userPassword">
           <value></value>

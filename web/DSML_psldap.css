@@ -1,46 +1,54 @@
-body { color: #000000 ; background-color: #FFFFFF; font-family: arial; font-size: 14px; margin: 1em; }
-hr { width: 100%; height 2px; background-color: #00FF00; }
-p { font-size: 14px; }
-font.menubar { color: #F0FF00; }
-a { color: #0000FF; font-size: 14px; }
-a:visited { color: #000000; }
-a:active { color: #00FF00; }
-a.headerlink:link { color: black ; text-decoration: none; }
-a.headerlink:visited { color: black ; text-decoration: none; }
-a.plainlink:link { color: #00FF00; }
+@import url(DSML_site.css);
+@import url(siteStyle.css);
 
-TR.personal_info { display: none; }
-TR.work_info { display: block; }
-TR.other_info { display: none; }
-TR.im_info { display: none; }
+h2 { padding: 0px; margin: 3px; }
 
-td.menubar input { margin-top: 3px; margin-bottom: 3px; font-family: arial; font-size: 12px; }
+tr.controlRow td { vertical-align:top; }
 
-pre, input, textarea { margin-top: 0px; margin-bottom: 0px; font-family: arial; font-size: 12px; }
+div.personal_info { display:none; }
+div.work_info { display:block; }
+div.other_info { display:none; }
+div.im_info { display:none; }
+div.vendor_info { display:none; }
+div.resultDiv td { vertical-align:top; }
+
+td.menubar_center input { margin-top: 3px; margin-bottom: 3px; font-family: arial; font-size: 12px; }
+
+label { font-size: 10px; margin-top: 0px; margin-bottom: 0px; }
+
+pre, input, textarea, select { padding-top: -3px; font-family: arial; font-size: 10px; margin-top: -1px; margin-bottom: -1px; }
+
+input[type=text], input[type=password], textarea, select { background-color: beige; border-width: 1px; border-style: solid; border-color: gray; }
+
+input[type=text] { line-height: 12px; height: 13px; padding-bottom: 2px; padding-left: 3px; }
 
 table { border-collapse: collapse; border: none; border-spacing: 3px; }
 
-table.boxed { border-collapse: collapse; border: 3px ridge #006A00; border-spacing: 3px; margin-top: -1px; padding: 0px; }
+table.boxed, tr.boxed { border-collapse: collapse; border: 3px solid #008A00; border-spacing: 3px; margin: 0px; padding: 0px; }
 
-table.menubar { width: 100%; cellspacing: 0px; border-spacing: 0px; margin-bottom: -3px; padding: 0px; }
-table.menubar tr { border-spacing: 0px; margin: 0px; padding: 0px; }
+table.menubar, tr.menubar { width: 100%; border-spacing: 0px; margin: 0px; padding: 0px; }
+table.menubar *, tr.menubar * { border-spacing: 0px; margin: 0px; padding: 0px; }
 
-table.std { border-style: hidden; cellspacing: 3px; }
+table.std { border-style: hidden; border-spacing: 3px; }
 
 td { border: none; font-size: 12px; }
+td#tree_cell { padding-top: 0; padding-bottom: 0; cursor:e-resize; }
+td#tree_cell div { cursor:auto; }
 
-td.cardColumn { vertical-align: top; border-left-color: green; border-left-width: 3px; border-left-style: ridge; margin-left: 10px; margin-right 10px; margin-top: 3px; margin-bottom: 3px; padding-left: 10px; padding-right: 10px; }
+td.cardColumn { vertical-align:top; border-left-color: green; border-left-width: 3px; border-left-style: ridge; margin-left: 10px; margin-right: 10px; margin-top: 3px; margin-bottom: 3px; padding-left: 10px; padding-right: 10px; }
 
-td.data { padding-left: 5px; padding-right: 5px; padding-top: 3px; vertical-align: top; }
+td.data { padding-left: 4px; padding-right: 4px; padding-top: 3px; vertical-align:top; white-space:nowrap; }
 
-td.label { padding-left: 10px; padding-right: 5px; padding-top: 3px; vertical-align: top; text-align: right; }
+td.label { padding-left: 4px; padding-right: 4px; padding-top: 3px; vertical-align:top; text-align: right; white-space: nowrap; }
 
-td.menubar { background: url(/psldap/images/header_bg.gif); }
-td.menubar, td.menubar a, td.menubar td { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; }
+table[name=cardInstance] { table-layout: auto; margin-top: 6px; }
+table[name=cardInstance] tr { width: 100%; }
+td.menubar_center { background: url(/psldap/images/header_bg.gif); white-space: nowrap; }
+td.menubar_center, td.menubar_center * { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; vertical-align:middle; margin: 3px; }
+td.menubar_center img { margin-left: 2px; margin-right: 1px; }
 td.menubar_left { background: url(/psldap/images/left_header.gif); background-repeat: no-repeat; width: 20px; }
-td.menubar_left img { width: 21px; }
 td.menubar_right { background: url(/psldap/images/right_header.gif); background-repeat: no-repeat; width: 20px; }
-td.menubar_right img { width: 21px; }
+td.menubar_right img, td.menubar_left img { width: 20px; height: 12px; opacity: 0.0; filter: alpha(opacity=0); }
 
 table#orgTable tr td a {
       text-decoration: none;
@@ -57,7 +65,7 @@ table#orgTable tr td a:active {
 }
 
 table#orgTable table tr[lastnode="true"]>td:first-child {
-      background-color: ;
+      background-color: white;
 }
 
 table#orgTable td[objectclass] {
@@ -103,7 +111,7 @@ table#directoryTable tr td {
       padding-right: 5px;
       padding-top: 2px;
       padding-bottom: 2px;
-      vertical-align: top;
+      vertical-align:top;
       border-color: green;
       border-width: 3px;
       border-style: ridge;
@@ -121,7 +129,6 @@ div#editNavControls span {
       line-height: 29px;
       margin: 5px;
       height: 29px;
-      vertical-align: center;
       cursor: pointer;
 }
 div#editNavControls span img {
@@ -130,11 +137,20 @@ div#editNavControls span img {
       width: 29px;
       height: 29px;
 }
-div#editNavControls span a {
+div#editNavControls_bak span a {
       display: block;
       text-decoration: none;
       font-size: 12px;
       shape: 14 14 14;
+      color: #000000;
+      background-position: 0px 0px;
+      background-image: url(/psldap/images/button_all.gif);
+      background-repeat: no-repeat;
+}
+div#editNavControls span a {
+      display: block;
+      text-decoration: none;
+      font-size: 12px;
       color: #000000;
       background-position: 0px 0px;
       background-image: url(/psldap/images/button_all.gif);
@@ -163,18 +179,21 @@ div#editNavControls span a:active {
 }
 
 img.cloneNode {
-    height: 14;
-    width: 14;
+    height: 14px;
+    width: 14px;
     display: none;
     cursor: pointer;
     background-repeat: no-repeat;
 }
 
 img.deleteNode {
-    height: 14;
-    width: 14;
+    height: 14px;
+    width: 14px;
     display: inline;
     cursor: pointer;
     background-repeat: no-repeat;
 }
 
+form { display: block; }
+
+div.ocEdit { z-index: 5; width: 60%; background-color: white; border: 1px solid silver; margin: 0px; padding: 10px; padding-bottom: 30px; display: none; position: absolute; }

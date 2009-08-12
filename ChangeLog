@@ -1,5 +1,9 @@
 Revision 0.91 (Future release)
 ===================
+Fixes to eliminate infinite loop in the vertical wrap to ensure IE displays the card view correctly and does not hang. This is related to a change in XSL based rendering in IE, requiring deferal of the wrap function call through a timeout.
+
+Introduce session persistence to the LDAP store to offer an alternative to passing credentials in the cookie, replacing content instead with a session id. An additional alternative is also introduced to embed the session id in the URL
+
 PENDING - complete the change to DSML response type for jpegPhoto inclusion in the stream to ensure requests from IE return a URL to the photo and not the binary stream while continuing to pass the encoded image to firefox / mozilla based browsers
 
 Enable mobile browsers capabilities to add, edit, lookup, email, sms, and dial contacts from a smartphone device given access to this application online

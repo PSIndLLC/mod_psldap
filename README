@@ -1,7 +1,7 @@
 mod_psldap
 ===========
 
-Version 0.89
+Version 0.90
 by David Picard
 
 This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
@@ -176,6 +176,13 @@ PsLDAPAuthExternal - Set to 'on' if authentication is to be performed by
 PsLDAPAuthUseCache - Set to 'on' if authentication will check the cache prior
       to querying the LDAP server
 
+PsLDAPUseSession - Set to 'on' if session information is to persist to LDAP
+      server and session id is to be saved to the cookie
+
+PsLDAPSessionTimeout - Set to the number of seconds of inactivity permitted in
+      an active session. Sessions extending beyond this period will be 
+      terminated on the server. Default value is 1 hour or 3600 seconds.
+
 PsLDAPBindMethod   - Set to 'simple', 'krbv41', or 'krbv42' to determine
       binding to server
 
@@ -230,17 +237,33 @@ authentication.
 
 In addition to basic authentication, cookie based authentication is also
 supported. Simply specify the AuthType as "cookie" and authentication will be
-performed through use of cookies. The username and password are stored in a
-plain text form in the cookie by the server and expires with the browser
-session. By default, the cookie is only sent across a secure connection. There
-is no mechanism for altering the expiration of the cookie on the client. The
-cookie may be sent across an unsecure connection by specifying 
+performed through use of cookies. By default, the username and password are 
+stored in a plain text form in the cookie by the server and expires with the 
+browser session. By default, the cookie is only sent across a secure connection. 
+There is no mechanism for altering the expiration of the cookie on the client. 
+The cookie may be sent across an unsecure connection by specifying 
 PsLDAPSecureAuthCookie to be set to 'off'. The username and password are
 captured through a url containing a form that is specified in the 
 PsLDAPCredentialForm parameter. In addition, if the credentials are to be used
 across different sites within the same domain, the administrator may set the
 domain of the cookie by specifying the domain in the PsLDAPAuthCookieDomain
 parameter.
+
+(New in version 0.91) Session persistence in the LDAP directory is also 
+supported in the latest versions of mod_psldap should the server be configured
+with PsLDAPUseSession set to 'on' - default is 'off'. This keeps user credential
+data in either the web server or the LDAP server and sends a session identifier
+to the web client in the cookie instead of the user id and password. The IP,
+port, and a random key form the session identifier - if the IP and port of the
+requesting connection do not match, authentication is denied and the user will
+be required to reauthenticate their session. Sessions are deleted from the LDAP 
+store after a configurable period of inactivity set via the PsLDAPSessionTimeout
+parameter, which defaults to 3600 seconds. In order to activate the session
+capabilities, the LDAP server must be configured to load the psldap.schema
+provided in this package. This capability further requires the LDAP account 
+credentials set in PsLDAPBindDN and PsLDAPBindPassword where this account has
+adequate access / permissions to create and maintain all LDAP records of class 
+PSIndHttpSession
 
 Alternatively, the administrator may use the Apache ErrorDocument directive
 to cause a form to be provided for the user to enter her credentials when she
@@ -645,9 +668,11 @@ in all views (edit, create, and delete).
 
 
 The web directory should be copied recursively to /psldap under your web root if
-your intent is to run the samples without modification. Future revisions of these
-samples will focus on several points of improvement, including improved graphics
-and a reduction in the use of hardcoded paths.
+your intent is to run the samples without modification. Revisions after 0.90 improve
+on configuration of paths in the client side JavaScript by extracting directory names
+and configuration to a configuration parameter script - psajax_config.js. The
+ldapDomain entries in this file should be changed to reflect the LDAP server
+information specific to your configuration.
 
 In order to enable form processing, the following segment must be added to your
 httpd.conf:
@@ -710,6 +735,15 @@ unit.
 	require valid-user
     </FilesMatch>
 
+
+Executing Queries From a URL
+============================
+
+Sometimes we might need to render a page without going through the form selection and submission. In those cases, we could request the data directly using a URL based representation of the LDAP query. A sample URL may look like:
+
+https://www.foo.com/ldapaction?FormAction=Search&search=(objectClass=organization)&dn=dc%3Dfoo%2Cdc%3Dcom&scope=subtree&BinaryHRef=on&xsl1=/psldap/DSML_cards.xsl
+
+Breaking this down a bit we can see that the handler is configured as ldapaction in the configuration file. The FormAction in the argument list must indicate what action should be performed through the psldap handler - in this case 'Search'. We indicate the search string directly in the search argument and further identify the base dn for the ldap search in the dn parameter. We can indicate the scope of the search in the scope parameter to limit the depth of the search. We can further identify the stylesheet to use to render the xml in the xsl1 argument.
 
 Bug reports, patches
 ====================

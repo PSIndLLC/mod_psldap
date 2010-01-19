@@ -47,7 +47,7 @@
       <xsl:apply-templates select="batchResponse/searchResponse" />
       </div>
       </td>
-      <td id="editCell" style="width: 512px; ">
+      <td id="editCell" style="width: 536px; ">
         <iframe id="editFrame" frameborder="0" width="100%" height="100%"/>
       </td>
       </tr>

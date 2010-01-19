@@ -35,16 +35,16 @@ td { border: none; font-size: 12px; }
 td#tree_cell { padding-top: 0; padding-bottom: 0; cursor:e-resize; }
 td#tree_cell div { cursor:auto; }
 
-td.cardColumn { vertical-align:top; border-left-color: green; border-left-width: 3px; border-left-style: ridge; margin-left: 10px; margin-right: 10px; margin-top: 3px; margin-bottom: 3px; padding-left: 10px; padding-right: 10px; }
+td.cardColumn { vertical-align:top; border-left-width: 3px; border-left-style: ridge; padding-left: 10px; padding-right: 10px; }
 
 td.data { padding-left: 4px; padding-right: 4px; padding-top: 3px; vertical-align:top; white-space:nowrap; }
 
 td.label { padding-left: 4px; padding-right: 4px; padding-top: 3px; vertical-align:top; text-align: right; white-space: nowrap; }
 
-table[name=cardInstance] { table-layout: auto; margin-top: 6px; }
-table[name=cardInstance] tr { width: 100%; }
-td.menubar_center { background: url(/psldap/images/header_bg.gif); white-space: nowrap; }
-td.menubar_center, td.menubar_center * { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; vertical-align:middle; margin: 3px; }
+table[name=cardInstance] { table-layout: auto; margin-top: 6px; margin-bottom: 0px; padding: 0px; border-spacing: 0px; }
+table[name=cardInstance] tr { width: 100%; margin-top: 0px; margin-bottom: 0px; border: 0px; }
+td.menubar_center { background: url(/psldap/images/header_bg.gif); background-repeat: repeat-x; white-space: nowrap; }
+td.menubar_center * { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; vertical-align:middle; padding: 1px; }
 td.menubar_center img { margin-left: 2px; margin-right: 1px; }
 td.menubar_left { background: url(/psldap/images/left_header.gif); background-repeat: no-repeat; width: 20px; }
 td.menubar_right { background: url(/psldap/images/right_header.gif); background-repeat: no-repeat; width: 20px; }
@@ -112,7 +112,6 @@ table#directoryTable tr td {
       padding-top: 2px;
       padding-bottom: 2px;
       vertical-align:top;
-      border-color: green;
       border-width: 3px;
       border-style: ridge;
       font-size: 12px;

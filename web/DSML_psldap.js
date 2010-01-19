@@ -48,6 +48,12 @@ function showMyXML() {
     }
 }
 
+function writeDomainOptions() {
+    for (var i=0; i < ldapDomains.length; i++) {
+	document.write('<option ' + ((ldapDomains[i].defaultDomain==1)?"selected ":"") + 'value="' + ldapDomains[i].dn + '">' + ldapDomains[i].label + '</option>');
+    }
+}
+
 /** Forces the visibility of the images in the objSpan to be shown or hidden
  *  @param objSpan the span whose images are to be altered
  *  @param bShow true indicates the images should be shown, false indicates a
@@ -716,17 +722,24 @@ function getVCard(dn, target) {
 
 function getWindowHeight(objWindow) {
     var myHeight = 0;
-    if( objWindow.innerWidth && typeof( objWindow.innerWidth ) == 'number' ) {
+
+    if( objWindow.innerHeight && typeof( objWindow.innerHeight ) == 'number' ) {
         //Non-IE
         myHeight = objWindow.innerHeight;
     } else if( document.documentElement &&
-              ( document.documentElement.clientWidth ||
-                document.documentElement.clientHeight ) ) {
+	       ( undefined != document.documentElement.clientHeight ) &&
+	       ( 0 < document.documentElement.clientHeight ) ) {
         //IE 6+ in 'standards compliant mode'
         myHeight = document.documentElement.clientHeight;
-    } else if( document.body && ( document.body.clientWidth || document.body.clientHeight ) ) {
-        //IE 4 compatible
+    } else if( document.body && ( undefined != document.body.clientHeight ) ) {
+        //IE 4 / 5 compatible
         myHeight = document.body.clientHeight;
+    }
+    if (myHeight < 100) {
+	window.alert ("Window height: " + objWindow.innerHeight + ", " + 
+		      document.documentElement.clientHeight + ", " +
+		      document.body.clientHeight);
+	myHeight = 150;
     }
     return myHeight;
 }
@@ -742,15 +755,45 @@ function getClientHeight(cellElmt)
     return ht;
 }
 
+
+function verticalWrapNColumns(objCellElmt, ncol)
+{
+    var resSz = 0;
+    var wrapHeight = (objCellElmt.lastChild.offsetTop)/ncol;
+    var winH = getWindowHeight(window);
+    var currentElmt = objCellElmt;
+
+    while (currentElmt.offsetParent) {
+	resSz += currentElmt.offsetTop;
+	currentElmt = currentElmt.offsetParent;
+    }
+    winH += resSz;
+    
+    if (wrapHeight > winH) {
+	wrapHeight = winH - wrapHeight;
+    } else {
+	wrapHeight = winH;
+    }
+    verticalWrapChildren(objCellElmt, wrapHeight);
+}
+
 function verticalWrapChildren(objCellElmt, reservedSize)
 {
     var nextChild;
-    /* Take 20 off the window height for the scrollbar thickness ... */
+    /* Take 25 off the window height for the scrollbar thickness ... */
     var scrollThickness = 25;
-    var wrapHeight = getWindowHeight(window) - scrollThickness - reservedSize;
+    var wrapHeight = 0;
     var currentElmt = objCellElmt;
+    while (currentElmt.offsetParent) {
+	reservedSize += currentElmt.offsetTop;
+	currentElmt = currentElmt.offsetParent;
+    }
 
+    currentElmt = objCellElmt;
     do {
+	if (0 == wrapHeight) {
+	    wrapHeight = getWindowHeight(window) - scrollThickness - reservedSize;
+	}
         if (getClientHeight(currentElmt) >= wrapHeight) {
             if ((currentElmt != objCellElmt) &&
 		(currentElmt.firstChild != currentElmt.lastChild) ) {
@@ -781,24 +824,46 @@ function verticalWrapChildren(objCellElmt, reservedSize)
 		currentElmt.appendChild(nextChild);
 	    } else {
 		currentElmt.insertBefore(nextChild, currentElmt.firstChild);
+		/* In this case, the last column has been reached and the height
+		   exceeds the screen height ... stop creating columns */
+		/* Append another column to split the last if more than one...
+		if ( currentElmt.firstChild != currentElmt.lastChild) {
+		    nextChild = currentElmt.lastChild;
+		    currentElmt = document.createElement(objCellElmt.tagName);
+		    currentElmt.name = "wrapElmt";
+		    currentElmt.className = objCellElmt.className;
+		    objCellElmt.parentNode.insertAfter(currentElmt, objCellElmt);
+		    currentElmt.appendChild(nextChild);
+		}
+		*/
+		nextChild = undefined;
 	    }
 	}
     } while (undefined != nextChild);
 }
 
-function initializeCards(reservedSize) {
-    window.status = "Organizing cards...";
-
+function initializeCardsCB() {
     var cardTable = document.getElementById("cardTable");
     var cardTd = cardTable;
     while ((null != cardTd) && (0 != cardTd.tagName.indexOf("TD"))) {
         cardTd = cardTd.firstChild;
     }
     if (null != cardTd) {
-        verticalWrapChildren(cardTd, reservedSize);
+	if (window.reservedSizeValue < 0) {
+	    verticalWrapNColumns(cardTd, -1 * window.reservedSizeValue);
+	} else {
+	    verticalWrapChildren(cardTd, window.reservedSizeValue);
+	}
     }
-
     window.status = "Done";
+}
+
+function initializeCards(reservedSize) {
+    window.status = "Organizing cards...";
+
+    // Allow rendering to finish ... wrap after a timeout
+    window.reservedSizeValue = reservedSize;
+    window.setTimeout(initializeCardsCB, 20);
 }
 
 function initialize() {

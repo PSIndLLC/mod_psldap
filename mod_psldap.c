@@ -117,7 +117,7 @@
  #define ap_mm_malloc(rm,c,s)	apr_rmm_addr_get((rm),apr_rmm_malloc((rm),((c)*(s))))
  #define ap_mm_realloc(rm,ptr,s) apr_rmm_addr_get((rm),apr_rmm_realloc((rm),(ptr),(s)))
  #define ap_mm_lock(g,l) 
- #define ap_mm_unlock(g) 
+ #define ap_mm_unlock(g)	apr_shm_detach(g)
  typedef apr_pool_t pool;
  typedef apr_table_t table;
  typedef apr_array_header_t array_header;
@@ -142,8 +142,12 @@
  #include "ap_mm.h"
  #include "ap_sha1.h"
  #define DEBUG_ERRNO 
+ #define APLOG_NOERRNO 0
  module MODULE_VAR_EXPORT psldap_module;
 #endif
+#define ps_error(ses,ll,...)	ap_log_error(APLOG_MARK, APLOG_NOERRNO|ll DEBUG_ERRNO, ses,__VA_ARGS__)
+#define ps_rerror(req,ll,...)	ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|ll DEBUG_ERRNO,req, __VA_ARGS__)
+
 
 #include <lber.h>
 #define LDAP_DEPRECATED 1
@@ -168,6 +172,10 @@
 #define XSL_TRANS_A		"xsl1"
 #define XSL_TRANS_B		"xsl2"
 #define FORM_ACTION		"FormAction"
+#define SECURE_CLIENT_IP	"clientIP"
+#define SECURE_SESSION_ID	"sessionID"
+#define SECURE_AUTH_NAMES	"authNames"
+#define SECURE_ACCESS_T		"lastAccessTime"
 #define LOGIN_ACTION	"Login"
 #define SEARCH_ACTION	"Search"
 #define MODIFY_ACTION	"Modify"
@@ -211,6 +219,8 @@ typedef struct  {
     char *psldap_cookiedomain;
     char *psldap_credential_uri;
     int   psldap_cache_auth;
+    int   psldap_use_session;
+    int   psldap_session_timeout;
     int   psldap_ldap_version;
     char *psldap_auth_filter;
     int   psldap_authz_enabled;
@@ -224,6 +234,17 @@ typedef struct {
 } psldap_server_rec;
 
 #define PSLDAP_REDIRECT_URI "PS_Redirect_URI"
+
+typedef struct {
+  const char *sessionId;
+  apr_time_t last_request_time;
+  const char *srcIp;
+  const char *srcPort;
+  const char *dn;	/* distinguished name of user record in ldap */
+  const char *uid;	/* username provided for login */
+  const char *passwd;
+  const char *groups;	/* ',' delimited string of groups */
+} psldap_session_rec;
 
 /* -------------------------------------------------------------*/
 /* --------------------- Caching code --------------------------*/
@@ -353,19 +374,15 @@ static void psldap_array_write_lock(psldap_array* array)
 {
 #ifdef CACHE_USE_SEMAPHORE
     int roCount = 0;
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 dataview.s,
-                 "Acquiring write lock on array");
+    ps_error(dataview.s, APLOG_DEBUG, "Acquiring write lock on array");
     sem_wait(&(array->wr_guard));
     /* If the write lock succeeds, wait for the reads to complete
        prior to allowing the write operations */
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 dataview.s,
-                 "Getting ro count from semaphore");
+    ps_error( dataview.s, APLOG_DEBUG,
+	      "Getting ro count from semaphore");
     sem_getvalue(&(array->ro_guard),&roCount);
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 dataview.s,
-                 "RO count from semaphore is %d", roCount);
+    ps_error( dataview.s, APLOG_DEBUG,
+	      "RO count from semaphore is %d", roCount);
     if (roCount != HARD_SERVER_LIMIT) {
         sem_wait(&(array->wr_guard));
     }
@@ -433,13 +450,12 @@ static psldap_array* psldap_array_create(const int max_record_count)
         if (NULL == result->items) {
             psldap_array_free(&result);
         }
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     dataview.s,
-                     "PSLDAP array created: <%d:%d>", result->ro_guard,
-                     result->wr_guard);
+        ps_error( dataview.s, APLOG_DEBUG,
+		  "PSLDAP array created: <%d:%d>", result->ro_guard,
+		  result->wr_guard);
     } else {
-      	ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, dataview.s,
-                     "Error creating array node");
+      ps_error( dataview.s, APLOG_ERR,
+		"Error creating array node");
     }
     return result;
 }
@@ -513,10 +529,9 @@ static void purge_stale_cache_items(request_rec *r, psldap_shared_dataview *dv)
             expires = data->max_inactive_time + time(NULL);
             for ( j = data->cache_width - 1; j >= 0; j--) {
                 psldap_array *cache = data->multi_cache[j];
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                             r->server,
-                             "Purging cache dimension: <%d:%d=%d>",
-                             i, j, cache->item_count);
+                ps_rerror( r, APLOG_DEBUG,
+			   "Purging cache dimension: <%d:%d=%d>",
+			   i, j, cache->item_count);
                 qsort(cache->items, cache->item_count, sizeof(void*),
                       compare_access_t);
                 for (k = 0; (k < cache->item_count) &&
@@ -534,10 +549,9 @@ static void purge_stale_cache_items(request_rec *r, psldap_shared_dataview *dv)
                 qsort(cache->items, cache->item_count, sizeof(void*),
                       dv->psldap_compares_item[i][j]);
                 data->last_purge_t = time(NULL);
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                             r->server,
-                             "Cache dimension <%d:%d=%d> purge completed",
-                             i, j, cache->item_count);
+                ps_rerror( r, APLOG_INFO,
+			  "Cache dimension <%d:%d=%d> purge completed",
+			  i, j, cache->item_count);
             }
         }
     }
@@ -555,10 +569,9 @@ static pscache_item* find_cache_item(request_rec *r, int collectionIndex,
             psldap_array *array = data->multi_cache[searchBy];
             compare_item = dataview.psldap_compares_item[collectionIndex][searchBy];
             result = (pscache_item*)array_find_item(array, compare_item, key);
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server,
-                         "Found cache item in dimension: <%d:%d> = %p",
-                         collectionIndex, searchBy, result);
+            ps_rerror( r, APLOG_DEBUG,
+		       "Found cache item in dimension: <%d:%d> = %p",
+		      collectionIndex, searchBy, result);
         }
     }
     if (NULL != result) {
@@ -621,19 +634,17 @@ static void insert_cache_item(request_rec *r, int collectionIndex,
             int (*compare_item)(const void *item1, const void *item2);
             psldap_array *array = data->multi_cache[insertBy];
             compare_item = dataview.psldap_compares_item[collectionIndex][insertBy];
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server,
-                         "Current array size on dimension %d:%d =  %d",
-                         collectionIndex, insertBy, array->item_count);
+            ps_error( r->server, APLOG_DEBUG,
+		      "Current array size on dimension %d:%d =  %d",
+		      collectionIndex, insertBy, array->item_count);
             if (0 > array_insert_item(item, array, compare_item, 0)) {
-                ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO,
-                             r->server, "Error inserting cache item <%d:%d>!! new size is %d",
-                             collectionIndex, insertBy, array->item_count);
+                ps_rerror( r, APLOG_ERR,
+			  "Error inserting cache item <%d:%d>!! new size is %d",
+			  collectionIndex, insertBy, array->item_count);
             } else {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                             r->server,
-                             "Cache item inserted in dimension %d:%d - new size is %d",
-                             collectionIndex, insertBy, array->item_count);
+                ps_rerror( r, APLOG_DEBUG,
+			  "Cache item inserted in dimension %d:%d - new size is %d",
+			  collectionIndex, insertBy, array->item_count);
             }
         }
     }
@@ -727,16 +738,14 @@ static void free_shared_data(psldap_shared_data *data, int collectionNumber)
 {
     if (NULL != data) {
         int i;
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     dataview.s,
-                     "Freeing psldap shared data in collection: <%d>",
-                     collectionNumber);
+        ps_error( dataview.s, APLOG_DEBUG,
+		  "Freeing psldap shared data in collection: <%d>",
+		  collectionNumber);
         if (data->multi_cache) {
             int items_freed = 0;
             for (i = 0; i < data->cache_width; i++) {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                             dataview.s,
-                             "Freeing psldap cache dimenstion: <%d>", i);
+                ps_error( dataview.s, APLOG_DEBUG,
+			  "Freeing psldap cache dimenstion: <%d>", i);
                 if (!items_freed) {
                     free_array_items(data->multi_cache[i], collectionNumber);
                     items_freed = 1;
@@ -747,10 +756,9 @@ static void free_shared_data(psldap_shared_data *data, int collectionNumber)
             }
             ap_mm_free(dataview.mem_mgr, data->multi_cache);
         }
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     dataview.s,
-                     "PSLdap shared data in collection freed: <%d>",
-                     collectionNumber);
+        ps_error( dataview.s, APLOG_DEBUG,
+		  "PSLdap shared data in collection freed: <%d>",
+		  collectionNumber);
     }
 }
 
@@ -772,9 +780,8 @@ static void init_shared_data(server_rec *s, psldap_shared_data *data,
         data->last_purge_t = time(NULL);
         data->cache_width = width;
 
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     dataview.s,
-                     "Creating multi-cache array: <%d>", width);
+        ps_error( dataview.s, APLOG_DEBUG,
+		  "Creating multi-cache array: <%d>", width);
         data->multi_cache = ap_mm_calloc(dataview.mem_mgr,
                                          data->cache_width,
                                          sizeof(psldap_array*));
@@ -790,9 +797,8 @@ static void init_shared_data(server_rec *s, psldap_shared_data *data,
         }
         if (0 == i) { free_shared_data(data, dataview.count - 1); }
 
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     dataview.s,
-                     "Multi-cache array created: <%d>", width);
+        ps_error( dataview.s, APLOG_DEBUG,
+		  "Multi-cache array created: <%d>", width);
     }
 }
 
@@ -841,15 +847,15 @@ static AP_MM* alloc_shared_data(server_rec *s, pool *p,
     if (NULL == dataview.mem_mgr) {
         /* log error */
         char *strError = ap_mm_error();
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
-                     "Error creating cache memory manager <%s:%d> : <%s>",
-                     get_shared_filename(s), get_shared_size(s, width),
-                     (NULL != strError) ? strError : "NO_ERR_STRING");
+        ps_error( s, APLOG_ERR,
+		  "Error creating cache memory manager <%s:%d> : <%s>",
+		  get_shared_filename(s), get_shared_size(s, width),
+		  (NULL != strError) ? strError : "NO_ERR_STRING");
     } else if (ap_mm_permission(dataview.mem_mgr, get_file_mode(s),
                                 ap_user_id, -1) ) {
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
-                     "Error setting mode on file <%s:%d>",
-                     get_shared_filename(s), get_file_mode(s));
+      ps_error( s, APLOG_ERR,
+		"Error setting mode on file <%s:%d>",
+		get_shared_filename(s), get_file_mode(s));
     } else {
         dataview.count++;
         if (dataview.collection == NULL) {
@@ -885,10 +891,9 @@ static AP_MM* alloc_shared_data(server_rec *s, pool *p,
 static apr_status_t psldap_server_cleanup(void *server)
 {
     int j;
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 dataview.s,
-                 "Cleaning up shared memory on server: <%d>",
-                 dataview.count);
+    ps_error( dataview.s, APLOG_DEBUG,
+	      "Cleaning up shared memory on server: <%d>",
+	      dataview.count);
     if ( 0 < dataview.count) {
         for (j = 0; j < dataview.count; j++) {
             free_shared_data(&(dataview.collection[j]), j);
@@ -959,9 +964,9 @@ typedef struct
     char *key;		/* The value of the configured key field */
     char *dn;		/* The distinguished name of the LDAP record*/
     char *passwd;	/* The password passed by the user for the
-                       last successful authentication */
+			   last successful authentication */
     char *groups;	/* The groups for the user in a ',' delmited
-                       string */
+			   string */
 } psldap_cache_item;
 
 static AP_MM *cache_mem_mgr = NULL;
@@ -1006,8 +1011,8 @@ static psldap_cache_item* psldap_cache_item_create(request_rec *r,
             if (NULL == (ldap = ps_ldap_init(conf, conf->psldap_hosts,
 					     LDAP_PORT)))
             { 
-                ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
-                             "ldap_init failed <%s>", conf->psldap_hosts);
+	      ps_error( s, APLOG_ERR,
+			"ldap_init failed <%s>", conf->psldap_hosts);
             }
             if (NULL == dn)
             {
@@ -1030,17 +1035,17 @@ static psldap_cache_item* psldap_cache_item_create(request_rec *r,
             ((NULL == result->groups) && (NULL != groups)) ) {
             psldap_cache_item_free(result);
             result = NULL;
-            ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
-                         "Freeing incomplete cache item <%s:%s>",
-                         lhost, key);
+            ps_error( s, APLOG_ERR,
+		      "Freeing incomplete cache item <%s:%s>",
+		      lhost, key);
         } else {
             psldap_cache_add_item(r, 0, result);
         }
     } else if (NULL == cache_mem_mgr) {
-      	ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, s,
-                     "Error creating cache item <%s:%s>",
-                     (NULL == dn) ? "NULL" : dn,
-                     (NULL == groups) ? "NULL" : groups);
+      ps_error( s, APLOG_ERR,
+		"Error creating cache item <%s:%s>",
+		(NULL == dn) ? "NULL" : dn,
+		(NULL == groups) ? "NULL" : groups);
     }
 
     return result;
@@ -1179,18 +1184,17 @@ static void psldap_status_append_mod(psldap_status *ps, request_rec *r,
 {
     LDAPMod **mods_coll;
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Appending LDAPMod instance for attr: %s",
-                 newMod->mod_type);
+    ps_rerror( r, APLOG_DEBUG, "Appending LDAPMod instance for attr: %s",
+	       newMod->mod_type);
     ps->mod_count++;
     mods_coll = ap_palloc(r->pool, ps->mod_count * sizeof(LDAPMod*));
     memcpy(mods_coll, ps->mods, (ps->mod_count - 2) * sizeof(LDAPMod*));
     mods_coll[ps->mod_count-2] = newMod;
     mods_coll[ps->mod_count-1] = NULL;
     ps->mods = mods_coll;
-    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "... LDAPMod instance for attr: %s  appended to collection",
-                 newMod->mod_type);
+    ps_rerror( r, APLOG_DEBUG,
+	      "... LDAPMod instance for attr: %s  appended to collection",
+	      newMod->mod_type);
 }
 
 static void *create_ldap_auth_dir_config (pool *p, char *d)
@@ -1220,6 +1224,8 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_cookiedomain = STR_UNSET;
     sec->psldap_credential_uri = STR_UNSET;
     sec->psldap_cache_auth = INT_UNSET;
+    sec->psldap_use_session = INT_UNSET;
+    sec->psldap_session_timeout = INT_UNSET;
     sec->psldap_ldap_version = INT_UNSET;
 
     return sec;
@@ -1297,6 +1303,8 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET,
                          INT_UNSET);
     set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_use_session, INT_UNSET, INT_UNSET);
+    set_cfg_int_if_n_set(result, b, psldap_session_timeout, INT_UNSET, INT_UNSET);
     set_cfg_int_if_n_set(result, b, psldap_ldap_version, INT_UNSET, INT_UNSET);
 
     if (NULL == b) return result;
@@ -1335,6 +1343,8 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_int_if_n_set(result, b, psldap_secure_auth_cookie, INT_UNSET, 1);
     /* Auth does not use cache by default */
     set_cfg_int_if_n_set(result, b, psldap_cache_auth, INT_UNSET, 0);
+    set_cfg_int_if_n_set(result, b, psldap_use_session, INT_UNSET, 0);
+    set_cfg_int_if_n_set(result, b, psldap_session_timeout, INT_UNSET, 3600);
     /*  */
     set_cfg_int_if_n_set(result, b, psldap_ldap_version, INT_UNSET, 2);
     /* Set the URI for the form to capture credentials */
@@ -1548,6 +1558,19 @@ command_rec ldap_auth_cmds[] = {
       "Set to 'on' if authentication will check the cache prior to querying "
       " the LDAP server"
     },
+    { "PsLDAPUseSession", (cmd_func)ap_set_flag_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_use_session),
+      OR_AUTHCFG, FLAG, 
+      "Set to 'on' if session information is to persist to LDAP server "
+      " and session id is to be saved to the cookie"
+    },
+    { "PsLDAPSessionTimeout", (cmd_func)ap_set_int_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_session_timeout),
+      OR_AUTHCFG, TAKE1, 
+      "Set to the number of seconds of inactivity permitted in an active session. "
+      "  Sessions extending beyond this period will be terminated on the server."
+      "  Default value is 1 hour or 3600 seconds."
+    },
     /* Connection security */
     { "PsLDAPBindMethod", (cmd_func)set_ldap_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_bindmethod),
@@ -1622,6 +1645,16 @@ command_rec ldap_auth_cmds[] = {
     { NULL }
 };
 
+static int ps_table_debug(void *data, const char *key, const char *value)
+{
+    request_rec *r = (request_rec*)data;
+
+    ps_rerror( r, APLOG_INFO, "  Key: %s | Value: %s",
+	       (NULL == key) ? "<blank>" : key,
+	       (NULL == value) ? "<blank>" : value );
+    return 1;
+}
+
 static char * get_user_name(request_rec *r)
 {
 #ifdef APACHE_V2
@@ -1629,6 +1662,191 @@ static char * get_user_name(request_rec *r)
 #else
     return r->connection->user;
 #endif
+}
+
+static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
+                          const char *user, const char *pass,
+                          psldap_config_rec *conf );
+static int add_record_in_ldap(void *data, const char *key, const char *val);
+static int update_record_in_ldap(void *data, const char *key,
+                                 const char *val);
+
+static LDAP* get_admin_ldap_session(request_rec *r, psldap_config_rec *conf)
+{
+    LDAP *result = NULL;
+    					       
+    return ps_bind_ldap(r, &result,
+			(conf->psldap_binddn == NULL) ? "" : conf->psldap_binddn,
+			(conf->psldap_bindpassword == NULL) ? "" :
+			conf->psldap_bindpassword,
+			conf);
+}
+
+static psldap_session_rec* create_psldap_session(request_rec *r,
+						 psldap_config_rec *conf,
+						 const char *dn,
+						 const char *uid,
+						 const char *passwd,
+						 const char *groups )
+{
+    char sessionId[64] = "";
+    psldap_session_rec *result = ap_palloc(r->pool, sizeof(psldap_session_rec));
+
+    sprintf(sessionId, "SESSIONID:%0lx%0lx%0lx%0lx%0lx%0lx%0lx%0lx:%s",
+	    random(),random(),random(),random(),
+	    random(),random(),random(),random(),
+	    r->connection->remote_ip );
+    
+    result->sessionId = ap_pstrdup(r->pool, sessionId);
+    result->srcIp = ap_pstrdup(r->pool, r->connection->remote_ip);
+    result->srcPort = ap_pstrdup(r->pool, "");
+    result->last_request_time = r->request_time;
+    result->dn = ap_pstrdup(r->pool, dn);
+    result->uid = ap_pstrdup(r->pool, uid);
+    result->passwd = ap_pstrdup(r->pool, passwd);
+    result->groups = ap_pstrdup(r->pool, groups);
+    
+    return result;
+}
+
+static int cleanup_expired_sessions(request_rec *r, LDAP *ldap, 
+				    psldap_config_rec *sec,
+				    const char *dn)
+{
+    /* TODO - sec->psldap_session_timeout
+       Cleanup all expired ldap session entries for this user */
+    return 0;
+}
+
+static psldap_session_rec* read_psldap_session(request_rec *r, LDAP *ldap,
+			       psldap_config_rec *conf,
+			       psldap_session_rec* sess)
+{
+    int err_code;
+    LDAPMessage *ld_result = NULL;
+    
+    sess->srcIp = NULL;
+    sess->last_request_time = 0;
+    sess->groups = NULL;
+    sess->dn = NULL;
+    sess->passwd = NULL;
+
+    if(LDAP_SUCCESS ==
+       (err_code = ldap_search_s(ldap, conf->psldap_basedn, LDAP_SCOPE_BASE,
+			 ap_pstrcat(r->pool, "sessionID=", sess->sessionId, NULL),
+			 NULL, 0, &ld_result))
+       )
+    {
+        register LDAPMessage *ldEntry = NULL;
+	char *tmp;
+	struct berval **values;
+	BerElement *ber;
+
+
+	for(ldEntry = ldap_first_entry(ldap, ld_result); NULL != ldEntry;
+	    ldEntry = ldap_next_entry(ldap, ldEntry)) {
+	    for (tmp = ldap_first_attribute(ldap, ldEntry, &ber); NULL != tmp;
+		 tmp = ldap_next_attribute(ldap, ldEntry, ber)) {
+	        int i;
+		char *lastValue;
+		values = ldap_get_values_len(ldap, ldEntry, tmp);
+		if ((NULL != values) &&
+		    (0 <= (i = ldap_count_values_len(values) - 1)) ) {
+		    lastValue = ap_pstrdup(r->pool, values[i]->bv_val);
+		    ldap_value_free_len(values);
+		}
+
+		if (0 == strcmp(SECURE_SESSION_ID, tmp)) {
+		    sess->sessionId = lastValue;
+		} else if (0 == strcmp(SECURE_CLIENT_IP, tmp)) {
+		    sess->srcIp = lastValue;
+		} else if (0 == strcmp(SECURE_ACCESS_T, tmp)) {
+		    struct tm tm;
+		    strptime(lastValue,"%y%m%d%H%M",&tm);
+		    sess->last_request_time = mktime(&tm);
+		} else if (0 == strcmp(SECURE_AUTH_NAMES, tmp)) {
+		    sess->groups = lastValue;
+		} else if (0 == strcmp("user", tmp)) {
+		    sess->dn = lastValue;
+		} else if (0 == strcmp("credential", tmp)) {
+		    sess->passwd = lastValue;
+		}
+		ldap_memfree(tmp);
+	    }
+	}
+    } else {
+        sess->sessionId = NULL;
+    }
+
+    if (NULL != ld_result) { ldap_msgfree(ld_result); }
+
+    ldap_unbind_s(ldap);
+
+    return sess;
+}
+
+static int update_psldap_session(request_rec *r, LDAP *ldap,
+				 psldap_config_rec *sec,
+				 psldap_session_rec* sess)
+{
+    struct tm curr_req_time;
+    char lastAccessTime[16];
+    psldap_status ps;
+    table *t = ap_make_table(r->pool, 8);
+
+    gmtime_r(&sess->last_request_time, &curr_req_time);
+    strftime(lastAccessTime, sizeof(lastAccessTime), "%y%m%d%H%M", &curr_req_time);
+
+    cleanup_expired_sessions(r, ldap, sec, sess->dn);
+
+    ap_table_add(t, "dn", ap_pstrcat(r->pool, "sessionID=", sess->sessionId,
+				     ",", sec->psldap_basedn, NULL));
+    ap_table_add(t, SECURE_SESSION_ID, sess->sessionId);
+    ap_table_add(t, SECURE_CLIENT_IP, sess->srcIp);
+    ap_table_add(t, SECURE_ACCESS_T, lastAccessTime);
+    ap_table_add(t, SECURE_AUTH_NAMES, sess->groups);
+    ap_table_add(t, "user", sess->dn);
+    ap_table_add(t, "credential", sess->passwd);
+
+    psldap_status_init(&ps, r, ldap, sec);
+    ap_table_do(update_record_in_ldap, (void*)&ps, t, NULL);
+
+    ap_clear_table(t);
+    ps.mod_err = get_lderrno(ps.ldap);
+
+    return ps.mod_err;
+}
+
+static int persist_psldap_session(request_rec *r, LDAP *ldap,
+				  psldap_config_rec *sec,
+				  psldap_session_rec* sess)
+{
+    struct tm curr_req_time;
+    char lastAccessTime[16];
+    psldap_status ps;
+    table *t = ap_make_table(r->pool, 8);
+
+    gmtime_r(&sess->last_request_time, &curr_req_time);
+    strftime(lastAccessTime, sizeof(lastAccessTime), "%y%m%d%H%M", &curr_req_time);
+
+    cleanup_expired_sessions(r, ldap, sec, sess->dn);
+
+    ap_table_add(t, "dn", ap_pstrcat(r->pool, "sessionID=", sess->sessionId,
+				     ",", sec->psldap_basedn, NULL));
+    ap_table_add(t, SECURE_SESSION_ID, sess->sessionId);
+    ap_table_add(t, SECURE_CLIENT_IP, sess->srcIp);
+    ap_table_add(t, SECURE_ACCESS_T, lastAccessTime);
+    ap_table_add(t, SECURE_AUTH_NAMES, sess->groups);
+    ap_table_add(t, "user", sess->dn);
+    ap_table_add(t, "credential", sess->passwd);
+
+    psldap_status_init(&ps, r, ldap, sec);
+    ap_table_do(add_record_in_ldap, (void*)&ps, t, NULL);
+
+    ap_clear_table(t);
+    ps.mod_err = get_lderrno(ps.ldap);
+
+    return ps.mod_err;
 }
 
 static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
@@ -1639,6 +1857,7 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
     const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
     char *ldap_query = NULL, *ldap_base = NULL, *user_dn = NULL;
     
+    ps_rerror(r, APLOG_DEBUG, "Getting user DN for user <%s>", user); 
     /* If the user dn is set as the user name, parse out the value and
        return it ... */
     if (0 == strncmp("dn=", user, 3)) {
@@ -1654,11 +1873,11 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
 					       conf->psldap_bindmethod) )
        )
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_bind as user <%s> to get username for <%s> failed:"
-		     " %s", (NULL != conf->psldap_binddn) ?
-		     conf->psldap_binddn : "N/A", user,
-                     ldap_err2string(err_code));
+        ps_rerror( r, APLOG_NOTICE,
+		   "ldap_bind as user <%s> to get username for <%s> failed:"
+		   " %s", (NULL != conf->psldap_binddn) ?
+		   conf->psldap_binddn : "N/A", user,
+		   ldap_err2string(err_code));
         /* Don't abort - try to get the username anyway if anonymous access is
 	   available ***
 	   goto AbortDNAcquisition;
@@ -1689,16 +1908,15 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_search failed: %s", ldap_err2string(err_code));
+        ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s : %s",
+		   ldap_base, ldap_err2string(err_code));
         goto CleanAbortDNAcquisition;
     }
     
     if(NULL == (ld_entry = ldap_first_entry(*ldap, ld_result)))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "attr <%s> for user <%s> not found in <%s>",
-                     ldap_attrs[0], ldap_query, ldap_base);
+        ps_rerror( r, APLOG_NOTICE, "attr <%s> for user <%s> not found in <%s>",
+		   ldap_attrs[0], ldap_query, ldap_base);
         goto CleanAbortDNAcquisition;
     }
 
@@ -1767,9 +1985,8 @@ static char* construct_ldap_query(request_rec *r, psldap_config_rec *conf,
         result = ap_pstrcat(r->pool, query_by, "=", query_for,
                             NULL);
     }
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "User = <%s = %s> : ldap_query = <%s>",
-                 conf->psldap_userkey, user, result);
+    ps_rerror( r, APLOG_DEBUG, "User = <%s = %s> : ldap_query = <%s>",
+	       conf->psldap_userkey, user, result);
 
     return result;
 }
@@ -1788,8 +2005,7 @@ static char* construct_ldap_base(request_rec *r, psldap_config_rec *conf,
         result = ap_pstrdup(r->pool, conf->psldap_basedn);
     }
 
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server, "ldap_base = <%s>",
-                 result);
+    ps_rerror( r, APLOG_DEBUG, "ldap_base = <%s>", result);
 
     return result;
 }
@@ -1819,9 +2035,8 @@ static char* build_psldap_magic_string(request_rec *r, const char *val,
     sprintf(fmresult->mtype, "%s", PSLDAP_FILE_MAGIC);
     fmresult->msize = len;
     memcpy(result + PSLDAP_FILE_MAGIC_SZ, val, len);
-    ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                 " ... built magic string of length %ld ( %lu )",
-                 len + PSLDAP_FILE_MAGIC_SZ, fmresult->msize);
+    ps_rerror( r, APLOG_NOTICE, " ... built magic string of length %ld ( %lu )",
+	       len + PSLDAP_FILE_MAGIC_SZ, fmresult->msize);
     return result;
 }
   
@@ -1842,9 +2057,9 @@ static int isCharArrayBinary(request_rec *r, const char *str, size_t len)
     if (result && (j==(len-1))) result = (str[j] != '\0');
     
     if (result) {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     " unprintable %d of %lu char <%d:%c> in str",
-                     j, len, str[j], str[j]);
+        ps_rerror( r, APLOG_DEBUG,
+		   " unprintable %d of %lu char <%d:%c> in str",
+		   j, len, str[j], str[j]);
     }
     return result;
 }
@@ -1921,15 +2136,13 @@ static LDAPMessage* get_ldrecords(
                                  ldap_query, (char**)ldap_attrs, 0, &result))
        )
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_search - %s | %d | %s- failed: %s",
-                     ldap_base, searchscope, ldap_query,
-                     ldap_err2string(err_code));
+        ps_rerror( r, APLOG_NOTICE, "ldap_search - %s | %d | %s- failed: %s",
+		   ldap_base, searchscope, ldap_query,
+		   ldap_err2string(err_code));
     }
     else if(0 >= ldap_count_entries(ldap, result))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "user <%s> not found", user);
+        ps_rerror( r, APLOG_NOTICE, "user <%s> not found", user);
         if (NULL != result) {
             ldap_msgfree(result);
             result = NULL;
@@ -1950,22 +2163,19 @@ static char * get_ldvalues_from_record(request_rec *r, psldap_config_rec *conf,
     if((NULL == record) ||
        (NULL == (ld_entry = ldap_first_entry(ldap, record))) )
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "first entry in ldap result not acquired: %d",
-                     get_lderrno(ldap) );
+        ps_rerror( r, APLOG_NOTICE,
+		   "first entry in ldap result not acquired: %d",
+		  get_lderrno(ldap) );
     }
     else if(NULL == (ld_values = ldap_get_values_len(ldap, ld_entry, attr)))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "get_ldvalues_from_record <%s | %s> failed",
-                     attr, ldap_err2string(get_lderrno(ldap)));
+        ps_rerror( r, APLOG_NOTICE, "get_ldvalues_from_record <%s | %s> failed",
+		   attr, ldap_err2string(get_lderrno(ldap)));
         set_lderrno(ldap, LDAP_SUCCESS);
     }
     else
     {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     r->server,
-                     "Building string list for attr %s", attr);
+        ps_rerror( r, APLOG_DEBUG, "Building string list for attr %s", attr);
         result = build_string_list(r, ld_values, separator);
         ldap_value_free_len(ld_values);
     }
@@ -1996,21 +2206,19 @@ static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *co
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_search - %s | %d | %s- failed: %s",
-                     ldap_base, searchscope, ldap_query,
-                     ldap_err2string(err_code));
+        ps_rerror( r, APLOG_NOTICE, "ldap_search - %s | %d | %s- failed: %s",
+		   ldap_base, searchscope, ldap_query,
+		   ldap_err2string(err_code));
     }
     else if(!(ld_entry = ldap_first_entry(ldap, ld_result)))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "user <%s> not found", user);
+        ps_rerror( r, APLOG_NOTICE, "user <%s> not found", user);
     }
     else if(!(ld_values = ldap_get_values_len(ldap, ld_entry, attr)))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_get_values <%s | %d | %s | %s> failed",
-                     ldap_base, searchscope, ldap_query, attr);
+        ps_rerror( r, APLOG_NOTICE,
+		   "ldap_get_values <%s | %d | %s | %s> failed",
+		   ldap_base, searchscope, ldap_query, attr);
     }
     else
     {
@@ -2025,8 +2233,7 @@ static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *co
 
 static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
                           const char *user, const char *pass,
-                          psldap_config_rec *conf
-                          )
+                          psldap_config_rec *conf )
 {
     const char *bindas = user, *bindpass = pass;
     int freeLdap = 0;
@@ -2036,8 +2243,7 @@ static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
     /* ldap_open is deprecated in future releases, ldap_init is recommended */
     if (NULL == (*ldap = ps_ldap_init(conf, conf->psldap_hosts, LDAP_PORT)))
     { 
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-                     "ldap_init failed <%s>", conf->psldap_hosts);
+        ps_rerror( r, APLOG_ERR, "ldap_init failed <%s>", conf->psldap_hosts);
         return *ldap;
     }
     
@@ -2051,18 +2257,17 @@ static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
 						   bindpass,
 						   conf->psldap_bindmethod)))
 	{
-            ap_log_error(APLOG_MARK, APLOG_WARNING DEBUG_ERRNO, r->server,
-                         "ldap_bind as user <%s> failed: %s",
-			 (NULL != bindas) ? bindas : "N/A",
-			 ldap_err2string(err_code));
+	    ps_rerror( r, APLOG_WARNING, "ldap_bind as user <%s> failed: %s",
+		       (NULL != bindas) ? bindas : "N/A",
+		       ldap_err2string(err_code));
             if(freeLdap) ldap_unbind_s(*ldap);
             *ldap = NULL;
 	    r->status = HTTP_UNAUTHORIZED;
         }
         else
         {
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                         "ldap_bind as user <%s> succeeded", bindas);
+	    ps_rerror( r, APLOG_INFO, "ldap_bind as user <%s> succeeded",
+		       bindas);
         }
     }
     return *ldap;
@@ -2130,17 +2335,18 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
     if((NULL == ldap) &&
        (NULL == (ldap = ps_ldap_init(conf, conf->psldap_hosts, LDAP_PORT))) )
     { 
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-                     "ldap_init failed <%s>", conf->psldap_hosts);
+        ps_rerror( r, APLOG_ERR, "ldap_init failed <%s>", conf->psldap_hosts);
         return retval;
     }
 
     if (NULL != ps_bind_ldap(r, &ldap, user, pass, conf) ) {
         groupkey = (NULL == conf->psldap_user_grp_attr) ? NULL :
-            get_ldap_val_bound(r, ldap, conf, user, NULL, NULL,
+            get_ldap_val_bound(r, ldap, conf, user, conf->psldap_userkey, user,
                                conf->psldap_user_grp_attr, ":", NULL, '\0');
         if (NULL != groupkey)
         {
+	    ps_rerror( r, APLOG_DEBUG, "Getting groups referencing %s=<%s>",
+		       conf->psldap_grp_mbr_attr, (NULL == groupkey) ? "BLANK" : groupkey);
             while(groupkey[0])
             {
                 char *v = ap_getword(r->pool, &groupkey,':');
@@ -2151,20 +2357,17 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
 				       NULL, '\0');
                 if(NULL != groups)
                 {
-                    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG
-                                 DEBUG_ERRNO,
-                                 r->server, "Found LDAP Groups <%s>", groups);
+                    ps_rerror(r, APLOG_DEBUG, "Found LDAP Groups <%s>", groups);
                     retval = (NULL == retval) ? groups :
                         ap_pstrcat(r->pool, retval, delim, groups, NULL);
                 }
             }
         }
-        else
+        else if (NULL != conf->psldap_user_grp_attr)
         {
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server,
-                         "Could not identify user LDAP User = <%s = %s>",
-                         conf->psldap_userkey, user);
+            ps_rerror( r, APLOG_INFO,
+		       "Could not identify user LDAP User = <%s = %s> with group key %s",
+		       conf->psldap_userkey, user, groupkey);
         }
         if (NULL == aldap) { ldap_unbind_s(ldap); }
     }
@@ -2172,38 +2375,31 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
     return retval;
 }
 
-static char * get_ldap_grp(request_rec *r, const char *user,
-                           const char *pass, psldap_config_rec *conf)
+static int ldap_grp_matches(request_rec *r, const char **groupList,
+			    const char *group)
 {
-    LDAP *ldap = NULL;
-    char *result = NULL;
-    
-    if (conf->psldap_cache_auth) {
-#ifdef USE_PSLDAP_CACHING
-        const psldap_cache_item *record = NULL:
-        record = psldap_cache_item_find(r, conf->psldap_hosts, user, NULL,
-					pass, CACHE_KEY);
-        /* Lookup groups in cache for this user */;
-        if(NULL != record) result = ap_pstrdup(r->pool, record->groups);
-#endif
+    char *v;
+    int result = 0, ll = strlen(*groupList), gl = strlen(group);
+    /* Group starts the string ...*/
+    if (0 == strncmp(*groupList + (ll-gl), group, gl)) {
+        result = 1;
+    /* Group ends the string ...*/
+    } else if ((0 == strncmp(*groupList + (ll-gl), group, gl)) &&
+	       (*groupList[gl] == ',') ) {
+        result = 1;
+    /* Group in the middle of the string ...*/
+    } else if (NULL != (v = strstr(*groupList, group)) ) {
+        if ( (v[-1] == ',') && (v[gl] == ',') ) {
+	    result = 1;
+	}
     }
-    if (NULL == result) {
-        if (conf->psldap_use_ldap_groups)
-        {
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server,
-                         "Finding group membership of LDAP User = <%s = %s>",
-                         conf->psldap_userkey, user);
-            result = get_groups_containing_grouped_attr(r, ldap, user, pass,
-                                                        ",", conf);
-        }
-        else
-        {
-            result = (NULL == conf->psldap_groupkey) ? NULL :
-                get_ldap_val(r, user, pass, conf, NULL, NULL,
-                             conf->psldap_groupkey, ",", NULL, '\0');
-        }
+    /*
+    while('\0' != *groupList[0])
+    {
+	v = ap_getword(r->pool, groupList,',');
+	if(0 == strcmp(v,group)) { result = 1; break; }
     }
+    */
     return result;
 }
 
@@ -2307,8 +2503,18 @@ static int authenticate_via_query (request_rec *r, psldap_config_rec *sec,
         if(password_matches(sec, r, real_pw, sent_pw))
         {
             return OK;
-        }
-    }    
+        } else {
+	    ps_rerror(r, APLOG_INFO,
+		      "Password query - match failed for user %s",
+		      user);
+	}	  
+    } else {
+        ps_rerror(r, APLOG_WARNING,
+		  "Password acquisition through ldap query failed for user %s"
+		  " try setting PsLDAPAuthExternal on and setting"
+		  " PsLDAPAuthSimple off",
+		  user);
+    }
     return HTTP_UNAUTHORIZED;
 }
 
@@ -2366,6 +2572,14 @@ static const char* psldap_findmatch(char *haystack, const char *needle,
     return result;
 }
 
+static int isSecuredField(const char *fieldName)
+{
+  return ((0 == strcmp(SECURE_AUTH_NAMES, fieldName)) ||
+	  (0 == strcmp(SECURE_SESSION_ID, fieldName)) ||
+	  (0 == strcmp(SECURE_CLIENT_IP, fieldName)) ||
+	  0);
+}
+
 static int isLdapField(const char *fieldName)
 {
   return ((0 != strcmp(FORM_ACTION, fieldName)) &&
@@ -2379,9 +2593,9 @@ static int isLdapField(const char *fieldName)
 	    */
 }
 
-char* get_qualified_field_name(request_rec *r, const char *fieldname)
+const char* get_qualified_field_name(request_rec *r, const char *fieldname)
 {
-    char *result = fieldname;
+    const char *result = (isSecuredField(fieldname))?NULL:fieldname;
     if (isLdapField(fieldname))
     {
         result = ap_pstrcat(r->pool, LDAP_KEY_PREFIX, fieldname, NULL);
@@ -2407,17 +2621,16 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
        Recommend the use of memcmp / memchr and construction of an algorithm
        to more efficiently identify the termination of the MIME section.
        Refer to RFCs 1341, 1521, & 1806 for MIME background */
-    const char *tmp;
-    char *val, *key, *filename;
+    const char *tmp, *key;
+    char *val, *filename;
     const char *data = *theData;
     int rc = OK;
     int boundary_len = strlen(boundary);
 
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO,
-                 r->server,
-                 "Form content-type %s read (%lu bytes) <experimental>",
-                 r->content_type, r->clength);
-
+    ps_rerror( r, APLOG_WARNING,
+	       "Form content-type %s read (%lu bytes) <experimental>",
+	       r->content_type, r->clength);
+    
     /* return DECLINED; */
     for (data = strstr(data, boundary),
              tmp = data = strstr(data + boundary_len, "Content-");
@@ -2437,18 +2650,17 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
         if (NULL == (data = strstr(val, boundary)) ) {
             data = psldap_findmatch(val, boundary,
                                     r->clength - (val - *theData) );
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server, "... data size of value for key %s = %ld",
-                         key, data - val );
+            ps_rerror( r, APLOG_DEBUG,
+		       "... data size of value for key %s = %ld",
+		       key, data - val );
         }
         /* The length of the value falls 2 chars before the next boundary,
            account for the CR LF */
         val_len =  data - val - 4;
         val[val_len] = '\0';
 
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                     r->server, "... parsing key %s - checking for file name",
-                     key);
+        ps_rerror( r, APLOG_DEBUG, "... parsing key %s - checking for file name",
+		  key);
         filename = strstr(key + strlen(key) + 1, "filename=\"");
         if (NULL != filename) {
             char *quote;
@@ -2456,9 +2668,8 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
             quote = strchr(filename, '\"');
             if((NULL != quote) && (quote != filename)) quote[0] = '\0';
             else filename = NULL;
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server, "... key %s file name is %s",
-                         key, (NULL != filename) ? filename : "<null>" );
+            ps_rerror( r, APLOG_DEBUG, "... key %s file name is %s",
+		      key, (NULL != filename) ? filename : "<null>" );
         } else {
             int i = 0;
             /*char *ptr = key + strlen(key) + 1, errBuffer[1024];*/
@@ -2471,9 +2682,8 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
             }
             if (i == sizeof(errBuffer)) i--;
             errBuffer[i] = '\0';
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server, "... key %s file name not found in %s",
-                         key, errBuffer);
+            ps_rerror( r, APLOG_DEBUG, "... key %s file name not found in %s",
+		       key, errBuffer);
         }
 
 	key = get_qualified_field_name(r, ap_getword_nc(r->pool, &key, '-'));
@@ -2503,13 +2713,11 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
             }
         } else {
             if (!is_psldap_magic_string(val)) {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                            r->server, "  ...parsed key/value: %s/%s",
-                            key, val);
+                ps_rerror( r, APLOG_DEBUG, "  ...parsed key/value: %s/%s",
+			   key, val);
             } else {
-                ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                             r->server, "  ...parsed key/value: %s/file:%s",
-                             key, filename);
+                ps_rerror( r, APLOG_DEBUG, "  ...parsed key/value: %s/file:%s",
+			   key, filename);
             }
             ap_table_addn(*tab, key, val);
         }
@@ -2528,8 +2736,8 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
  **/
 static void parse_client_data(request_rec *r, char **data, table **tab)
 {
-    const char *tmp;
-    char *val, *key;
+    const char *tmp, *key;
+    char *val;
     while (('\0' != *((char*)*data)) &&
            (val = ap_getword_nc(r->pool, data, '&')))
     {
@@ -2556,16 +2764,20 @@ static void parse_client_data(request_rec *r, char **data, table **tab)
 static int util_read(request_rec *r, char **buf)
 {
     int rc = !OK;
+    ps_rerror( r, APLOG_DEBUG, "Setting up client block for read...");
     if((rc = ap_setup_client_block(r, REQUEST_CHUNKED_ERROR))!= OK)
     {
         return rc;
     }
 
+    ps_rerror( r, APLOG_DEBUG, "Should client block for read...");
     if (ap_should_client_block(r)) {
         int len_read = 0, rpos=0;
         long length = (r->remaining > r->clength) ? r->remaining : r->clength;
         char *argsbuf = *buf = (char*)ap_pcalloc(r->pool, length + 2);
 
+	ps_rerror( r, APLOG_NOTICE, "Reading %ld of %ld bytes of client data",
+		   length, r->remaining);
         ap_hard_timeout("util_read", r);
         while ((length > rpos) &&
                (len_read = ap_get_client_block(r, argsbuf, length - rpos)) > 0)
@@ -2573,12 +2785,12 @@ static int util_read(request_rec *r, char **buf)
             argsbuf[len_read] = '\0';
             rpos += len_read;
             argsbuf = (char*)*buf + rpos;
+	    ps_rerror(r, APLOG_DEBUG, "Client data read: %ld bytes", strlen(*buf));
             ap_reset_timeout(r);
         }
         if(rpos > length) {
-            ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-                          "Buffer overflow reading page response %s",
-                          r->unparsed_uri);
+	    ps_rerror( r, APLOG_ERR, "Buffer overflow reading page response %s",
+		       r->unparsed_uri);
         } else {
             if (r->clength != len_read) r->clength = rpos;
             rc = OK;
@@ -2599,7 +2811,10 @@ static int read_get(request_rec *r, table **tab)
 
     if (r->method_number != M_GET)
     {
+        ps_rerror( r, APLOG_DEBUG, "Skip reading content from get");
         return rc;
+    } else {
+        ps_rerror( r, APLOG_DEBUG, "Reading content from URI params");
     }
 
     /* Ensure values are available for later processing */
@@ -2614,7 +2829,7 @@ static int read_get(request_rec *r, table **tab)
         parse_client_data(r, &data, tab);
         if (NULL == ap_table_get(*tab, FORM_ACTION))
         {
-            ap_clear_table(*tab);
+	    ap_clear_table(*tab);
         }
     }
 
@@ -2629,17 +2844,28 @@ static int read_post(request_rec *r, table **tab)
 
     if (r->method_number != M_POST)
     {
+        ps_rerror( r, APLOG_DEBUG, "Skip reading content from post");
         return rc;
+    } else {
+        ps_rerror( r, APLOG_DEBUG, "Reading content from post");
     }
 
     /* Ensure values are available for later processing */
     if (NULL == (*tab = r->subprocess_env) )
     {
-        *tab = r->subprocess_env = ap_make_table(r->pool, 8);
+        ps_rerror( r, APLOG_DEBUG, "Creating subprocess env on post reading");
+	*tab = r->subprocess_env = ap_make_table(r->pool, 8);
     }
-    else if (NULL != ap_table_get(*tab, FORM_ACTION)) return rc;
+    else if (NULL != (tmp = ap_table_get(*tab, FORM_ACTION)) ) {
+        ps_rerror( r, APLOG_DEBUG,
+		   "%d: Subprocess env found during post reading", rc);
+        /*ap_table_do(ps_table_debug, r, *tab, NULL);*/
+	return rc;
+    }
 
     tmp = ap_table_get(r->headers_in, "Content-Type");
+    ps_rerror( r, APLOG_INFO, "Reading form content of type %s", tmp);
+
     if (0 != strstr(tmp, "multipart/form-data") ) 
     {
         char *boundary = ap_pstrdup(r->pool, strstr(tmp, "boundary=") + 9);
@@ -2651,20 +2877,64 @@ static int read_post(request_rec *r, table **tab)
         rc = parse_multipart_data(r, boundary, &data, tab);
         return rc;
     } else if (0 != strcasecmp(tmp, "application/x-www-form-urlencoded")) {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_WARNING DEBUG_ERRNO, r->server,
-                     "Form content-type %s cannot be read", tmp);
+        ps_rerror( r, APLOG_WARNING, "Form content-type %s cannot be read",
+		   tmp);
         return DECLINED;
     }
 
-    if ((rc = util_read(r, &data)) != OK) return rc;
-    
+    if (OK != (rc = util_read(r, &data)) ) return rc;
+
+    ps_rerror(r, APLOG_DEBUG, "Parsing client data: %ld bytes", strlen(data));
     parse_client_data(r, &data, tab);
 
     return OK;
 }
 
 static const char *cookie_credential_param = "psldapcredentials";
+static const char *cookie_session_param = SECURE_SESSION_ID;
 static const char *cookie_field_label = "PsLDAPField";
+
+static const char* (*def_cookie_value)(request_rec *r, psldap_config_rec *sec,
+				 const char *userValue,
+				 const char *passValue);
+
+/** Set the cookie value with the user and password
+ **/
+static const char* def_cookie_auth_value(request_rec *r, psldap_config_rec *sec,
+                                   const char *userValue,
+                                   const char *passValue)
+{
+    char *result = NULL;
+    ps_rerror(r, APLOG_INFO, "Creating auth cookie for %s", userValue);
+    result = ap_pstrcat(r->pool, sec->psldap_userkey, "=", userValue, "&",
+			sec->psldap_passkey, "=", passValue, NULL);
+    result = ap_pbase64encode(r->pool, result);
+    ps_rerror(r, APLOG_INFO, "Auth cookie = %s", result);
+    return ap_pstrcat(r->pool, cookie_credential_param, "=",
+		      result);
+}
+
+/** Set the cookie value with the session id and persist the session info
+ **/
+static const char* def_cookie_session_value(request_rec *r, psldap_config_rec *sec,
+				      const char *userValue,
+				      const char *passValue)
+{
+    psldap_session_rec* result;
+    LDAP *ldap;
+
+    ps_rerror(r, APLOG_INFO, "Creating session cookie for %s", userValue);
+    result = create_psldap_session(r, sec, "", userValue, passValue,
+				   get_ldap_grp(r, userValue, passValue, sec) );
+    ldap = get_admin_ldap_session(r, sec);
+    if (LDAP_SUCCESS != persist_psldap_session(r, ldap, sec, result)) {
+        update_psldap_session(r, ldap, sec, result);
+    }
+
+    ldap_unbind_s(ldap);
+    
+    return result->sessionId;
+}
 
 /** Set the auth cookie into the err_headers_out struct on the passed
  *  requestor instance.
@@ -2682,45 +2952,48 @@ static void set_psldap_auth_cookie(request_rec *r, psldap_config_rec *sec,
                                    const char *passValue)
 {
     char *cookie_string;
-    char *cookie_value;
+    const char *cookie_value;
     int secure = sec->psldap_secure_auth_cookie;
     const char *cookiedomain = sec->psldap_cookiedomain;
 
-    cookie_value = ap_pstrcat(r->pool, sec->psldap_userkey, "=", userValue,
-                              "&", sec->psldap_passkey, "=", passValue, NULL);
-    cookie_string = ap_pstrcat(r->pool, cookie_credential_param, "=",
-                               ap_pbase64encode(r->pool, cookie_value),
-                               "; path=/",
-                               (secure) ? "; secure" : "",
-                               (cookiedomain) ? "; domain=" : "",
-                               (cookiedomain) ? cookiedomain : "",
-                               NULL);
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Adding auth cookie Set-Cookie: %s", cookie_string);
+    def_cookie_value = (sec->psldap_use_session) ? def_cookie_session_value :
+        def_cookie_auth_value;
+
+    cookie_value = def_cookie_value(r, sec, userValue, passValue);
+    ps_rerror( r, APLOG_DEBUG, "Cookie value: %s", cookie_value);
+    cookie_string = ap_pstrcat(r->pool, cookie_value, "; path=/",
+			       (secure) ? "; secure" : "",
+			       (cookiedomain) ? "; domain=" : "",
+			       (cookiedomain) ? cookiedomain : "",
+			       NULL);
+
+    ps_rerror( r, APLOG_DEBUG, "Adding auth cookie Set-Cookie: %s",
+	       cookie_string);
     ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
 }
 
 static int get_first_form_fieldvalue(request_rec *r, const char* fieldname,
-                               char **sent_value)
+				     char **sent_value)
 {
     int result = 0;
     char *tmp = NULL;
     table *tab = NULL;
 
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "getting form value for %s from get", fieldname);
+    ps_rerror( r, APLOG_DEBUG, "Getting form values for %s from get & post",
+	       fieldname);
     read_get(r, &tab);
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "getting form value for %s from post", fieldname);
     read_post(r, &tab);
 
     if (NULL != tab)
     {
         tmp = (char*)ap_table_get(tab, get_qualified_field_name(r, fieldname));
+    } else {
+        ps_rerror( r, APLOG_DEBUG, "Failed to find value for %s", fieldname);
     }
 
     if(NULL != tmp)
     {
+      ps_rerror( r, APLOG_DEBUG, "Value for %s found <%ld>", fieldname, strlen(tmp) );
         tmp = ap_pstrdup(r->pool, tmp);
         *sent_value = ap_getword_nc(r->pool, &tmp, ';');
         ap_table_add(r->notes, fieldname, *sent_value);
@@ -2729,6 +3002,7 @@ static int get_first_form_fieldvalue(request_rec *r, const char* fieldname,
     return result;
 }
 
+static int (*cookie_cb)(void *data, const char *key, const char *value);
 static int cookie_fieldvalue_cb(void *data, const char *key,
                                 const char *value)
 {
@@ -2743,9 +3017,8 @@ static int cookie_fieldvalue_cb(void *data, const char *key,
     {
         const char *val;
         cookie_string = ap_pbase64decode(r->pool, cookie_string);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                     "getting cookie value for %s from %s",
-                     key, cookie_string);
+        ps_rerror( r, APLOG_DEBUG, "getting cookie value for %s from %s",
+		   key, cookie_string);
         while ((*cookie_string != '\0') &&
                (val = ap_getword_nc(r->pool, &cookie_string, '&')) ) {
             const char *key = ap_getword(r->pool, &val, '=');
@@ -2759,8 +3032,67 @@ static int cookie_fieldvalue_cb(void *data, const char *key,
     return 1;
 }
 
-static int get_cookie_fieldvalue(request_rec *r, const char* fieldname,
-                                 char **sent_value)
+static int cookie_session_cb(void *data, const char *key, const char *value)
+{
+    request_rec *r = (request_rec*)data;
+    psldap_config_rec *conf =
+        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                   &psldap_module);
+    char *tmp = ap_pstrdup(r->pool, value);
+    const char *fieldname = ap_table_get(r->notes, cookie_field_label);
+    char *cookie_string = ap_getword_nc(r->pool, &tmp, ';');
+    
+    if ((0 == strcmp("Cookie", key)) &&
+        (0 == strcmp(cookie_session_param,
+                     ap_getword_nc(r->pool, &cookie_string, ':')) ) )
+    {
+        const char *sessionId = ap_getword_nc(r->pool, &cookie_string, ':');
+        const char *reqIp = ap_getword_nc(r->pool, &cookie_string, ':');
+        ps_rerror( r, APLOG_DEBUG, "getting cookie value for %s from %s:%s",
+		   key, sessionId, reqIp);
+
+	if (0 == strcmp(reqIp, r->connection->remote_ip)) {
+	    psldap_session_rec sess;
+
+	    sess.sessionId = sessionId;
+	    sess.srcIp = reqIp;
+
+	    /* Only go to LDAP if the data is not in the notes table */
+            if (NULL != ap_table_get(r->notes, SECURE_SESSION_ID)) {
+	        LDAP *ldap = get_admin_ldap_session(r, conf);
+		read_psldap_session(r, ldap, conf, &sess);
+
+		ap_table_set(r->notes, conf->psldap_userkey, sess.uid);
+		ap_table_set(r->notes, conf->psldap_passkey, sess.passwd);
+		ap_table_set(r->notes, SECURE_SESSION_ID, sess.sessionId);
+		ap_table_set(r->notes, SECURE_CLIENT_IP, sess.srcIp);
+		{
+		    struct tm curr_req_time;
+		    char lastAccessTime[16];
+		    gmtime_r(&sess.last_request_time, &curr_req_time);
+		    strftime(lastAccessTime, sizeof(lastAccessTime),
+			     "%y%m%d%H%M", &curr_req_time);
+		    ap_table_set(r->notes, SECURE_ACCESS_T, lastAccessTime);
+		}
+		ap_table_set(r->notes, SECURE_AUTH_NAMES, sess.groups);
+		ap_table_set(r->notes, "user", sess.dn);
+		ap_table_set(r->notes, "credential", sess.passwd);
+	    
+		update_psldap_session(r, ldap, conf, &sess);
+		ldap_unbind_s(ldap);
+	    }
+
+            if (NULL != ap_table_get(r->notes, fieldname)) {
+                ap_table_unset(r->notes, cookie_field_label);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static int get_cookie_fieldvalue(request_rec *r, psldap_config_rec *conf,
+				 const char* fieldname, char **sent_value)
 {
     int result = 0;
 
@@ -2769,9 +3101,11 @@ static int get_cookie_fieldvalue(request_rec *r, const char* fieldname,
     */
     ap_table_set(r->notes, cookie_field_label, fieldname);
     ap_table_set(r->notes, fieldname, "");
-    ap_table_do(cookie_fieldvalue_cb, r, r->headers_in, "Cookie", NULL);
-    ap_table_do(cookie_fieldvalue_cb, r, r->err_headers_out, "Set-Cookie",
-                NULL);
+
+    cookie_cb = (conf->psldap_use_session) ? cookie_session_cb :
+        cookie_fieldvalue_cb;
+    ap_table_do(cookie_cb, r, r->headers_in, "Cookie", NULL);
+    ap_table_do(cookie_cb, r, r->err_headers_out, "Set-Cookie", NULL);
     *sent_value = (char*)ap_table_get(r->notes, fieldname);
 
     if(0 == strlen(*sent_value) )
@@ -2783,6 +3117,46 @@ static int get_cookie_fieldvalue(request_rec *r, const char* fieldname,
     }
     return result;
 }
+
+static char * get_ldap_grp(request_rec *r, const char *user,
+                           const char *pass, psldap_config_rec *conf)
+{
+    LDAP *ldap = NULL;
+    char *result = NULL;
+    
+    if (conf->psldap_cache_auth) {
+#ifdef USE_PSLDAP_CACHING
+        const psldap_cache_item *record = NULL:
+        record = psldap_cache_item_find(r, conf->psldap_hosts, user, NULL,
+					pass, CACHE_KEY);
+        /* Lookup groups in cache for this user */;
+        if(NULL != record) result = ap_pstrdup(r->pool, record->groups);
+#endif
+    }
+    if (conf->psldap_use_session) {
+        get_cookie_fieldvalue(r, conf, SECURE_AUTH_NAMES, &result);
+    }
+    if (NULL == result) {
+        if (conf->psldap_use_ldap_groups)
+        {
+            ps_rerror( r, APLOG_DEBUG,
+		       "Finding group membership of LDAP User = <%s = %s>",
+		       conf->psldap_userkey, user);
+            result = get_groups_containing_grouped_attr(r, ldap, user, pass,
+                                                        ",", conf);
+        }
+        else
+        {
+            result = (NULL == conf->psldap_groupkey) ? NULL :
+                get_ldap_val(r, user, pass, conf, NULL, NULL,
+                             conf->psldap_groupkey, ",", NULL, '\0');
+        }
+    }
+
+    ps_rerror(r, APLOG_DEBUG, "LDAP group for user %s is %s", user, result);
+    return result;
+}
+
 
 /** Provide the requested auth value
  * @param r the apache request record
@@ -2838,7 +3212,7 @@ static int get_provided_authvalue(request_rec *r, const char* field,
             return get_first_form_fieldvalue(r, fieldKey, sent_value) ? OK:
                 HTTP_UNAUTHORIZED;
         } else if (0 == strcmp("cookie", authType)) {
-            return get_cookie_fieldvalue(r, fieldKey, sent_value) ? OK:
+	    return get_cookie_fieldvalue(r, sec, fieldKey, sent_value) ? OK:
                 HTTP_UNAUTHORIZED;
         } else {
 	    /* Default handling assumes the request has the user info...
@@ -2852,7 +3226,7 @@ static int get_provided_authvalue(request_rec *r, const char* field,
 	}
     } else {
         table *env = r->subprocess_env;
-        *sent_value = ap_pstrdup(r->pool, ap_table_get(env, fieldKey) );
+        *sent_value = ap_pstrdup(r->pool, ap_table_get(env, get_qualified_field_name(r, fieldKey)) );
         if (NULL != *sent_value) return OK;
     }
     return DECLINED;
@@ -2895,10 +3269,11 @@ static int get_provided_credentials(request_rec *r, psldap_config_rec *sec,
     {
         result = get_provided_credentials(r->prev, sec, sent_pw, sent_user);
     }
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Credentials (%s:%s) %saquired for %s via %s auth for user %s",
-                 sec->psldap_userkey , sec->psldap_passkey,
-                 (OK == result) ? "" : "not ", r->uri, authType, *sent_user);
+    ps_rerror( r, APLOG_DEBUG,
+	       "Credentials (%s:%s) %saquired for %s via %s auth for user %s",
+	       sec->psldap_userkey , sec->psldap_passkey,
+	       (OK == result) ? "" : "not ", r->uri, authType, 
+	       (NULL == *sent_user) ? "<blank>" : *sent_user );
     return result;
 }
 
@@ -2919,17 +3294,17 @@ static int cookie_next_uri_cb(void *data, const char *key, const char *value)
             */
         {
             ap_table_setn(r->notes, cookie_next_uri, cookie_string);
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                         "Next uri after auth set from referrer %s",
-                         cookie_string);
+            ps_rerror( r, APLOG_INFO,
+		       "Next uri after auth set from referrer %s",
+		       cookie_string);
         }
     } else if ((0 == strcmp("Cookie", key)) &&
                (0 == strcmp(cookie_next_uri,
                             ap_getword_nc(r->pool, &cookie_string, '=')) ) ) {
         cookie_string = ap_pbase64decode(r->pool, cookie_string);
         ap_table_setn(r->notes, cookie_next_uri, cookie_string);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                     "Next uri found after auth %s", cookie_string);
+        ps_rerror( r, APLOG_INFO, "Next uri found after auth %s",
+		   cookie_string);
         return 0;
     }
     return 1;
@@ -2953,8 +3328,7 @@ static void set_post_login_uri(request_rec *r, const char *post_login_uri)
     char *cookie_string;
     char *cookie_value;
 
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Setting post login uri to %s", post_login_uri);
+    ps_rerror( r, APLOG_DEBUG, "Setting post login uri to %s", post_login_uri);
     cookie_value = ap_pstrcat(r->pool, post_login_uri, NULL);
     cookie_string = ap_pstrcat(r->pool, cookie_next_uri, "=",
                                ap_pbase64encode(r->pool, cookie_value),
@@ -2966,9 +3340,7 @@ static int log_table_values(void *data, const char *key,
                                 const char *value)
 {
     request_rec *r = (request_rec*)data;
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 r->server,
-                 "Header in kv pair: <%s> = <%s>", key, value);
+    ps_rerror( r, APLOG_DEBUG, "Header in kv pair: <%s> = <%s>", key, value);
     return 1;
 }
 #endif
@@ -2987,10 +3359,8 @@ static int ldap_redirect_handler(request_rec *r)
     r->content_type = "text/html";
     ap_table_add(r->err_headers_out, "Location", redirect_uri);
 
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                 r->server,
-                 "Redirecting to URI %s of type %s", redirect_uri,
-                 r->content_type);
+    ps_rerror( r, APLOG_INFO, "Redirecting to URI %s of type %s", redirect_uri,
+	       r->content_type);
     
     return HTTP_MOVED_TEMPORARILY;
 }
@@ -3007,13 +3377,17 @@ static int ldap_authenticate_user2 (request_rec *r, const char *sent_user,
     const psldap_cache_item *record = NULL;
 #endif
     if(!sec->psldap_userkey || !sec->psldap_auth_enabled) {
+        ps_rerror( r, APLOG_INFO,
+		  "Authentication deferred: user key %s / PSLDAP auth %s",
+		  !sec->psldap_userkey ? "<unset>" : sec->psldap_userkey,
+		  !sec->psldap_auth_enabled ? "disabled" : "enabled"
+		  );
         return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
     }
     
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-		 r->server,
-		 "Authenticating user %s for <%s> with passed credentials",
-		 (NULL == sent_user) ? "" : sent_user, r->uri);
+    ps_rerror( r, APLOG_INFO,
+	      "Authenticating user %s for <%s> with passed credentials",
+	      (NULL == sent_user) ? "" : sent_user, r->uri);
 #ifdef USE_PSLDAP_CACHING
     if (sec->psldap_cache_auth) {
         record = psldap_cache_item_find(r, sec->psldap_hosts, sent_user,
@@ -3021,35 +3395,28 @@ static int ldap_authenticate_user2 (request_rec *r, const char *sent_user,
     }
     if (NULL != record) {
         cacheResultMissing = 0;
-	ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-                     r->server,
-                     "Authentication of user %s through cache",
-                     (NULL == sent_user) ? "" : sent_user);
+	ps_rerror( r, APLOG_INFO,
+		   "Authentication of user %s through cache",
+		   (NULL == sent_user) ? "" : sent_user);
 	res = ((0 == strcmp(sent_user, record->key)) &&
 	       (0 == strcmp(sent_pw, record->passwd)) ) ?
 	  OK : HTTP_UNAUTHORIZED;
     } else {
 #endif
         if(sec->psldap_authexternal) {
-	    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-			 r->server,
-			 "Authentication of user %s through bind",
-			 (NULL == sent_user) ? "" : sent_user);
+	    ps_rerror( r, APLOG_INFO, "Authentication of user %s through bind",
+		       (NULL == sent_user) ? "" : sent_user);
 	    res = authenticate_via_bind (r, sec, sent_user, sent_pw);
 	} else { /* if (sec->psldap_authsimple)  or anything else */
-	    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-			 r->server,
-			 "Authentication of user %s through query",
-			 (NULL == sent_user) ? "" : sent_user);
+	    ps_rerror( r, APLOG_INFO, "Authentication of user %s through query",
+		       (NULL == sent_user) ? "" : sent_user);
 	    res = authenticate_via_query (r, sec, sent_user, sent_pw);
 	}
 #ifdef USE_PSLDAP_CACHING
     }
 #endif
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-		 r->server,
-		 "Authentication of user %s complete",
-		 (NULL == sent_user) ? "" : sent_user);
+    ps_rerror( r, APLOG_INFO, "Authentication of user %s complete",
+	       (NULL == sent_user) ? "" : sent_user);
 	
     return res;
 }
@@ -3069,17 +3436,15 @@ static int ldap_authenticate_user (request_rec *r)
         return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
     }
     
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                 "Authenticating LDAP user for <%s>", r->uri);
+    ps_rerror( r, APLOG_INFO, "Authenticating LDAP user for <%s>", r->uri);
     if (OK != (res = get_provided_credentials (r, sec, &sent_pw, &sent_user
                                                )))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-                     r->server,
-                     "Failed to acquire %s credentials for authentication",
-                     (NULL == sent_user) ? "" : sent_user);
+        ps_rerror( r, APLOG_INFO,
+		   "Failed to acquire <%s> credentials for authentication",
+		   (NULL == sent_user) ? "" : sent_user);
     } else {
-      res = ldap_authenticate_user2(r, sent_user, sent_pw);
+        res = ldap_authenticate_user2(r, sent_user, sent_pw);
     }
 
     if (res == HTTP_UNAUTHORIZED)
@@ -3094,26 +3459,26 @@ static int ldap_authenticate_user (request_rec *r)
         {
             /* We should return the credential page if authtype is cookie,
                and the credential uri is set and unset the cookie */
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO,
-                         r->server,
-                         "Credentials don't exist on page request <%s>,"
-                         " sending form for %s auth: %s",
-                         r->uri, authType, sec->psldap_credential_uri);
+            ps_rerror( r, APLOG_INFO,
+		       "Credentials don't exist on page request <%s>,"
+		       " sending form for %s auth: %s",
+		       r->uri, authType, sec->psldap_credential_uri);
             r->handler = ap_pstrdup(r->pool, "ldap-auth-form");
             res = OK;
         } else if (sec->psldap_authoritative) {
-            ap_log_error (APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                          "LDAP user %s not found or password invalid",
-                          (NULL != sent_user) ? sent_user : "<blank>");
+	  ps_rerror (r, APLOG_NOTICE,
+		    "LDAP user %s not found or password invalid via %s auth",
+		    (NULL != sent_user) ? sent_user : "<blank>",
+		    authType);
             ap_note_basic_auth_failure (r);
         } else {
             res = DECLINED;
         }
 #ifdef USE_PSLDAP_CACHING
     } else if ((OK == res) && cacheResultMissing && (NULL != cache_mem_mgr)) {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                     "Cached user credentials and info for user %s: %s",
-                     sec->psldap_hosts, sent_user);
+        ps_rerror( r, APLOG_INFO,
+		   "Cached user credentials and info for user %s: %s",
+		   sec->psldap_hosts, sent_user);
         /* Cache the user account information */
         psldap_cache_item_create(r, sec->psldap_hosts, sent_user, NULL,
                                  sent_pw, NULL);
@@ -3145,8 +3510,7 @@ static int ldap_check_authz(request_rec *r)
     {
         return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
     }
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                 "Checking LDAP user authorization");
+    ps_rerror( r, APLOG_INFO, "Checking LDAP user authorization");
     if (!reqs_arr ||
 	((OK != get_provided_credentials (r, sec, &sent_pw, &user)) &&
 	 !sec->psldap_authsimple)
@@ -3167,7 +3531,6 @@ static int ldap_check_authz(request_rec *r)
 	
         if(0 == strcmp(w,"group"))
         {
-            char *v;
             const char *groups;
 
             groupRequirementExists = 1;
@@ -3188,13 +3551,9 @@ static int ldap_check_authz(request_rec *r)
                         w = ap_getword(r->pool, &t, ' ');
                     }
                     groups = orig_groups;
-                    /* TODO - optimize this to use string functions instead
-                       of parsing out the string segments */
-                    while(groups[0])
-                    {
-                        v = ap_getword(r->pool, &groups,',');
-                        if(0 == strcmp(v,w)) return OK;
-                    }
+		    if (1 == ldap_grp_matches(r, &groups, w)) {
+		        return OK;
+		    }
                 }
                 errstr = ap_pstrcat(r->pool, "user ", user, " <", orig_groups,
                                     "> not in correct group <", t, ">", NULL);
@@ -3385,8 +3744,7 @@ static LDAPMod* get_transactions(request_rec *r, const char* attr,
     /* Initialize this to something - add is 0x0000 */
     mresult->mod_op = LDAP_MOD_ADD;
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Finding differences of attr: %s", attr);
+    ps_rerror( r, APLOG_DEBUG, "Finding differences of attr: %s", attr);
     while (((NULL != old_v) && (i < old_v->nelts)) || (j < new_v->nelts)) {
         if (j >= new_v->nelts) {
             psldap_txns_add_item_to_results(r, result->deletions,
@@ -3426,10 +3784,9 @@ static LDAPMod* get_transactions(request_rec *r, const char* attr,
         }
     }
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Creating LDAPMod of attr: %s (%d:%d:%d)", attr,
-                 result->keepers->nelts, result->deletions->nelts,
-                 result->additions->nelts);
+    ps_rerror( r, APLOG_DEBUG, "Creating LDAPMod of attr: %s (%d:%d:%d)", attr,
+	       result->keepers->nelts, result->deletions->nelts,
+	       result->additions->nelts);
     mresult->mod_type = (char*)attr;
     if ((result->keepers->nelts == 0) && (result->deletions->nelts == 0) &&
         (result->additions->nelts > 0) ) {
@@ -3619,7 +3976,7 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
                                do we determine the appropriate type ??? */
                             sendValue = ap_pstrcat(r->pool, "<![CDATA[",
                                r->uri,
-                               "?FormAction=Search",
+			       "?", FORM_ACTION, "=", SEARCH_ACTION,
                                "&search=", ap_escape_uri(r->pool, "(objectClass=*)"),
                                "&dn=", ap_escape_uri(r->pool, dn),
                                "&", BINARY_DATA, "=", attr,
@@ -3651,9 +4008,9 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
                 ap_rputs("\t\t\t</searchResultEntry>\n", r);
             }
         } else {
-            ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                         "Cannot read msg type building dsml results: %x",
-                         ldap_msgtype(ldEntry) );
+	  ps_rerror( r, APLOG_NOTICE,
+		     "Cannot read msg type building dsml results: %x",
+		     ldap_msgtype(ldEntry) );
         }
     }
     if (isXMLMimeType(mimeType)) {
@@ -3686,10 +4043,10 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
     static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
     int  err_code;
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Executing ldap_search with base / scope / pattern: "
-                 "%s / %d / %s ...",
-                 ldap_base, conf->psldap_searchscope, ldap_query);
+    ps_rerror( r, APLOG_DEBUG,
+	       "Executing ldap_search with base / scope / pattern: "
+	       "%s / %d / %s ...",
+	       ldap_base, conf->psldap_searchscope, ldap_query);
     ldap_attrs[0] = attr;
     if (LDAP_SCOPE_DEFAULT == scope)
     {
@@ -3704,18 +4061,17 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
             ap_rputs("\t\t<searchResponse>\n", r);
             write_dsml_response_fragment(r, "searchResultDone", err_code);
             ap_rputs("\t\t</searchResponse>\n", r);
-            ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                         "ldap_search failed: %s", ldap_err2string(err_code));
+            ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s",
+		       ldap_err2string(err_code));
         }
     } else {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                     "...ldap_search successfully executed with base / scope / pattern: "
-                     "%s / %d / %s\n"
-                     "Generating and sending DSML response to ldap search request...",
-                     ldap_base, conf->psldap_searchscope, ldap_query);
+        ps_rerror( r, APLOG_DEBUG,
+		  "...ldap_search successfully executed with base / scope / pattern: "
+		  "%s / %d / %s\n"
+		  "Generating and sending DSML response to ldap search request...",
+		  ldap_base, conf->psldap_searchscope, ldap_query);
         write_dsml_search_response(r, ldap, ld_result, mimeType, binaryAsHref);
-        ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                      "...DSML search response sent");
+        ps_rerror(r, APLOG_DEBUG, "...DSML search response sent");
     }
     
     if (NULL != ld_result) { ldap_msgfree(ld_result); }
@@ -3726,22 +4082,21 @@ static void set_processing_parameter(psldap_status *ps, request_rec *r,
 {
     if (0 == strcmp(BINARY_TYPE, key)) {
         ps->responseType = ap_pstrdup(r->pool, val);
-	ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-		      "LDAP response type set to %s",ps->responseType);
+	ps_rerror(r, APLOG_DEBUG, "LDAP response type set to %s",
+		  ps->responseType);
     } else if (0 == strcmp(BINARY_REFS, key)) {
         ps->binaryAsHref = strcasecmp("off", val);
-	ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-		      "LDAP BinaryHRef set to %d", ps->binaryAsHref);
+	ps_rerror(r, APLOG_DEBUG, "LDAP BinaryHRef set to %d",
+		  ps->binaryAsHref);
     } else if (0 == strcmp(XSL_TRANS_A, key)) {
         ps->xslPrimaryUri = ap_pstrdup(r->pool, val);
-	ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-		      "LDAP XML response primary xsl uri set to %s",
-		      ps->xslPrimaryUri);
+	ps_rerror(r, APLOG_DEBUG,
+		  "LDAP XML response primary xsl uri set to %s",
+		  ps->xslPrimaryUri);
     } else if (0 == strcmp(XSL_TRANS_B, key)) {
         ps->xslSecondaryUri = ap_pstrdup(r->pool, val);
-	ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-		      "LDAP XML response primary xsl uri set to %s",
-		      ps->xslSecondaryUri);
+	ps_rerror(r, APLOG_DEBUG, "LDAP XML response primary xsl uri set to %s",
+		  ps->xslSecondaryUri);
     } else if (0 == strcmp(NEW_RDN, key)) {
         ps->newrdn = ap_pstrdup(r->pool, val);
     } else if (0 == strcmp(NEW_SUPERIOR, key)) {
@@ -3805,9 +4160,8 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
         if(0 == strcmp("search", key + LDAP_KEY_PREFIX_LEN))
         {
             ldap_query = ps->searchPattern = ap_pstrdup(r->pool, val);
-            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                          "LDAP query pattern set to %s",
-                          ldap_query);
+            ps_rerror(r, APLOG_DEBUG, "LDAP query pattern set to %s",
+		      ldap_query);
         } else if(0 == strcmp("scope", key + LDAP_KEY_PREFIX_LEN)) {
 	    if (0 == strcmp("subtree", val)) {
 	        ldap_scope = ps->searchScope = LDAP_SCOPE_SUBTREE;
@@ -3816,21 +4170,17 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
 	    } else if (0 == strcmp("base", val)) {
 	        ldap_scope = ps->searchScope = LDAP_SCOPE_BASE;
 	    }
-            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                          "LDAP searchScope set to %d", ldap_scope);
+            ps_rerror(r, APLOG_DEBUG, "LDAP searchScope set to %d", ldap_scope);
         } else if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN)) {
             ps->mod_dn = ap_pstrdup(r->pool, val);
-            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                          "LDAP query record dn set to %s",
-                          ps->mod_dn);
+            ps_rerror(r, APLOG_DEBUG, "LDAP query record dn set to %s",
+		      ps->mod_dn);
         } else if (0 == strcmp(BINARY_DATA, key + LDAP_KEY_PREFIX_LEN)) {
             ldap_field = ps->fieldName = ap_pstrdup(r->pool, val);
-            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                          "LDAP query field set to %s", ldap_field);
+            ps_rerror(r, APLOG_DEBUG,"LDAP query field set to %s", ldap_field);
         } else {
-            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                          "Form field %s not processed to perform ldap query",
-                          key);
+	    ps_rerror(r, APLOG_DEBUG,
+		      "Form field %s not processed to perform ldap query", key);
         }
     } else {
         set_processing_parameter(ps, r, key, val);
@@ -3860,27 +4210,26 @@ static void rprintf_LDAPMod_instance(request_rec *r, LDAPMod *mod)
         op_name = "Unknown Operation";
     }
 
-    ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                  ".. writing %s response to client on mod_op %d",
-                  (NULL != mod->mod_type) ? mod->mod_type : "",
-                  mod->mod_op);
+    ps_rerror(r, APLOG_DEBUG, ".. writing %s response to client on mod_op %d",
+	      (NULL != mod->mod_type) ? mod->mod_type : "",
+	      mod->mod_op);
     ap_rprintf(r, "%s (%d): Attr = %s: ", op_name, mod->mod_op,
                (NULL != mod->mod_type) ? mod->mod_type : "");
     if (0 != (mod->mod_op & LDAP_MOD_BVALUES)) {
         if (NULL != mod->mod_bvalues) {
-            ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                          ".. writing binary values of %s response to client",
-                          (NULL != mod->mod_type) ? mod->mod_type : "");
-            for (i = 0; NULL != mod->mod_bvalues[i]; i++) {
+	    ps_rerror(r, APLOG_DEBUG,
+		      ".. writing binary values of %s response to client",
+		      (NULL != mod->mod_type) ? mod->mod_type : "");
+	    for (i = 0; NULL != mod->mod_bvalues[i]; i++) {
                 ap_rprintf(r, " binary (%d) bytes: %lu%s",
                            i, mod->mod_bvalues[i]->bv_len,
                            (NULL != mod->mod_bvalues[i+1]) ? "; " : "");
             }
         }
     } else if (NULL != mod->mod_values) {
-        ap_log_error (APLOG_MARK, APLOG_DEBUG DEBUG_ERRNO, r->server,
-                      ".. writing char values of %s response to client",
-                      (NULL != mod->mod_type) ? mod->mod_type : "");
+        ps_rerror(r, APLOG_DEBUG,
+		  ".. writing char values of %s response to client",
+		  (NULL != mod->mod_type) ? mod->mod_type : "");
         for (i = 0; NULL != mod->mod_values[i]; i++) {
             ap_rprintf(r, "%s%s",
                        mod->mod_values[i],
@@ -4152,9 +4501,7 @@ static int update_record_in_ldap(void *data, const char *key,
                                                     ";");
             }
 
-            ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                         r->server,
-                         "Finding transactions for key %s", key);
+            ps_rerror( r, APLOG_DEBUG, "Finding transactions for key %s", key);
             {
                 const char *value = duplicate_value_data(r, val);
                 array_header *new_v = parse_arg_string(r, &value, ';');
@@ -4181,9 +4528,7 @@ static int (*get_action_handler(request_rec *r, const char **action))(void*, con
         *action = SEARCH_ACTION;
         return get_dn_attributes_from_ldap;
     }
-    else ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO,
-                      r->server,
-                     "Getting handler for action %s", *action);
+    else ps_rerror( r, APLOG_DEBUG, "Getting handler for action %s", *action);
 
     if (0 == strcmp(LOGIN_ACTION, *action))
     {
@@ -4245,9 +4590,8 @@ static int ldap_update_handler(request_rec *r)
                                                    &psldap_module);
     if (r->method_number == M_OPTIONS) {
         r->allowed |= (1 << M_GET) | (1 << M_POST);
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                     "User <%s> ldap update declined",
-                     (NULL == user) ? "" : user);
+        ps_rerror( r, APLOG_INFO, "User <%s> ldap update declined",
+		   (NULL == user) ? "" : user);
         return DECLINED;
     }
 
@@ -4256,14 +4600,13 @@ static int ldap_update_handler(request_rec *r)
     
     if (OK != (res = get_provided_credentials (r, conf, &password, &user)))
     {
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO DEBUG_ERRNO, r->server,
-                     "User <%s> ldap update rejected - missing auth info",
-                     (NULL == user) ? "null" : user);
+        ps_rerror( r, APLOG_INFO,
+		   "User <%s> ldap update rejected - missing auth info",
+		   (NULL == user) ? "null" : user);
     } else if(NULL == (ldap = ps_ldap_init(conf, conf->psldap_hosts,
 					   LDAP_PORT))) { 
-        ap_log_error(APLOG_MARK, APLOG_ERR DEBUG_ERRNO, r->server,
-                     "ldap_init failed on ldap update <%s>",
-                     conf->psldap_hosts);
+        ps_rerror( r, APLOG_ERR, "ldap_init failed on ldap update <%s>",
+		   conf->psldap_hosts);
         res = HTTP_INTERNAL_SERVER_ERROR;
     } else if((NULL != (bindas =
                         get_user_dn(r, &ldap, user, password, conf))) &&
@@ -4271,10 +4614,10 @@ static int ldap_update_handler(request_rec *r)
                (err_code = ldap_bind_s(ldap, bindas, password,
                                        conf->psldap_bindmethod) ) )
         ) {
-        ap_log_error(APLOG_MARK, APLOG_NOTICE DEBUG_ERRNO, r->server,
-                     "ldap_bind as user <%s> failed on ldap update: %s",
-                     (NULL != bindas) ? bindas : "N/A",
-		     ldap_err2string(err_code));
+        ps_rerror( r, APLOG_NOTICE,
+		   "ldap_bind as user <%s> failed on ldap update: %s",
+		   (NULL != bindas) ? bindas : "N/A",
+		   ldap_err2string(err_code));
         res = HTTP_UNAUTHORIZED;
     } else {
         const char *action = NULL;
@@ -4377,9 +4720,9 @@ static int ldap_update_handler(request_rec *r)
             res = OK;
         }
 	
-        ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                     "ldap_bind as user <%s> status on ldap update: %s",
-                     bindas, ldap_err2string(err_code));
+        ps_rerror( r, APLOG_INFO,
+		   "ldap_bind as user <%s> status on ldap update: %s",
+		   bindas, ldap_err2string(err_code));
         ldap_unbind_s(ldap);
     }
     return res;
@@ -4457,9 +4800,8 @@ module MODULE_VAR_EXPORT psldap_module =
  **/
 static void remove_psldap_auth_cookie(request_rec *r)
 {
-    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_DEBUG DEBUG_ERRNO, r->server,
-                 "Unsetting auth cookie - removing all Set-Cookie entries "
-                 "from err_headers_out");
+    ps_rerror( r, APLOG_DEBUG, "Unsetting auth cookie - "
+	       "removing all Set-Cookie entries from err_headers_out");
     ap_table_unset(r->err_headers_out, "Set-Cookie");
 }
 

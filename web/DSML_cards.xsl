@@ -305,8 +305,8 @@
   <xsl:if test="(not ($heading = '')) and (position() = 1)">
     <h2><xsl:value-of select="$heading" /></h2>
   </xsl:if>
-  <table name='cardInstance' width='100%' border='0' cellspacing='0'>
-    <tr class="menubar">
+  <table name='cardInstance' width='100%' >
+    <tr class="menubar" cellspacing='0'>
       <td class="menubar_left" ><img src="/psldap/images/left_header.gif" /></td>
       <td class="menubar_center" >
 	<table width="100%"><tr>
@@ -328,12 +328,12 @@
 	      </xsl:otherwise>
 	    </xsl:choose>
 	  </td>
-	  <td width="64" noWrap="true" >
+	  <td width="72" noWrap="true" >
 	    <xsl:element name="a">
 	      <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>");</xsl:attribute>
 	      <xsl:element name="img">
 		<xsl:attribute name="src">/psldap/images/editRecord_sm.gif</xsl:attribute>
-		<xsl:attribute name="style">margin-top: 3px; margin-bottom: 0px;</xsl:attribute>
+		<xsl:attribute name="style">margin-top: 1px; margin-bottom: 0px;</xsl:attribute>
 	      </xsl:element>
 	    </xsl:element>
 	    <xsl:comment />
@@ -341,7 +341,7 @@
 	      <xsl:attribute name="href">javascript: void getVCard("<xsl:value-of select="@dn"/>");</xsl:attribute>
 	      <xsl:element name="img">
 		<xsl:attribute name="src">/psldap/images/vcard.gif</xsl:attribute>
-		<xsl:attribute name="style">margin-top: 3px; margin-bottom: 0px;</xsl:attribute>
+		<xsl:attribute name="style">margin-top: 1px; margin-bottom: 0px;</xsl:attribute>
 	      </xsl:element>
 	    </xsl:element>
 	    <xsl:comment />

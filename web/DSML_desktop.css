@@ -1,0 +1,6 @@
+.phone { display: none; }
+.mobile { display: none; }
+
+input[type=text], input[type=password], textarea, select { background-color: beige; border-width: 1px; border-style: solid; border-color: gray; }
+
+input[type=text] { line-height: 12px; height: 13px; padding-bottom: 2px; padding-left: 3px; }

@@ -23,6 +23,9 @@
   </script>
 </xsl:template>
 
+<xsl:template name="pageSpecificHeader" >
+</xsl:template>
+
 <xsl:template match="/dsml">
   <html>
     <xsl:call-template name="pageHeader" />

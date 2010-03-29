@@ -1,0 +1,4 @@
+.phone { display: none; }
+.desktop { display: none; }
+
+input[type=text], input[type=password], textarea, select { background-color: beige; border-width: 1px; border-style: solid; border-color: gray; }

@@ -20,11 +20,15 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
-var isNav, isIE;
+var isNav=0, isMoz=0, isIE=0, isOpera=0;
 
 if (parseInt(navigator.appVersion) >= 4) {
     if (navigator.appName == "Netscape" ) {
         isNav = true;
+    } else if (navigator.appName == "Mozilla") {
+	isMoz = true;
+    } else if (navigator.appName == "Opera") {
+	isOpera = true;
     } else {
         isIE = true;
     }
@@ -32,6 +36,8 @@ if (parseInt(navigator.appVersion) >= 4) {
 
 // Update the URI with the bound URIs in the httpd.conf
 //var psldapRootUri = document.URL.substring(0, document.URL.lastIndexOf("/"));
+var psldapSitePrefix = document.URL.substring(8);
+psldapSitePrefix = "http://" + psldapSitePrefix.substring(0,psldapSitePrefix.indexOf("/"));
 var psldapRootUri = "/psldap";
 var ldapupdateUri = "/ldapupdate";
 
@@ -46,6 +52,47 @@ function showMyXML() {
     } else {
         alert(window.document.textContent);
     }
+}
+
+/** Provides the value associate with name from loaded cookies
+ *  @param c_name the cookie name
+ *  @return the unescaped value stored in the cookie
+ **/
+function ps_get_cookie ( c_name )
+{
+    var c = null;
+    if (document.cookie) {
+	index = document.cookie.indexOf(c_name);
+	if (index != -1) {
+	    var v_start = (document.cookie.indexOf("=", index) + 1);
+	    var v_end = document.cookie.indexOf(";", v_start);
+	    if (v_end == -1) {
+		v_end = v_start;
+	    }
+	    c = document.cookie.substring(v_start, v_end);
+	}
+	/*
+    } else {
+	window.alert("Cookies not accessible, personalization disabled");
+	*/
+    }
+    return c;
+}
+
+function getLoginUserCN() {
+    return ps_get_cookie("psUserCn");
+}
+
+function getLoginUserDN() {
+    return ps_get_cookie("psUserDn");
+}
+
+/** @return true if images can be represented inline in base64 encoding as
+ *           opposed to referencing the src as a URI
+ **/
+function uaSupportsInlineImages() {
+    var result = (isNav || isMoz);
+    return result;
 }
 
 function writeDomainOptions() {
@@ -687,10 +734,11 @@ function writeEditableRecord(dn, target, xslName, xslUri, xslManager,
 }
 
 function getEditableRecord(dn, target, xmgr) {
+    var bhref = uaSupportsInlineImages() ? "off" : "on";
     if (arguments.length < 3) {
         var getUrl = ldapupdateUri + "?FormAction=Search&" +
 	    "search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
-            "&BinaryHRef=on" +
+            "&BinaryHRef=" + bhref +
             "&xsl1=" + psldapRootUri + "/DSML_editform.xsl";
 	//+ "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
         loadRecordUrl(getUrl, target);
@@ -710,11 +758,29 @@ function getEditableRecord(dn, target, xmgr) {
     }
 }
 
+function parseCNFromDN(dn) {
+    var result = null;
+    var index = dn.indexOf("cn=");
+
+    if (index != -1) {
+	var v_start = index + 3;
+	var v_end = dn.indexOf(",", v_start);
+	if (v_end > v_start) {
+	    result = dn.substring(v_start, v_end);
+	}
+    }
+    return result;
+}
+
 function getVCard(dn, target) {
-    //    "&BinaryType=text/x-vcard" +
-    var getUrl = ldapupdateUri + "?FormAction=Search&" +
-	"search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
-        "&BinaryHRef=on" +
+    var userCN = parseCNFromDN(dn);
+    var getUrl;
+    if (null == userCN) userCN = "Contact";
+    getUrl = ldapupdateUri + "?FormAction=Search" +
+	"&search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
+	"&BinaryType=text/x-vcard" +
+	"&dlFilename=" + userCN.replace(/ /g, "") + ".vcf" +
+        "&BinaryHRef=off" +
         "&xsl1=" + psldapRootUri + "/DSML_vcard.xsl" +
         "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
     loadRecordUrl(getUrl, target);
@@ -860,7 +926,6 @@ function initializeCardsCB() {
 
 function initializeCards(reservedSize) {
     window.status = "Organizing cards...";
-
     // Allow rendering to finish ... wrap after a timeout
     window.reservedSizeValue = reservedSize;
     window.setTimeout(initializeCardsCB, 20);

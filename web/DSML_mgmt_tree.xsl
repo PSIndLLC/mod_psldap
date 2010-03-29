@@ -2,23 +2,22 @@
 
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML">
-<xsl:output method="html"/>
+
+<xsl:include href="DSML_sitefrags.xsl" />
+
+<xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
+
+<xsl:output method="html" doctype-public="-//W3C//DTD XHTML 1.0 Transitional//EN" doctype-system="http://www.w3.org/TR/xhtml1l/DTD/transitional.dtd" omit-xml-declaration="no" media-type="text/html" />
+
 <xsl:param name="xslManager" />
-<xsl:template match="/dsml">
-  <html>
-    <head>
-      <link rel="STYLESHEET" type="text/css" media="screen" href="/psldap/DSML_psldap.css" />
-      <link rel="STYLESHEET" type="text/css" media="print" href="/psldap/DSML_psldap.css" />
-      <xsl:element name="script">
-        <xsl:attribute name="language">JavaScript</xsl:attribute>
-        <xsl:attribute name="src">/psldap/DSML_psldap.js</xsl:attribute>
-      </xsl:element>
-      <xsl:element name="script">
-        <xsl:attribute name="language">JavaScript</xsl:attribute>
-        <xsl:attribute name="src">/psldap/DSML_treemanager.js</xsl:attribute>
-      </xsl:element>
-      <xsl:element name="script">
-        <xsl:attribute name="language">JavaScript</xsl:attribute>
+
+<xsl:template name="pageSpecificHeader" >
+  <xsl:element name="script">
+    <xsl:attribute name="language">JavaScript</xsl:attribute>
+    <xsl:attribute name="src">/psldap/DSML_treemanager.js</xsl:attribute>
+  </xsl:element>
+  <xsl:element name="script">
+    <xsl:attribute name="language">JavaScript</xsl:attribute>
         var resizeTimeOutId = 0;
         function resizeTopTable() {
             if (0 == arguments.length) {
@@ -36,9 +35,15 @@
                 document.getElementById("editCell").style.height = cellHeight + "px";
             }
         }
-      </xsl:element>
-      <title>Search Results</title>
-    </head>
+  </xsl:element>
+</xsl:template>
+
+<xsl:template match="/dsml">
+  <html>
+    <xsl:call-template name="pageHeader" >
+      <xsl:with-param name='title'>PsLDAP Search Results</xsl:with-param>
+    </xsl:call-template>
+
     <body onload="resizeTopTable(true);" onresize="resizeTopTable();" style="margin-top: 0px; margin-bottom: 0px;">
       <table width="100%" height="100%">
       <tr>
@@ -47,7 +52,7 @@
           <xsl:apply-templates select="batchResponse/searchResponse" />
         </div>
       </td>
-      <td id="editCell" style="width: 512px; ">
+      <td id="editCell" style="width: 568px; ">
         <iframe id="editFrame" frameborder="0" width="100%" height="100%"/>
       </td>
       </tr>

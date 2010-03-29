@@ -2,33 +2,31 @@
 
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/REC-html40'>
-<xsl:output method="html" encoding="ISO-8859-1" indent="yes" />
+
+<xsl:include href="DSML_sitefrags.xsl" />
+
+<xsl:output method="html" doctype-public="-//W3C//DTD XHTML 1.0 Transitional//EN" doctype-system="http://www.w3.org/TR/xhtml1l/DTD/transitional.dtd" omit-xml-declaration="no" media-type="text/html" />
 
 <xsl:variable name="psldapRoot" select="'/psldap'" />
 
+<xsl:template name="pageSpecificHeader">
+  <xsl:element name="style">
+    <xsl:attribute name="type">text/css</xsl:attribute>
+    div#queryDiv {  z-index: 0; background-color: beige; border: 1px solid silver; margin: 0px; display: none; position: absolute; }
+  </xsl:element>
+  <xsl:element name="script">
+    <xsl:attribute name="type">text/javascript</xsl:attribute>
+    <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/DSML_psldap.js</xsl:attribute>
+  </xsl:element>
+</xsl:template>
+
 <xsl:template match="/dsml">
   <xsl:element name="html">
-    <xsl:element name="head">
-      <xsl:element name="title">DSML Transaction Results</xsl:element>
-      <xsl:element name="meta">
-        <xsl:attribute name="name">generator</xsl:attribute>
-        <xsl:attribute name="content">mod_psldap</xsl:attribute>
-      </xsl:element>
-      <xsl:element name="link">
-        <xsl:attribute name="rel">STYLESHEET</xsl:attribute>
-        <xsl:attribute name="type">text/css</xsl:attribute>
-        <xsl:attribute name="media">screen</xsl:attribute>
-        <xsl:attribute name="href">/psldap/DSML_psldap.css</xsl:attribute>
-      </xsl:element>
-      <xsl:element name="style">
-	<xsl:attribute name="type">text/css</xsl:attribute>
-	div#queryDiv {  z-index: 0; background-color: beige; border: 1px solid silver; margin: 0px; display: none; position: absolute; }
-      </xsl:element>
-      <xsl:element name="script">
-        <xsl:attribute name="type">text/javascript</xsl:attribute>
-        <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/DSML_psldap.js</xsl:attribute>
-      </xsl:element>
-    </xsl:element>
+
+    <xsl:call-template name="pageHeaderWithRefClass" >
+      <xsl:with-param name="title">DSML Transaction Result</xsl:with-param>
+    </xsl:call-template>
+
     <xsl:element name="body">
       <xsl:element name="div">
 	<xsl:attribute name="id">queryDiv</xsl:attribute>

@@ -26,14 +26,17 @@
  * Name: psldap_module
  * ConfigStart
  LDAP_LIBS="-lldap -llber"
- LIBS="$LIBS $LDAP_LIBS"
+ XSL_LIBS="-lxml2 -lxslt"
+ LIBS="$LIBS $LDAP_LIBS $XSL_LIBS"
  echo "       + using LDAP libraries for psldap module"
+ echo "       + using XML2 and XSLT libraries for psldap module"
  * ConfigEnd
  * MODULE-DEFINITION-END
  */
 
 #define PSLDAP_VERSION_LABEL "0.90"
 /*
+#define USE_LIBXML2_LIBXSL
 #define USE_PSLDAP_CACHING
 */
 
@@ -50,6 +53,12 @@
 /* Semaphores will not work on Linux, process sharing semaphores are not
    implemented */
  #define CACHE_USE_SEMAPHORE 1
+#endif
+
+#ifdef USE_LIBXML2_LIBXSL
+ #include "libxml/tree.h"
+ #include "libxml/xmlsave.h"
+ #include "transform.h"
 #endif
 
 #ifdef MPM20_MODULE_STUFF
@@ -72,6 +81,7 @@
  #define ap_push_array apr_array_push
  #define ap_pstrcat apr_pstrcat
  #define ap_pstrdup apr_pstrdup
+ #define ap_pstrndup apr_pstrndup
  #define ap_pcalloc apr_pcalloc
  #define ap_palloc apr_palloc
  #define ap_table_add apr_table_add
@@ -171,6 +181,8 @@
 #define NEW_SUPERIOR		"newSuperior"
 #define XSL_TRANS_A		"xsl1"
 #define XSL_TRANS_B		"xsl2"
+#define XML_TEMPLATE		"xmlObjectTemplate"
+#define DL_FILENAME		"dlFilename"
 #define FORM_ACTION		"FormAction"
 #define SECURE_CLIENT_IP	"clientIP"
 #define SECURE_SESSION_ID	"sessionID"
@@ -180,12 +192,14 @@
 #define SEARCH_ACTION	"Search"
 #define MODIFY_ACTION	"Modify"
 #define CREATE_ACTION	"Create"
+#define PRESENT_ACTION	"Present"
 #define DISABLE_ACTION	"Disable"
 #define DELETE_ACTION	"Delete"
 #define DSML_LOGIN_ACTION	"authRequest"
 #define DSML_SEARCH_ACTION	"searchRequest"
 #define DSML_MODIFY_ACTION	"modifyRequest"
 #define DSML_CREATE_ACTION	"addRequest"
+#define DSML_PRESENT_ACTION	"presentRequest"
 #define DSML_DELETE_ACTION	"delRequest"
 #define DSML_MODIFYDN_ACTION	"modDNRequest"
 #define DSML_COMPARE_ACTION	"compareRequest"
@@ -245,6 +259,8 @@ typedef struct {
   const char *passwd;
   const char *groups;	/* ',' delimited string of groups */
 } psldap_session_rec;
+
+static const char *CONFIG_HTTP_HEADER = "CFG-HTTP-HEADER";
 
 /* -------------------------------------------------------------*/
 /* --------------------- Caching code --------------------------*/
@@ -1149,6 +1165,8 @@ typedef struct
     char *searchPattern;
     char *xslPrimaryUri;
     char *xslSecondaryUri;
+    char *xmlTemplateUri;
+    char *dlFilename;
     char *fieldName;
     char *responseType;
     int binaryAsHref;
@@ -1172,6 +1190,8 @@ static void psldap_status_init(psldap_status *ps, request_rec *r, LDAP *ldap,
     ps->searchPattern = NULL;
     ps->xslPrimaryUri = NULL;
     ps->xslSecondaryUri = NULL;
+    ps->xmlTemplateUri = NULL;
+    ps->dlFilename = NULL;
     ps->fieldName = NULL;
     ps->responseType = NULL;
     ps->binaryAsHref = 0;    
@@ -1647,11 +1667,13 @@ command_rec ldap_auth_cmds[] = {
 
 static int ps_table_debug(void *data, const char *key, const char *value)
 {
+#if 0
     request_rec *r = (request_rec*)data;
 
     ps_rerror( r, APLOG_INFO, "  Key: %s | Value: %s",
 	       (NULL == key) ? "<blank>" : key,
 	       (NULL == value) ? "<blank>" : value );
+#endif
     return 1;
 }
 
@@ -2585,6 +2607,9 @@ static int isLdapField(const char *fieldName)
   return ((0 != strcmp(FORM_ACTION, fieldName)) &&
             (0 != strcmp(BINARY_TYPE, fieldName)) &&
             (0 != strcmp(XSL_TRANS_A, fieldName)) &&
+            (0 != strcmp(XSL_TRANS_B, fieldName)) &&
+            (0 != strcmp(XML_TEMPLATE, fieldName)) &&
+            (0 != strcmp(DL_FILENAME, fieldName)) &&
             (0 != strcmp(BINARY_REFS, fieldName)) &&
             (0 != strcmp(NEW_RDN, fieldName)) &&
             (0 != strcmp(NEW_SUPERIOR, fieldName)) );
@@ -2687,13 +2712,7 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
         }
 
 	key = get_qualified_field_name(r, ap_getword_nc(r->pool, &key, '-'));
-	/*       
-        if ( isLdapField(key) ) {
-            key = ap_pstrcat(r->pool, LDAP_KEY_PREFIX,
-                             ap_getword_nc(r->pool, &key, '-'),
-                             NULL);
-        }
-	*/
+
         if (NULL != filename) {
             val = build_psldap_magic_string(r, val, val_len + 1);
         }
@@ -2859,7 +2878,7 @@ static int read_post(request_rec *r, table **tab)
     else if (NULL != (tmp = ap_table_get(*tab, FORM_ACTION)) ) {
         ps_rerror( r, APLOG_DEBUG,
 		   "%d: Subprocess env found during post reading", rc);
-        /*ap_table_do(ps_table_debug, r, *tab, NULL);*/
+        ap_table_do(ps_table_debug, r, *tab, NULL);
 	return rc;
     }
 
@@ -2910,8 +2929,9 @@ static const char* def_cookie_auth_value(request_rec *r, psldap_config_rec *sec,
 			sec->psldap_passkey, "=", passValue, NULL);
     result = ap_pbase64encode(r->pool, result);
     ps_rerror(r, APLOG_INFO, "Auth cookie = %s", result);
+
     return ap_pstrcat(r->pool, cookie_credential_param, "=",
-		      result);
+		      result, NULL);
 }
 
 /** Set the cookie value with the session id and persist the session info
@@ -3356,13 +3376,70 @@ static int ldap_redirect_handler(request_rec *r)
 {
     const char *redirect_uri = ap_table_get(r->notes, PSLDAP_REDIRECT_URI);
 
-    r->content_type = "text/html";
-    ap_table_add(r->err_headers_out, "Location", redirect_uri);
-
-    ps_rerror( r, APLOG_INFO, "Redirecting to URI %s of type %s", redirect_uri,
-	       r->content_type);
-    
+    if (NULL != redirect_uri) {
+        r->content_type = "text/html";
+	ap_table_add(r->err_headers_out, "Location", redirect_uri);
+	
+	ps_rerror( r, APLOG_INFO, "Redirecting to URI %s of type %s", redirect_uri,
+		   r->content_type);
+	
+	ap_soft_timeout("redirect ldap handler", r);
+	ap_send_http_header(r);
+	ap_kill_timeout(r);
+	/*
+	  ap_internal_redirect(redirect_uri, r);
+	  return OK;
+	*/
+    }
     return HTTP_MOVED_TEMPORARILY;
+}
+
+static char* escapeChar(request_rec *r, char *str, char c, const char* frag)
+{
+    char *result = str, *tmp = result, *last = result;
+    char search[] = {'\0', '\0'};
+    const char *replaceWith = (NULL == frag) ? "&amp;" : frag;
+    search[0] = c;
+    if (NULL != strstr(str, search)) {
+        result = apr_strtok(ap_pstrdup(r->pool, result), search, &last);
+	while (NULL != (tmp = apr_strtok(NULL, search, &last))) {
+	    result = ap_pstrcat(r->pool, result, replaceWith, tmp, NULL);
+	}
+    }
+    return result;
+}
+
+static void write_cn_cookie(request_rec *r, psldap_config_rec *sec,
+			    const char *sent_user, const char *sent_pw)
+{
+    LDAP *ldap = ps_ldap_init(sec, sec->psldap_hosts, LDAP_PORT);
+    char *cookie_string;
+    char *dn = get_user_dn(r, &ldap, sent_user, sent_pw, sec);
+    char *cn = get_ldap_val(r, sent_user, sent_pw, sec, NULL, NULL,
+			    "cn", " ", NULL, '\0');
+
+    if (NULL != dn) {
+        ldap_unbind(ldap);
+
+	ps_rerror( r, APLOG_DEBUG, "Setting post login cn cookie to %s",
+		   (NULL == cn) ? "(blank)" : cn );
+	cookie_string = ap_pstrcat(r->pool, "psUserCn=",
+				   (NULL == cn) ? "(blank)" : cn,
+				   "; path=/", NULL);
+	ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
+
+	ps_rerror( r, APLOG_DEBUG, "Setting post login dn cookie to %s", dn);
+	dn = ap_escape_uri(r->pool, dn);
+	dn = escapeChar(r, dn, '&', "%26");
+	dn = escapeChar(r, dn, '=', "%3D");
+	cookie_string = ap_pstrcat(r->pool, "psUserDn=", dn, "; path=/", NULL);
+	ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
+    } else {
+	ps_rerror( r, APLOG_WARNING,
+		   "Ldap connect failed setting login cn/dn cookie for user: %s",
+		   sent_user);
+    }
+    return;
 }
 
 static int ldap_authenticate_user2 (request_rec *r, const char *sent_user,
@@ -3466,10 +3543,10 @@ static int ldap_authenticate_user (request_rec *r)
             r->handler = ap_pstrdup(r->pool, "ldap-auth-form");
             res = OK;
         } else if (sec->psldap_authoritative) {
-	  ps_rerror (r, APLOG_NOTICE,
-		    "LDAP user %s not found or password invalid via %s auth",
-		    (NULL != sent_user) ? sent_user : "<blank>",
-		    authType);
+	    ps_rerror (r, APLOG_NOTICE,
+		       "LDAP user %s not found or password invalid via %s auth",
+		       (NULL != sent_user) ? sent_user : "<blank>",
+		       authType);
             ap_note_basic_auth_failure (r);
         } else {
             res = DECLINED;
@@ -3483,6 +3560,9 @@ static int ldap_authenticate_user (request_rec *r)
         psldap_cache_item_create(r, sec->psldap_hosts, sent_user, NULL,
                                  sent_pw, NULL);
 #endif
+    }
+    if (OK == res) {
+        write_cn_cookie(r, sec, sent_user, sent_pw);
     }
     return res;
 }
@@ -3887,13 +3967,34 @@ static const char* get_dsml_err_code_string(int err_code)
 #endif
 
 static void write_dsml_response_fragment(request_rec *r, const char *rt,
-                                         int err_code)
+                                         int err_code, const char *lPrefix)
 {
-    ap_rprintf(r, "\t\t<%s>\n", rt);
-    ap_rprintf(r, "\t\t\t<resultCode code=\"%d\" />\n", err_code);
-    ap_rprintf(r, "\t\t\t<errorMessage>%s</errorMessage>\n", ldap_err2string(err_code));
-    ap_rprintf(r, "\t\t</%s>\n", rt);
+    ap_rprintf(r, "%s<%s>\n", lPrefix, rt);
+    ap_rprintf(r, "%s\t<resultCode code=\"%d\" />\n", lPrefix, err_code);
+    ap_rprintf(r, "%s\t<errorMessage>%s</errorMessage>\n", lPrefix,
+	       ldap_err2string(err_code));
+    ap_rprintf(r, "%s</%s>\n", lPrefix, rt);
 }
+
+#ifdef USE_LIBXML2_LIBXSL
+static xmlNodePtr gen_dsml_response_node(request_rec *r, const xmlNodePtr n, const xmlChar *rt,
+				   int err_code)
+{
+    char err_str[16];
+    xmlNodePtr result = NULL, n1 = NULL, n2 = NULL;
+
+    result = xmlNewChild(n, NULL, rt, NULL);
+    n2 = xmlNewChild(result, NULL, (const xmlChar*)"searchResultDone", NULL);
+    n1 = xmlNewChild(n2, NULL, (const xmlChar*)"resultCode", NULL);
+      
+    sprintf(err_str, "%d", err_code);
+    xmlSetProp(n1, (const xmlChar*)"code", (const xmlChar*)err_str);
+
+    n1 = xmlNewChild(n2, NULL, (const xmlChar*)"errorMessage", (const xmlChar*)ldap_err2string(err_code));
+
+    return result;
+}
+#endif
 
 static int isXMLMimeType(const char *mimeType)
 {
@@ -3903,6 +4004,292 @@ static int isXMLMimeType(const char *mimeType)
 	(0 == strcmp("text/xml", mimeType)) ) result = TRUE;
     return result;
 }
+
+static const char* getAttrMimeType(const char *attrName)
+{
+    const char *result = "image/jpeg";
+    return result;
+}
+
+static char* encodeLdapValue(request_rec *r, const char *dn,
+			     const char *attr, int *bytesWritten,
+			     struct berval *value,
+			     const char *mimeType, int binaryAsHref)
+{
+    char *result = value->bv_val;
+    int useMagic = isCharArrayBinary(r, value->bv_val,
+				     value->bv_len);
+    if (!useMagic) {
+        char *encVal = ap_palloc(r->pool,
+				 value->bv_len + 1);
+	strncpy(encVal, value->bv_val, value->bv_len);
+	encVal[value->bv_len] = '\0';
+	result = ap_escape_html(r->pool,
+				strip_lt_whitespace(encVal));
+    } else if (!isXMLMimeType(mimeType)) {
+        if (0 == *bytesWritten) {
+	    ap_kill_timeout(r);
+	    *bytesWritten = ap_send_mmap(value->bv_val, r,
+					0, value->bv_len);
+	}
+    } else if (binaryAsHref) {
+        char *dnstr = ap_escape_uri(r->pool, dn);
+	dnstr = escapeChar(r, dnstr, '&', "%26");
+        result = ap_pstrcat(r->pool, r->uri,
+			    "?", FORM_ACTION, "=", SEARCH_ACTION,
+			    "&amp;search=",
+			    ap_escape_uri(r->pool, "(objectClass=*)"),
+			    "&amp;dn=", dnstr,
+			    "&amp;", BINARY_DATA, "=", attr,
+			    "&amp;", BINARY_TYPE, "=",
+			    ap_escape_uri(r->pool, getAttrMimeType(attr)),
+			    NULL);
+
+    } else {
+        int j = ap_base64encode_len(value->bv_len);
+	char *encVal = ap_palloc(r->pool, j);
+	ap_base64encode_binary(encVal, result, value->bv_len);
+	result = encVal;
+    }
+    return result;
+}
+
+#ifdef USE_LIBXML2_LIBXSL
+/** Iterate through the results returned by the LDAP server and write them out as
+ *  a complete DSML searchResult node in an XML DOM.
+ *
+ *  @param r request record from which to preform pool related operations
+ *  @param n xml dom object node pointer containing response
+ *  @param ldResult the LDAPMessage instance received from the server containing
+ *         the data in response to a search query.
+ *  @param mimeType is a character string indicating the expected mime type of
+ *         the response. Any value other than NULL causes only the content of the
+ *         first entry to be printed to the client (future implementation)
+ *  @result allocated string containing all the values in the array values
+ *          separated by string separator
+ */
+static void gen_dsml_search_response(request_rec *r, xmlNodePtr n, LDAP *ld,
+				     LDAPMessage *ldResult,
+				     const char *mimeType,
+				     int binaryAsHref)
+{
+    register LDAPMessage *ldEntry = NULL;
+    char *attr, *dn, *tmp;
+    struct berval **values;
+    BerElement *ber;
+    int i, bytesWritten = 0;
+
+    xmlNodePtr sr = gen_dsml_response_node(r, n,
+				       (const xmlChar*)"searchResponse",
+				       LDAP_SUCCESS);
+    
+    for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
+        ldEntry = ldap_next_entry(ld, ldEntry))
+    {
+        if (LDAP_RES_SEARCH_ENTRY == ldap_msgtype(ldEntry)) {
+	    xmlNodePtr n1 = NULL, n2 = NULL;
+
+            dn = ldap_get_dn(ld, ldEntry);
+	    n1 = xmlNewChild(sr, NULL, (const xmlChar*)"searchResultEntry",
+			     NULL);
+	    xmlSetProp(n1, (const xmlChar*)"dn",
+		       (const xmlChar*)ap_escape_html(r->pool, dn) );
+
+            for (tmp = ldap_first_attribute(ld, ldEntry, &ber); NULL != tmp;
+                 tmp = ldap_next_attribute(ld, ldEntry, ber)) {
+                /* NOTE - use ldap_get_values_len for binary data - assumed ascii */
+                attr = ap_pstrdup(r->pool, tmp);
+                ldap_memfree(tmp);
+                values = ldap_get_values_len(ld, ldEntry, attr);
+                if ((NULL != values) &&
+                    (0 <= (i = ldap_count_values_len(values) - 1)) ) {
+
+		    n2 = xmlNewChild(n1, NULL, (const xmlChar*)"attr", NULL);
+		    xmlSetProp(n2, (const xmlChar*)"name",
+			       (const xmlChar*)attr );
+                    while (i >= 0) {
+		        /* Mime type is blanked - values not subject to mime
+			   interpretation */
+		        char *sv = encodeLdapValue(r, dn, attr, &bytesWritten,
+						   values[i--],
+						   "", binaryAsHref);
+			xmlNewChild(n2, NULL, (const xmlChar*)"value",
+				    (const xmlChar*)sv);
+                    }
+                    ldap_value_free_len(values);
+                }
+            }
+            ldap_memfree(dn);
+            if (NULL != ber) ber_free(ber, 0);
+        } else {
+	    ps_rerror( r, APLOG_NOTICE,
+		       "Cannot read msg type building dsml results: %x",
+		       ldap_msgtype(ldEntry) );
+        }
+    }
+}
+
+/** This writes the DSML search response directly to an XML DOM. This response is buffered
+ *  by design and is subject to any overhead that may be incurred with overly large
+ *  datasets.
+ *  @param r request_rec pointer
+ *  @param conf psldap configuration instance
+ *  @param ldap LDAP pointer
+ *  @param ps psldap_status pointer
+ *  @param ldap_base string representation of the base of the query
+ *  @param ldap_query string representation of the query filter
+ *  @param attr the attribute to acquire from the server. See the man page on
+ *         ldap_search_s
+ *  @param mimeType is a character string indicating the expected mime type of
+ *         the response. Any value other than NULL causes only the content of the
+ *         first entry to be printed to the client (future implementation)
+ **/
+static xmlDocPtr gen_dsml_dom_sr(request_rec *r, psldap_config_rec *conf,
+				 LDAP *ldap, psldap_status *ps,
+				 char *ldap_base, int scope,
+				 char *ldap_query, const char *attr,
+				 const char* mimeType, int binaryAsHref)
+{
+    LDAPMessage *ld_result = NULL;
+    static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
+    xmlDocPtr result = xmlNewDoc((const xmlChar*)"1.0");
+    xmlNodePtr n1 = NULL, n2 = NULL;
+    int  err_code;
+
+    ps_rerror( r, APLOG_DEBUG,
+	       "Executing ldap_search with base / scope / pattern: "
+	       "%s / %d / %s ...",
+	       ldap_base, conf->psldap_searchscope, ldap_query);
+    ldap_attrs[0] = attr;
+    if (LDAP_SCOPE_DEFAULT == scope)
+    {
+	scope = conf->psldap_searchscope;
+    }
+
+    n1 = xmlNewDocNode(result, NULL, (const xmlChar*)"dsml", NULL);
+    xmlDocSetRootElement(result, n1);
+    n2 = xmlNewChild(n1, NULL, (const xmlChar*)"batchResponse", NULL);
+
+    if(LDAP_SUCCESS !=
+       (err_code = ldap_search_s(ldap, ldap_base, scope,
+                                 ldap_query, (char**)ldap_attrs, 0, &ld_result))
+       )
+    {
+        if (isXMLMimeType(mimeType)) {
+	    n1 = gen_dsml_response_node(r, n2, (const xmlChar*)"searchResponse", err_code);
+            ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s",
+		       ldap_err2string(err_code));
+        }
+    } else {
+        ps_rerror( r, APLOG_DEBUG,
+		  "...ldap_search successfully executed with base / scope / pattern: "
+		  "%s / %d / %s\n"
+		  "Generating and sending response as %s to ldap search request...",
+		   ldap_base, conf->psldap_searchscope, ldap_query, mimeType);
+        gen_dsml_search_response(r, n2, ldap, ld_result, mimeType, binaryAsHref);
+        ps_rerror(r, APLOG_DEBUG, "...DSML constructed in server DOM");
+    }
+    
+    if (NULL != ld_result) { ldap_msgfree(ld_result); }
+
+    return result;
+}
+
+
+/** This writes the transformed content to the apache request area
+ *  @param context an Output context
+ *  @param buffer buffer the buffer of data to write
+ *  @param len the length of the buffer in bytes
+ *  @return the number of bytes written or -1 in case of error
+ **/
+static int transform_output_write_cb(void * context, const char * buffer, int len)
+{
+    int result = -1;
+    request_rec *r = (request_rec*)context;
+    result = ap_rwrite(buffer, len, r);
+    return result;
+}
+
+/** This writes the transformed content to the apache request area
+ *  @param context an Output context
+ *  @return 0 or -1 in case of error
+ **/
+static int transform_output_close_cb(void * context)
+{
+    int result = -1;
+    result = 0;
+    return result;
+}
+
+/** Get the user agent string for the UA - ensure consistency
+ **/
+static const char * getUserAgent(request_rec *r, int quoteIt)
+{
+    const char *bb_ua = "BlackBerry";
+    const char *ua = ap_table_get(r->headers_in, "User-Agent");
+
+    if (0 == strncasecmp(bb_ua, ua, strlen(bb_ua))) {
+        ua = bb_ua;
+    } else {
+        char *p = strpbrk(ua, " /,");
+        ua = ap_pstrndup(r->pool, ua, (p-ua) );
+    }
+    if (quoteIt) {
+        char *result = ap_pcalloc(r->pool, strlen(ua) + 3);
+        ap_snprintf(result, strlen(ua) + 3, "'%s'", ua );
+	ua = result;
+    }
+
+    return ua;
+}
+
+/** This writes the DSML search response directly to an XML DOM. This response is buffered
+ *  by design and is subject to any overhead that may be incurred with overly large
+ *  datasets.
+ *  @param r request_rec pointer
+ *  @param conf psldap configuration instance
+ *  @param mimeType is a character string indicating the expected mime type of
+ *         the response. Any value other than NULL causes only the content of
+ *         the first entry to be printed to the client (future implementation)
+ *  @return number of bytes written in transformation or -1 if error
+ **/
+static int transform_dom_sr_to_connection(request_rec *r, psldap_config_rec *conf,
+					   xmlDocPtr doc, const char *xslUri, const char* mimeType)
+{
+    const char *params[2+1] = { "UserAgent", getUserAgent(r, 1), NULL};
+    xsltStylesheetPtr ss = xsltParseStylesheetFile((const xmlChar*)xslUri);
+    xmlOutputBufferPtr xob = xmlOutputBufferCreateIO(transform_output_write_cb,
+						     transform_output_close_cb,
+						     r, NULL);
+    int result = xsltRunStylesheet(ss, doc, params, NULL, NULL, xob);
+
+    const char *mt = (NULL != ss) ? (char *)(ss->mediaType) : "NULL";
+    const char *docName = (NULL != ss) ? ((NULL != ss->doc) ? (char*)(ss->doc->URL) : "NULL DOC") : "NULL";
+
+    ps_rerror( r, APLOG_INFO,
+	       "Transformed ldap_search results in web server for %s with: "
+	       "%s / %s:%s for user agent %s",
+	       mimeType, xslUri, docName, mt,
+	       ap_table_get(r->headers_in, "User-Agent") );
+#if 0
+    {
+        xmlSaveCtxtPtr xsc = xmlSaveToIO(transform_output_write_cb,
+					 transform_output_close_cb,
+					 r, NULL, XML_SAVE_NO_DECL);
+	xmlSaveDoc(xsc, doc);
+	xmlSaveFlush(xsc);
+	xmlSaveClose(xsc);
+    }
+#endif
+
+    xmlOutputBufferFlush(xob);
+    xmlOutputBufferClose(xob);
+    xsltFreeStylesheet(ss);
+
+    return result;
+}
+
+#endif
 
 /** Iterate through the results returned by the LDAP server and write them out as
  *  a complete DSML searchResult node.
@@ -3927,11 +4314,6 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
     BerElement *ber;
     int i, bytesWritten = 0;
 
-    if (isXMLMimeType(mimeType)) {
-        ap_rputs("\t\t<searchResponse>\n", r);
-        write_dsml_response_fragment(r, "searchResultDone", LDAP_SUCCESS);
-    }
-
     for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
         ldEntry = ldap_next_entry(ld, ldEntry))
     {
@@ -3954,45 +4336,11 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
                                   NULL);
                     }
                     while (i >= 0) {
-                        char *sendValue = values[i]->bv_val;
-                        int useMagic = isCharArrayBinary(r, values[i]->bv_val,
-                                                         values[i]->bv_len);
-                        if (!useMagic) {
-                            char *encVal = ap_palloc(r->pool,
-                                                     values[i]->bv_len + 1);
-                            strncpy(encVal, values[i]->bv_val, 
-                                    values[i]->bv_len);
-                            encVal[values[i]->bv_len] = '\0';
-                            sendValue = ap_escape_html(r->pool,
-                                               strip_lt_whitespace(encVal));
-                        } else if (!isXMLMimeType(mimeType)) {
-                            if (0 == bytesWritten) {
-                                ap_kill_timeout(r);
-                                bytesWritten = ap_send_mmap(values[i]->bv_val, r,
-                                                          0, values[i]->bv_len);
-                            }
-                        } else if (binaryAsHref) {
-                            /* TODO - compose URL to acquire binary file. How
-                               do we determine the appropriate type ??? */
-                            sendValue = ap_pstrcat(r->pool, "<![CDATA[",
-                               r->uri,
-			       "?", FORM_ACTION, "=", SEARCH_ACTION,
-                               "&search=", ap_escape_uri(r->pool, "(objectClass=*)"),
-                               "&dn=", ap_escape_uri(r->pool, dn),
-                               "&", BINARY_DATA, "=", attr,
-                               "&", BINARY_TYPE, "=", ap_escape_uri(r->pool, "image/jpeg"),
-                               "]]>",
-                               NULL);
-                        } else {
-                            int j = ap_base64encode_len(values[i]->bv_len);
-                            char *encVal = ap_palloc(r->pool, j);
-                            ap_base64encode_binary(encVal, sendValue,
-                                                   values[i]->bv_len);
-                            sendValue = encVal;
-                        }
-                        i--;
+		        char *sv = encodeLdapValue(r, dn, attr, &bytesWritten,
+						   values[i--],
+						   mimeType, binaryAsHref);
                         if (isXMLMimeType(mimeType)) {
-                            ap_rvputs(r, "\t\t\t\t\t<value>", sendValue,
+                            ap_rvputs(r, "\t\t\t\t\t<value>", sv,
                                       "</value>\n", NULL);
                         }
                     }
@@ -4013,9 +4361,38 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
 		     ldap_msgtype(ldEntry) );
         }
     }
-    if (isXMLMimeType(mimeType)) {
-        ap_rputs("\t\t</searchResponse>\n", r);
+}
+
+/** Parse the incoming headers - assume that blackberry devices and anything
+ *  capable of handling text/vnd.wap.wml cannot provide support for XSL
+ *  @param r request_rec instance containing incoming headers
+ *  @return 0 if support is not provided, non-0 if XSL support is assumed
+ **/
+static int requestUAProvidesXSLSupport(request_rec *r)
+{
+    int result = 0;
+    const char *bb_ua = "BlackBerry";
+    const char *ua = ap_table_get(r->headers_in, "User-Agent");
+
+    result = strncasecmp(bb_ua, ua, strlen(bb_ua));
+
+    if (0 != result) {
+        const char *ac = ap_table_get(r->headers_in, "Accept");
+	if ((NULL != strstr(ac, "text/vnd.wap.wml")) ||
+	    (NULL != strstr(ac, "application/vnd.wap.wmlc")) ||
+	    (NULL != strstr(ac, "application/vnd.rim.html"))
+	    ) {
+	    ps_rerror( r, APLOG_DEBUG, "Agent %s accepts content as %s",
+		       ua, ac);
+	    result = 0;
+	}
     }
+    if (0 == result) {
+        ps_rerror( r, APLOG_DEBUG,
+		   "%d - Agent %s lacks XSL support - transforming server side",
+		   result, ua );
+    }
+    return result;
 }
 
 /** This writes the DSML search response directly to the client. This response is not
@@ -4037,12 +4414,17 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
                                         LDAP *ldap, psldap_status *ps,
                                         char *ldap_base, int scope,
 					char *ldap_query, const char *attr,
+					const char *xslUri1, const char *xslUri2,
 					const char* mimeType, int binaryAsHref)
 {
     LDAPMessage *ld_result = NULL;
     static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
     int  err_code;
 
+#ifdef USE_LIBXML2_LIBXSL
+    static const char *htmlResponse = "text/html";
+    if (!requestUAProvidesXSLSupport(r)) mimeType = htmlResponse;
+#endif
     ps_rerror( r, APLOG_DEBUG,
 	       "Executing ldap_search with base / scope / pattern: "
 	       "%s / %d / %s ...",
@@ -4052,27 +4434,45 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
     {
 	scope = conf->psldap_searchscope;
     }
+
     if(LDAP_SUCCESS !=
        (err_code = ldap_search_s(ldap, ldap_base, scope,
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
-        if (isXMLMimeType(mimeType)) {
-            ap_rputs("\t\t<searchResponse>\n", r);
-            write_dsml_response_fragment(r, "searchResultDone", err_code);
-            ap_rputs("\t\t</searchResponse>\n", r);
-            ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s",
-		       ldap_err2string(err_code));
-        }
+        ps->mod_err = err_code;
+	ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s",
+		   ldap_err2string(err_code));
     } else {
         ps_rerror( r, APLOG_DEBUG,
 		  "...ldap_search successfully executed with base / scope / pattern: "
 		  "%s / %d / %s\n"
 		  "Generating and sending DSML response to ldap search request...",
 		  ldap_base, conf->psldap_searchscope, ldap_query);
-        write_dsml_search_response(r, ldap, ld_result, mimeType, binaryAsHref);
-        ps_rerror(r, APLOG_DEBUG, "...DSML search response sent");
+        if (isXMLMimeType(mimeType) || (NULL != attr) ) {
+	    write_dsml_search_response(r, ldap, ld_result, mimeType,
+				       binaryAsHref);
+#ifdef USE_LIBXML2_LIBXSL
+	} else {
+	    char * xslUri = ap_pstrcat(r->pool, ap_document_root(r),
+			       r->server->path,
+			       (r->server->path[strlen(r->server->path)-1] ==
+				xslUri1[0]) ? &xslUri1[1] : xslUri1,
+				NULL);
+	    xmlDocPtr doc = gen_dsml_dom_sr(r, conf, ldap, ps, ldap_base, scope,
+					    ldap_query, attr, mimeType,
+					    binaryAsHref);
+	    ps_rerror( r, APLOG_DEBUG,
+		       "Transforming ldap_search results for %s serverside: %s",
+		       mimeType, xslUri);
+	    transform_dom_sr_to_connection(r, conf, doc, xslUri, mimeType);
+	    xmlFreeDoc(doc);
+#endif
+	}
     }
+
+    ps_rerror(r, APLOG_DEBUG, "...%s search response sent - error code = %d",
+	      mimeType, err_code);
     
     if (NULL != ld_result) { ldap_msgfree(ld_result); }
 }
@@ -4097,10 +4497,21 @@ static void set_processing_parameter(psldap_status *ps, request_rec *r,
         ps->xslSecondaryUri = ap_pstrdup(r->pool, val);
 	ps_rerror(r, APLOG_DEBUG, "LDAP XML response primary xsl uri set to %s",
 		  ps->xslSecondaryUri);
+    } else if (0 == strcmp(XML_TEMPLATE, key)) {
+        ps->xmlTemplateUri = ap_pstrdup(r->pool, val);
+	ps_rerror(r, APLOG_DEBUG, "LDAP XML object template set to %s",
+		  ps->xmlTemplateUri);
+    } else if (0 == strcmp(DL_FILENAME, key)) {
+        ps->dlFilename = ap_pstrdup(r->pool, val);
+	ps_rerror(r, APLOG_DEBUG, "Download content filename set to %s",
+		  ps->dlFilename);
     } else if (0 == strcmp(NEW_RDN, key)) {
         ps->newrdn = ap_pstrdup(r->pool, val);
     } else if (0 == strcmp(NEW_SUPERIOR, key)) {
         ps->newSuperior = ap_pstrdup(r->pool, val);
+    } else {
+	ps_rerror(r, APLOG_DEBUG, "Unknown processing parameter %s = %s",
+		  key, val);
     }
 }
 
@@ -4130,33 +4541,18 @@ static int get_dn_attributes_from_ldap(void *data, const char *key,
             ldap_base = (NULL != ps->mod_dn) ? ps->mod_dn :
                 construct_ldap_base(r, conf, conf->psldap_basedn);
             get_provided_username(r, &user);
-            if (isXMLMimeType(ps->responseType)) {
-                ap_rvputs(r,
-                          (NULL != xslUri1) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
-                          (NULL != xslUri1) ? xslUri1 : "",
-                          (NULL != xslUri1) ? "\"?>\n": "",
-                          (NULL != xslUri2) ? "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"" : "",
-                          (NULL != xslUri2) ? xslUri2 : "",
-                          (NULL != xslUri2) ? "\"?>\n" : "",
-                          "<dsml>\n",
-                          " <batchResponse>\n",
-                          NULL);
-            }
+
             write_dsml_sr_to_connection(r, conf, ldap, ps, ldap_base,
-				        ps->searchScope,
-					ldap_query,
-                                        ps->fieldName, ps->responseType, 
-                                        ps->binaryAsHref);
-            if (isXMLMimeType(ps->responseType)) {
-                ap_rvputs(r,
-                          " </batchResponse>\n",
-                          "</dsml>",
-                          NULL);
-            }
+				        ps->searchScope, ldap_query,
+					ps->fieldName,
+					xslUri1, xslUri2,
+					ps->responseType, ps->binaryAsHref);
         }
-    }
-    else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
-    {
+    } else if (0 == strcmp(CONFIG_HTTP_HEADER, key)) {
+        if (!requestUAProvidesXSLSupport(r)) {
+	    ps->responseType = ap_pstrdup(r->pool, "text/html");
+	}
+    } else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN)) {
         if(0 == strcmp("search", key + LDAP_KEY_PREFIX_LEN))
         {
             ldap_query = ps->searchPattern = ap_pstrdup(r->pool, val);
@@ -4250,6 +4646,8 @@ static const char * get_dsml_action_type(const char * action) {
         result = DSML_MODIFY_ACTION;
     } else if (0 == strcmp(CREATE_ACTION, action)) {
         result = DSML_CREATE_ACTION;
+    } else if (0 == strcmp(PRESENT_ACTION, action)) {
+        result = DSML_PRESENT_ACTION;
     } else if (0 == strcmp(DELETE_ACTION, action)) {
         result = DSML_DELETE_ACTION;
     } else if (0 == strcmp(MODIFYDN_ACTION, action)) {
@@ -4260,13 +4658,16 @@ static const char * get_dsml_action_type(const char * action) {
     return result;
 }
 
-static void write_dsml_request_fragment(psldap_status *ps, const char* dsmlReqType)
+static void write_dsml_request_fragment(psldap_status *ps, const char* dsmlReqType,
+					const char *lPrefix)
 {
     int j;
     static const char * op_names[4] = {"replace", "add", "delete", NULL};
 
-    ap_rprintf(ps->rr, " <%s%s%s%s>\n", dsmlReqType, (NULL != ps->mod_dn) ? " dn=\"": "",
-	       (NULL != ps->mod_dn) ? ps->mod_dn : "", (NULL != ps->mod_dn) ? "\"" : "" );
+    ap_rprintf(ps->rr, "%s\t<%s%s%s%s>\n", lPrefix, dsmlReqType,
+	       (NULL != ps->mod_dn) ? " dn=\"": "",
+	       (NULL != ps->mod_dn) ? ps->mod_dn : "",
+	       (NULL != ps->mod_dn) ? "\"" : "" );
     for (j = 0; NULL != ps->mods[j]; j++) {
         LDAPMod *mod = ps->mods[j];
 	request_rec *r = ps->rr;
@@ -4289,36 +4690,36 @@ static void write_dsml_request_fragment(psldap_status *ps, const char* dsmlReqTy
 	}
 
 	if (op_names[3] != op_name) {
-	    ap_rprintf(ps->rr, " <modification name=\"%s\" operation=\"%s\">\n    ",
-		       (NULL != mod->mod_type) ? mod->mod_type : "", op_name);
+	    ap_rprintf(ps->rr, "%s\t\t<modification name=\"%s\" operation=\"%s\">\n",
+		       lPrefix, (NULL != mod->mod_type) ? mod->mod_type : "", op_name);
 	} else {
-	    ap_rprintf(r, "<attr name=\"%s\">",
-		       (NULL != mod->mod_type) ? mod->mod_type : "");
+	    ap_rprintf(r, "%s\t\t<attr name=\"%s\">",
+		       lPrefix, (NULL != mod->mod_type) ? mod->mod_type : "");
 	}
 
 	if (0 != (mod->mod_op & LDAP_MOD_BVALUES)) {
 	    if (NULL != mod->mod_bvalues) {
 	        for (i = 0; NULL != mod->mod_bvalues[i]; i++) {
-		    ap_rprintf(r, "<value>%lu bytes written</value>%s",
-			       mod->mod_bvalues[i]->bv_len,
+		    ap_rprintf(r, "%s\t\t\t<value>%lu bytes written</value>%s",
+			       lPrefix, mod->mod_bvalues[i]->bv_len,
 			       (op_names[3] != op_name) ? "\n" : "" );
 		}
 	    }
 	} else if (NULL != mod->mod_values) {
 	    for (i = 0; NULL != mod->mod_values[i]; i++) {
-	        ap_rprintf(r, "<value>%s</value>%s", mod->mod_values[i],
+	      ap_rprintf(r, "%s\t\t\t<value>%s</value>%s", lPrefix, mod->mod_values[i],
 			   (op_names[3] != op_name) ? "\n" : "" );
 	    }
 	}
 
 	
 	if (op_names[3] != op_name) {
-	    ap_rputs(" </modification>\n", ps->rr);
+	    ap_rprintf(ps->rr, "%s\t\t</modification>\n", lPrefix);
 	} else {
-	    ap_rputs(" </attr>\n", ps->rr);
+	    ap_rprintf(ps->rr, "%s\t\t</attr>\n", lPrefix);
 	}
     }
-    ap_rprintf(ps->rr, " </%s>\n", dsmlReqType);
+    ap_rprintf(ps->rr, "%s\t</%s>\n", lPrefix, dsmlReqType);
 }
 
 static const char* duplicate_value_data(request_rec *r, const char *value)
@@ -4332,6 +4733,23 @@ static const char* duplicate_value_data(request_rec *r, const char *value)
         result = ap_pstrdup(r->pool, value);
     }
     return result;
+}
+
+static int get_xml_object_template(void *data, const char *key, const char *val)
+{
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+
+    if (NULL == key ) {
+        if (NULL != val) strncpy((char*)val, "queryResponse", 13);
+        /* Write the response here... */
+        return 0;
+    } else if (0 != strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN)) {
+        set_processing_parameter(ps, r, key, val);
+    }
+    /* LDAP record data is irrelevant... no else required*/
+
+    return TRUE;
 }
 
 static int add_record_in_ldap(void *data, const char *key, const char *val)
@@ -4455,7 +4873,23 @@ static int moddn_record_in_ldap(void *data, const char *key, const char *val)
 
 static int login_and_reply(void *data, const char *key, const char *val)
 {
-    return TRUE;
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    const char *post_login_uri = get_post_login_uri(r);
+
+    if (NULL == key) {
+	if (NULL != post_login_uri) {
+            ap_table_set(r->notes, PSLDAP_REDIRECT_URI, post_login_uri);
+	}
+    } else if (0 == strcmp(CONFIG_HTTP_HEADER, key)) {
+        ps->responseType = ap_pstrdup(r->pool, "text/html");
+	ap_table_add(r->err_headers_out, "Location", post_login_uri);
+	
+	ps_rerror( r, APLOG_INFO, "Redirecting to URI %s of type %s", post_login_uri,
+		   r->content_type);
+    }
+
+    return HTTP_MOVED_TEMPORARILY;
 }
 
 static int update_record_in_ldap(void *data, const char *key,
@@ -4546,6 +4980,10 @@ static int (*get_action_handler(request_rec *r, const char **action))(void*, con
     {
         return add_record_in_ldap;
     }
+    if (0 == strcmp(PRESENT_ACTION, *action))
+    {
+        return get_xml_object_template;
+    }
     if (0 == strcmp(DISABLE_ACTION, *action))
     {
         return update_record_in_ldap;
@@ -4563,18 +5001,6 @@ static int (*get_action_handler(request_rec *r, const char **action))(void*, con
         return compare_record_in_ldap;
     }
     return NULL;
-}
-
-static void write_dsml_err_response(request_rec *r, psldap_status *ps,
-                                    const char *opName)
-{
-    ap_rvputs(r,
-              " <batchResponse id='",
-              (NULL != ps->mod_dn) ? ps->mod_dn : "NULL_DN",
-              "'>\n",
-              NULL);
-    write_dsml_response_fragment(r, opName, ps->mod_err);
-    ap_rputs(" </batchResponse>\n", r);
 }
 
 static int ldap_update_handler(request_rec *r)
@@ -4621,99 +5047,110 @@ static int ldap_update_handler(request_rec *r)
         res = HTTP_UNAUTHORIZED;
     } else {
         const char *action = NULL;
+	int sendXml = FALSE;
         int (*actionHandler)(void *data, const char *key,
                              const char *val);
+	psldap_status ps;
+
+	/* Add ldap connection pointer to the request and process
+	   the table entries corresponding to the ldap attributes
+	*/
+	psldap_status_init(&ps, r, ldap, conf);
+
         actionHandler = get_action_handler(r, &action);
-        if (login_and_reply ==actionHandler)
-        {
-            const char *post_login_uri = get_post_login_uri(r);
+	sendXml = ((get_dn_attributes_from_ldap == actionHandler) ||
+		   (update_record_in_ldap == actionHandler) ||
+		   (add_record_in_ldap == actionHandler) ||
+		   (delete_record_in_ldap == actionHandler) ||
+		   (moddn_record_in_ldap == actionHandler) ||
+		   (compare_record_in_ldap == actionHandler) );
+	if (NULL != t_env) {
+	    /*  Collect all supporting values from the request into the
+		psldap_status struct */
+	    ap_table_do(actionHandler, (void*)&ps, t_env, NULL);
+	    ps.mod_err = get_lderrno(ps.ldap);
+	}
+	    
+	/* Setup and send the HTTP header response ...*/
+	actionHandler(&ps, CONFIG_HTTP_HEADER, "");
+	write_cn_cookie(r, conf, user, password);
+	if (!isXMLMimeType(ps.responseType)) {
+	    r->content_type = ps.responseType;
+	    if (NULL != ps.dlFilename) {
+	        /* Add ContentDisposition to r->headers_out table to force
+		   download ... */
+	        char *cdStr = ap_pstrcat(r->pool, "attachment; filename=",
+					 ps.dlFilename, ";", NULL);
+	        ap_table_add(r->err_headers_out, "Content-Description",
+			     "Content generated by mod_psldap");
+	        ap_table_add(r->err_headers_out, "Content-Disposition", cdStr);
+		ps_rerror( r, APLOG_DEBUG,
+			   "transformed content filename set to %s: Content-Disposition = <%s>",
+			   ps.dlFilename, cdStr);
+	    }
+	    sendXml = 0;
+	} else {
+	    r->content_type = (sendXml) ? "text/xml" : "text/html";
+	}
+	ap_soft_timeout("update ldap data", r);
+	ap_send_http_header(r);
+	
+	/* Send the  actual HTTP response... */
+	if ( (login_and_reply == actionHandler) ||
+	     (get_xml_object_template == actionHandler) ) {
+	    res = actionHandler(&ps, NULL, NULL);
+	} else {
+	    char opName[32] = "errorResponse";
+	    if (get_dn_attributes_from_ldap != actionHandler) {
+	        strcpy(opName, "searchResultDone");
+	    }
+	    if (isXMLMimeType(ps.responseType)) {
+		const char *dsmlRequestType = get_dsml_action_type(action);
+		char txTypeNm[8] = "search";
 
-            set_psldap_auth_cookie(r, conf, user, password);
-            ap_table_set(r->notes, PSLDAP_REDIRECT_URI, post_login_uri);
-            res = ldap_redirect_handler(r);
-        } else {
-	    int sendXml = ((get_dn_attributes_from_ldap == actionHandler) ||
-			   (update_record_in_ldap == actionHandler) ||
-			   (add_record_in_ldap == actionHandler) ||
-			   (delete_record_in_ldap == actionHandler) ||
-			   (moddn_record_in_ldap == actionHandler) ||
-			   (compare_record_in_ldap == actionHandler) );
-            if (NULL != t_env)
-            {
-                const char opName[16] = "errorResponse";
-                /* Add ldap connection pointer to the request and process
-                   the table entries corresponding to the ldap attributes
-                */
-                psldap_status ps;
-                psldap_status_init(&ps, r, ldap, conf);
+		if (get_dn_attributes_from_ldap != actionHandler) {
+		    strcpy(txTypeNm, "batch");
+		}
 
-                /*  Collect all supporting values from the request into the
-                    psldap_status struct */
-                ap_table_do(actionHandler, (void*)&ps, t_env, NULL);
-                ps.mod_err = get_lderrno(ps.ldap);
+	        if (!sendXml) { ap_rputs("<body>\n<xml id='errResponse'>\n", r); }
+		else {
+		    ap_rvputs(r,
+			      (NULL != ps.xslPrimaryUri) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
+			      (NULL != ps.xslPrimaryUri) ? ps.xslPrimaryUri : "",
+			      (NULL != ps.xslPrimaryUri) ? "\"?>\n" : "",
+			      (NULL != ps.xslSecondaryUri) ? "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"" : "",
+			      (NULL != ps.xslSecondaryUri) ? ps.xslSecondaryUri : "",
+			      (NULL != ps.xslSecondaryUri) ? "\"?>\n" : "",
+			      "<dsml>\n",
+			      NULL);
+		}
 
-                /* Setup the HTTP response ...*/
-                if (!isXMLMimeType(ps.responseType)) {
-                    r->content_type = ps.responseType;
-		    /* Add ContentDisposition to r->headers_out table to force
-		       download ... */
-		    /*ap_table_add(r->err_headers_out, "ContentDisposition",
-		      "attachment;filename=\"foo\"");*/
-                    sendXml = 0;
-                } else {
-                    r->content_type = (sendXml) ? "text/xml" : "text/html";
-                }
-                ap_soft_timeout("update ldap data", r);
-                ap_send_http_header(r);
-                if (isXMLMimeType(ps.responseType)) {
-                    ap_rputs((sendXml) ? "<?xml version=\"1.0\"?>\n" :
-                             "<body>\n", r);
-                }
+		/* Write the request node to the response stream */
+		ap_rvputs(r, "\t<", txTypeNm, "Request",
+			  (get_dn_attributes_from_ldap != actionHandler) ? "" : " processing=\"parallel\" onError=\"resume\"",
+			  ">\n", NULL);
+		write_dsml_request_fragment(&ps, dsmlRequestType, "\t\t");
+		ap_rvputs(r, "\t</", txTypeNm, "Request>\n", NULL);
 
-                /* Handle the request, fill the opName */
-                actionHandler(&ps, NULL, opName);
+		/* Write the response node to the response stream */
+		ap_rvputs(r, "\t<", txTypeNm, "Response id='",
+			  (NULL != ps.mod_dn) ? ps.mod_dn : "NULL_DN",
+			  "'>\n",
+			  NULL);
+		actionHandler(&ps, NULL, opName);
+		/* Write the status of the request to the response element */
+		write_dsml_response_fragment(r, opName, ps.mod_err, "\t\t");
+		ap_rvputs(r, "\t</", txTypeNm, "Response>\n</dsml>", NULL);
+		
+		if (NULL != ps.mod_record) {
+		    ldap_msgfree(ps.mod_record);
+		    ps.mod_record = NULL;
+		}
 
-                if (NULL != ps.mod_record) {
-                    ldap_msgfree(ps.mod_record);
-                    ps.mod_record = NULL;
-                }
-
-                if (isXMLMimeType(ps.responseType)) {
-                    if (!sendXml) {
-                        ap_rputs("<body>\n<xml id='errResponse'>\n", r);
-                    } else {
-		        ap_rvputs(ps.rr,
-				  (NULL != ps.xslPrimaryUri) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
-				  (NULL != ps.xslPrimaryUri) ? ps.xslPrimaryUri : "",
-				  (NULL != ps.xslPrimaryUri) ? "\"?>\n" : "",
-				  (NULL != ps.xslSecondaryUri) ? "<?xml-stylesheet type=\"text/xsl\" alternate=\"yes\" title=\"Secondary View\" href=\"" : "",
-				  (NULL != ps.xslSecondaryUri) ? ps.xslSecondaryUri : "",
-				  (NULL != ps.xslSecondaryUri) ? "\"?>\n" : "",
-				  NULL);
-		    }
-                    if (get_dn_attributes_from_ldap != actionHandler) {
-		        const char *dsmlRequestType = get_dsml_action_type(action);
-			ap_rputs("<dsml>\n", ps.rr);
-			/*
-			  ap_rputs("<batchRequest xmlns=\"urn:oasis:names:tc:DSML:2:0:core\" processing=\"parallel\" onError=\"resume\">\n", ps.rr);
-			*/
-			ap_rputs("<batchRequest processing=\"parallel\" onError=\"resume\">\n", ps.rr);
-		        write_dsml_request_fragment(&ps, dsmlRequestType);
-			ap_rputs("</batchRequest>\n", ps.rr);
-			write_dsml_err_response(r, &ps, opName);
-			ap_rputs("</dsml>", ps.rr);
-                    }
-                    if (!sendXml) {
-                        ap_rputs("</xml>\n</body>", r);
-                    }
-                }
+		if (!sendXml) { ap_rputs("</xml>\n</body>", r);	}
             } else {
-                /* Setup the HTTP response ...*/
-                r->content_type = "text/html";
-                ap_soft_timeout("update ldap data", r);
-                ap_send_http_header(r);
-                ap_rputs("<body>\n</body>", r);
-            }
+		actionHandler(&ps, NULL, opName);
+	    }
 
             ap_kill_timeout(r);
 
@@ -4728,16 +5165,41 @@ static int ldap_update_handler(request_rec *r)
     return res;
 }
 
+/** Remove the previously set auth cookie from the err_headers_out struct
+ *  on the passed requestor instance.
+ *  @param r - the request_rec struct reference from which the 'Set-Cookie'
+ *             entry should be removed from the err_headers_out table 
+ **/
+static void remove_psldap_auth_cookie(request_rec *r)
+{
+    ps_rerror( r, APLOG_DEBUG, "Unsetting auth cookie - "
+	       "removing all Set-Cookie entries from err_headers_out");
+    ap_table_unset(r->err_headers_out, "Set-Cookie");
+}
+
+static int auth_form_redirect_handler(request_rec *r)
+{
+    psldap_config_rec *conf =
+        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                   &psldap_module);
+    /* Remove any previously set cookies for authentication */
+    remove_psldap_auth_cookie(r);
+    ap_internal_redirect(conf->psldap_credential_uri, r);
+    return OK;
+}
+
 #ifdef APACHE_V2
 static int ldap_update_handlerV2(request_rec *r)
 {
-    if ((0 != strcmp(r->handler, "ldap-update")) &&
-        (0 != strcmp(r->handler, "ldap-auth-form")) &&
-        (0 != strcmp(r->handler, "ldap-send-redirect")) ) {
-           return DECLINED;
+    if (0 == strcmp(r->handler, "ldap-update") ) {
+        return ldap_update_handler(r);
+    } else if (0 == strcmp(r->handler, "ldap-auth-form") ) {
+        return auth_form_redirect_handler(r);
+    } else if (0 == strcmp(r->handler, "ldap-send-redirect") ) {
+        return ldap_redirect_handler(r);
+    } else {
+        return DECLINED;
     }
-    
-    return ldap_update_handler(r);
 }
 
 #ifdef AUTHN_PROVIDER_GROUP
@@ -4792,29 +5254,6 @@ module MODULE_VAR_EXPORT psldap_module =
 };
 
 #else
-
-/** Remove the previously set auth cookie from the err_headers_out struct
- *  on the passed requestor instance.
- *  @param r - the request_rec struct reference from which the 'Set-Cookie'
- *             entry should be removed from the err_headers_out table 
- **/
-static void remove_psldap_auth_cookie(request_rec *r)
-{
-    ps_rerror( r, APLOG_DEBUG, "Unsetting auth cookie - "
-	       "removing all Set-Cookie entries from err_headers_out");
-    ap_table_unset(r->err_headers_out, "Set-Cookie");
-}
-
-static int auth_form_redirect_handler(request_rec *r)
-{
-    psldap_config_rec *conf =
-        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
-                                                   &psldap_module);
-    /* Remove any previously set cookies for authentication */
-    remove_psldap_auth_cookie(r);
-    ap_internal_redirect(conf->psldap_credential_uri, r);
-    return OK;
-}
 
 static int translate_handler(request_rec *r)
 {

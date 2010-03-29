@@ -123,6 +123,10 @@ utility:
    % apxs -c mod_psldap.c -lldap -llber
    % apxs -i -a -n psldap mod_psldap.la
 
+   (... Apache 2.X full functionality build with XSLT ...)
+   % apxs -I /usr/include/libxml2 -I /usr/include/libxslt -D USE_LIBXML2_LIBXSL -c mod_psldap.c -lldap -llber -lxml2 -lxslt
+   % apxs -i -a -n psldap mod_psldap.la
+
 
 Summary Description of Apache Configuration Parameters
 =======================================================
@@ -616,7 +620,19 @@ that are older than 15 minutes. Future versions of this module will allow
 for some configurability of this behavior.
 
 NOTE: Caching is no longer compiled in by default pending a more robust
-      implementation of the cache management capability
+      implementation of the cache management capability - it can be enabled by
+      passing '-D USE_PSLDAP_CACHING=X -lmm' as an option to apxs during
+      compilation.
+
+
+Enable Server-Side XSL Transformation
+=====================================
+Server side XSL transformation requires the presence of the libxml2 and libxslt
+libraries on the target environment. To enable server side processing of the
+results for responses requested in non-XML forms, the module must be compiled
+passing the '-D USE_LIBXML2_LIBXSL=X -lxml2 -lxslt' options to apxs (prior to
+the -c option).
+
 
 Setting Up Forms
 ================

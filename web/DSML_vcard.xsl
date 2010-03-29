@@ -4,7 +4,7 @@
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" >
 
 <xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
-<xsl:output method="text" indent="no" media-type="text/x-vcard" />
+<xsl:output method="text" indent="no" omit-xml-declaration="yes" media-type="text/x-vcard" />
 
 <xsl:template match="/">
     <xsl:apply-templates select="//dsml" />
@@ -56,6 +56,7 @@
 
 <xsl:template match="searchResultEntry">
   <xsl:param name="heading" select="attr[@name='objectClass' and position() = 1]" />
+  <xsl:variable name="jpegLabelType"></xsl:variable>
   <xsl:if test="(starts-with(@dn, 'cn='))" >
     <xsl:apply-templates select="attr[@name='sn']" >
       <xsl:with-param name='label'>N</xsl:with-param>
@@ -113,6 +114,9 @@
     </xsl:apply-templates>
     <xsl:apply-templates select="attr[@name='labeledUri']" >
       <xsl:with-param name='label'>URL;WORK</xsl:with-param>
+    </xsl:apply-templates>
+    <xsl:apply-templates select="attr[@name='jpegPhoto']" >
+      <xsl:with-param name='label' >PHOTO;<xsl:choose><xsl:when test="(not(contains(attr[@name='jpegPhoto']/value,'BinaryData')) or (starts-with(attr[@name='jpegPhoto']/value,'/9j/4AA')))">ENCODING=BASE64;</xsl:when><xsl:otherwise>VALUE=URL;</xsl:otherwise></xsl:choose>TYPE=JPEG</xsl:with-param>
     </xsl:apply-templates>
   </xsl:if>
 </xsl:template>

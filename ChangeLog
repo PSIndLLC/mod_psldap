@@ -4,9 +4,24 @@ Fixes to eliminate infinite loop in the vertical wrap to ensure IE displays the 
 
 Introduce session persistence to the LDAP store to offer an alternative to passing credentials in the cookie, replacing content instead with a session id. An additional alternative is also introduced to embed the session id in the URL
 
-PENDING - complete the change to DSML response type for jpegPhoto inclusion in the stream to ensure requests from IE return a URL to the photo and not the binary stream while continuing to pass the encoded image to firefox / mozilla based browsers
+Introduced server side XSL transformation - integrated into vcard display for the contact records and in general response handling for blackberry user agents.
 
-Enable mobile browsers capabilities to add, edit, lookup, email, sms, and dial contacts from a smartphone device given access to this application online
+Fixed issue with poor handling of '&' in dn for URL reference to jpegPhoto which was causing some transformations to fail due to incorrect XML parsing
+
+Completed the change to DSML response type for jpegPhoto inclusion in the stream to ensure requests from IE return a URL to the photo and not the binary stream while continuing to pass the encoded image to firefox / mozilla based browsers
+
+Established uniform page head elements across all pages through introduction of XSL includes and imports
+
+Introduced performance improvements by adding indexes in the XSL processing.
+
+Introduced first page customizations for handheld user agents - initially only supporting blackberry - to include suppression of JS to wrap columns in the card style. UserAgent parameter added to all xsl templates via the new DSML_sitefrags.xsl inclusion. Telephone dialing, emailing, and SMS functional within handheld devices and tested on the blackberry.
+
+Addition of xmlObjectTemplate parameter to ldapupdate handler and the Present action type to present XML documents directly from the server. Formerly, this was achieved by getting XML documents directly via HTTP get requests, but this did not accomodate agents - such as handheld or mobile phone browsers - that did not perform the transform via XSL. 
+
+Addition of the dlFilename parameter to ldap update handler to allow responses to be provided with an attachment disposition whose filename correlates to the value of the parameter.
+
+PENDING
+Enable mobile browsers capabilities to add, edit, and lookup as tailored to form factor of a smartphone device given access to this application online
 
 Development of a registration page to allow users to self-register in the directory. Supplement with a registrations pending page to classify and move users based on their requests to the appropriate groups.
 

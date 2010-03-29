@@ -1,0 +1,6 @@
+*.slo
+*.lo
+*.la
+config.status
+config.log
+.libs

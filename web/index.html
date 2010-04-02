@@ -48,10 +48,9 @@
         function setFormBaseDN() {
             alert("Loaded window - new dn is ");
         }
-        function loadDNInitializationFormUrl(objUrl) {
-            var objWindow = loadRecordUrl(objUrl + "?dn=" +
-                                          document.queryForm.dn.value);
-            objWindow.onload='setFormBaseDN';
+        function loadDNInitializationFormUrl(xmlUrl, xslUrl) {
+	    var addArgs = "&dn=" + encodeURIComponent(document.queryForm.dn.value);
+	    loadTemplateRecord(xmlUrl, xslUrl, null, addArgs, 'setFormBaseDN');
         }
         function resizeResultIframe() {
             var objIframe = document.getElementById("resultSet");
@@ -92,7 +91,7 @@
     <td align="right" width="5px">
       <fieldset>
         <legend>Create a New ...</legend>
-        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(this.value); this.value='';">
+        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(psldapRootUri + '/' + this.value, psldapRootUri + '/DSML_editform.xsl'); this.value='';">
           <option selected value="">Select One ...</option>
           <option value="DSML_new_v_o.xml">Vendor Organization</option>
           <option value="DSML_new_o.xml">Organization</option>

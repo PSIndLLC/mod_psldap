@@ -1,4 +1,18 @@
-Revision 0.91 (Future release)
+About mod_psldap
+===================
+mod_psldap was created to provide a very lightweight means of managing directory information by leveraging client processing power to render the edit and reporting pages on any web browser without requiring an ActiveX or other binary executable download. It reduces the incremental network traffic for subsequent edits by 95% or more while still providing a very rich AJAX / Web 2.0 enabled user interface.
+
+Revision X (Upcoming release)
+===================
+Enhance mobile / handheld device support to tailor presentation to form factor
+
+Importing / exporting from / to google contact export format
+
+SVG based rendering of organizational structures
+
+Enablement of contact database integration to blackberry devices
+
+Revision 0.91
 ===================
 Fixes to eliminate infinite loop in the vertical wrap to ensure IE displays the card view correctly and does not hang. This is related to a change in XSL based rendering in IE, requiring deferal of the wrap function call through a timeout.
 
@@ -21,7 +35,6 @@ Addition of xmlObjectTemplate parameter to ldapupdate handler and the Present ac
 Addition of the dlFilename parameter to ldap update handler to allow responses to be provided with an attachment disposition whose filename correlates to the value of the parameter.
 
 PENDING
-Enable mobile browsers capabilities to add and lookup as tailored to form factor of a smartphone device given access to this application online
 
 Development of a registration page to allow users to self-register in the directory. Supplement with a registrations pending page to classify and move users based on their requests to the appropriate groups.
 

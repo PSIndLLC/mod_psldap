@@ -608,15 +608,18 @@ function showPrevRecord() {
     showRecord(currentRecord - 1);
 }
 
-function loadRecordUrl(sel, target) {
+function loadRecordUrl(sel, target, olcb) {
     var objWindow = null;
     if (sel != "") {
+	var objFrame = null;
         if ((arguments.length < 2) || (null == target)) {
-            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=448, width=512");
+            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=480, width=544");
+	    objFrame = objWindow;
         } else {
-            var objFrame = document.getElementById(target);
+            objFrame = document.getElementById(target);
             objFrame.src = sel;
         }
+	if ((null != objFrame) && (arguments.length > 2)) objFrame.onload=olcb;
     }
     return objWindow;
 }
@@ -756,6 +759,16 @@ function getEditableRecord(dn, target, xmgr) {
                             psldapRootUri + "/DSML_editform.xsl",
                             xmgr, targetNode);
     }
+}
+
+function loadTemplateRecord(xmlUri, xslUri, target, passArgs, olcb) {
+    var addArgs = (arguments.length < 4) ? "" : passArgs;
+    var bhref = uaSupportsInlineImages() ? "off" : "on";
+    var getUrl = ldapupdateUri + "?FormAction=Present&" +
+	"xmlObjectTemplate=" + encodeURIComponent(xmlUri) +
+	"&BinaryHRef=" + bhref +
+	"&xsl1=" + xslUri + addArgs;
+    return (arguments.length < 5) ? loadRecordUrl(getUrl, target): loadRecordUrl(getUrl, target, olcb);
 }
 
 function parseCNFromDN(dn) {

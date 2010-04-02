@@ -68,11 +68,16 @@
 #if AP_SERVER_MINORVERSION_NUMBER > 1
  #include "ap_compat.h"
  #include "apr_base64.h"
+ #include "apr_file_io.h"
+ #include "apr_file_info.h"
  #include "ap_provider.h"
  #include "mod_auth.h"
  #define ap_base64encode_binary apr_base64_encode_binary
  #define ap_base64encode_len apr_base64_encode_len
  #define ap_clear_table apr_table_clear
+ #define ap_file_close apr_file_close
+ #define ap_file_getc apr_file_getc
+ #define ap_file_open apr_file_open
  #define ap_iscntrl apr_iscntrl
  #define ap_isprint apr_isprint
  #define ap_isspace apr_isspace
@@ -80,6 +85,7 @@
  #define ap_make_table apr_table_make
  #define ap_push_array apr_array_push
  #define ap_pstrcat apr_pstrcat
+ #define ap_strtok apr_strtok
  #define ap_pstrdup apr_pstrdup
  #define ap_pstrndup apr_pstrndup
  #define ap_pcalloc apr_pcalloc
@@ -1153,6 +1159,9 @@ static void set_lderrno(LDAP *ld, int error_code)
 typedef struct
 {
     request_rec *rr;
+#ifdef USE_LIBXML2_LIBXSL
+    xmlNodePtr pNode;
+#endif
     LDAP *ldap;
     psldap_config_rec *conf;
     char *mod_dn;
@@ -1177,6 +1186,9 @@ static void psldap_status_init(psldap_status *ps, request_rec *r, LDAP *ldap,
                                psldap_config_rec *conf)
 {
     ps->rr = r;
+#ifdef USE_LIBXML2_LIBXSL
+    ps->pNode = NULL;
+#endif
     ps->ldap = ldap;
     ps->conf = conf;
     ps->mod_dn = NULL;
@@ -3401,8 +3413,8 @@ static char* escapeChar(request_rec *r, char *str, char c, const char* frag)
     const char *replaceWith = (NULL == frag) ? "&amp;" : frag;
     search[0] = c;
     if (NULL != strstr(str, search)) {
-        result = apr_strtok(ap_pstrdup(r->pool, result), search, &last);
-	while (NULL != (tmp = apr_strtok(NULL, search, &last))) {
+        result = ap_strtok(ap_pstrdup(r->pool, result), search, &last);
+	while (NULL != (tmp = ap_strtok(NULL, search, &last))) {
 	    result = ap_pstrcat(r->pool, result, replaceWith, tmp, NULL);
 	}
     }
@@ -3969,6 +3981,9 @@ static const char* get_dsml_err_code_string(int err_code)
 static void write_dsml_response_fragment(request_rec *r, const char *rt,
                                          int err_code, const char *lPrefix)
 {
+    ps_rerror( r, APLOG_DEBUG, "Writing response fragment %s (ec=%d) to stream",
+	       rt, err_code);
+
     ap_rprintf(r, "%s<%s>\n", lPrefix, rt);
     ap_rprintf(r, "%s\t<resultCode code=\"%d\" />\n", lPrefix, err_code);
     ap_rprintf(r, "%s\t<errorMessage>%s</errorMessage>\n", lPrefix,
@@ -3977,8 +3992,8 @@ static void write_dsml_response_fragment(request_rec *r, const char *rt,
 }
 
 #ifdef USE_LIBXML2_LIBXSL
-static xmlNodePtr gen_dsml_response_node(request_rec *r, const xmlNodePtr n, const xmlChar *rt,
-				   int err_code)
+static xmlNodePtr gen_dsml_response_node(request_rec *r, const xmlNodePtr n,
+					 const xmlChar *rt, int err_code)
 {
     char err_str[16];
     xmlNodePtr result = NULL, n1 = NULL, n2 = NULL;
@@ -4079,9 +4094,7 @@ static void gen_dsml_search_response(request_rec *r, xmlNodePtr n, LDAP *ld,
     BerElement *ber;
     int i, bytesWritten = 0;
 
-    xmlNodePtr sr = gen_dsml_response_node(r, n,
-				       (const xmlChar*)"searchResponse",
-				       LDAP_SUCCESS);
+    xmlNodePtr sr = n;
     
     for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
         ldEntry = ldap_next_entry(ld, ldEntry))
@@ -4144,17 +4157,14 @@ static void gen_dsml_search_response(request_rec *r, xmlNodePtr n, LDAP *ld,
  *         the response. Any value other than NULL causes only the content of the
  *         first entry to be printed to the client (future implementation)
  **/
-static xmlDocPtr gen_dsml_dom_sr(request_rec *r, psldap_config_rec *conf,
-				 LDAP *ldap, psldap_status *ps,
-				 char *ldap_base, int scope,
-				 char *ldap_query, const char *attr,
-				 const char* mimeType, int binaryAsHref)
+static void gen_dsml_dom_sr(request_rec *r, psldap_config_rec *conf,
+			    LDAP *ldap, psldap_status *ps,
+			    char *ldap_base, int scope,
+			    char *ldap_query, const char *attr,
+			    const char* mimeType, int binaryAsHref)
 {
     LDAPMessage *ld_result = NULL;
     static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
-    xmlDocPtr result = xmlNewDoc((const xmlChar*)"1.0");
-    xmlNodePtr n1 = NULL, n2 = NULL;
-    int  err_code;
 
     ps_rerror( r, APLOG_DEBUG,
 	       "Executing ldap_search with base / scope / pattern: "
@@ -4166,33 +4176,19 @@ static xmlDocPtr gen_dsml_dom_sr(request_rec *r, psldap_config_rec *conf,
 	scope = conf->psldap_searchscope;
     }
 
-    n1 = xmlNewDocNode(result, NULL, (const xmlChar*)"dsml", NULL);
-    xmlDocSetRootElement(result, n1);
-    n2 = xmlNewChild(n1, NULL, (const xmlChar*)"batchResponse", NULL);
-
-    if(LDAP_SUCCESS !=
-       (err_code = ldap_search_s(ldap, ldap_base, scope,
-                                 ldap_query, (char**)ldap_attrs, 0, &ld_result))
-       )
-    {
-        if (isXMLMimeType(mimeType)) {
-	    n1 = gen_dsml_response_node(r, n2, (const xmlChar*)"searchResponse", err_code);
-            ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s",
-		       ldap_err2string(err_code));
-        }
-    } else {
+    if(LDAP_SUCCESS ==
+       (ps->mod_err = ldap_search_s(ldap, ldap_base, scope,
+				    ldap_query, (char**)ldap_attrs, 0, &ld_result)) ) {
         ps_rerror( r, APLOG_DEBUG,
 		  "...ldap_search successfully executed with base / scope / pattern: "
 		  "%s / %d / %s\n"
 		  "Generating and sending response as %s to ldap search request...",
 		   ldap_base, conf->psldap_searchscope, ldap_query, mimeType);
-        gen_dsml_search_response(r, n2, ldap, ld_result, mimeType, binaryAsHref);
+        gen_dsml_search_response(r, ps->pNode, ldap, ld_result, mimeType, binaryAsHref);
         ps_rerror(r, APLOG_DEBUG, "...DSML constructed in server DOM");
     }
     
     if (NULL != ld_result) { ldap_msgfree(ld_result); }
-
-    return result;
 }
 
 
@@ -4243,9 +4239,9 @@ static const char * getUserAgent(request_rec *r, int quoteIt)
     return ua;
 }
 
-/** This writes the DSML search response directly to an XML DOM. This response is buffered
- *  by design and is subject to any overhead that may be incurred with overly large
- *  datasets.
+/** This writes the DSML search response directly to an XML DOM. This response
+ *  is buffered by design and is subject to any overhead that may be incurred
+ *  with overly large datasets.
  *  @param r request_rec pointer
  *  @param conf psldap configuration instance
  *  @param mimeType is a character string indicating the expected mime type of
@@ -4253,8 +4249,10 @@ static const char * getUserAgent(request_rec *r, int quoteIt)
  *         the first entry to be printed to the client (future implementation)
  *  @return number of bytes written in transformation or -1 if error
  **/
-static int transform_dom_sr_to_connection(request_rec *r, psldap_config_rec *conf,
-					   xmlDocPtr doc, const char *xslUri, const char* mimeType)
+static int transform_dom_sr_to_connection(request_rec *r,
+					  psldap_config_rec *conf,
+					   xmlDocPtr doc, const char *xslUri,
+					  const char* mimeType)
 {
     const char *params[2+1] = { "UserAgent", getUserAgent(r, 1), NULL};
     xsltStylesheetPtr ss = xsltParseStylesheetFile((const xmlChar*)xslUri);
@@ -4267,7 +4265,7 @@ static int transform_dom_sr_to_connection(request_rec *r, psldap_config_rec *con
     const char *docName = (NULL != ss) ? ((NULL != ss->doc) ? (char*)(ss->doc->URL) : "NULL DOC") : "NULL";
 
     ps_rerror( r, APLOG_INFO,
-	       "Transformed ldap_search results in web server for %s with: "
+	       "Transformed results in web server for %s with: "
 	       "%s / %s:%s for user agent %s",
 	       mimeType, xslUri, docName, mt,
 	       ap_table_get(r->headers_in, "User-Agent") );
@@ -4419,7 +4417,6 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
 {
     LDAPMessage *ld_result = NULL;
     static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
-    int  err_code;
 
 #ifdef USE_LIBXML2_LIBXSL
     static const char *htmlResponse = "text/html";
@@ -4436,13 +4433,12 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
     }
 
     if(LDAP_SUCCESS !=
-       (err_code = ldap_search_s(ldap, ldap_base, scope,
-                                 ldap_query, (char**)ldap_attrs, 0, &ld_result))
+       (ps->mod_err = ldap_search_s(ldap, ldap_base, scope,
+				    ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
-        ps->mod_err = err_code;
 	ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s",
-		   ldap_err2string(err_code));
+		   ldap_err2string(ps->mod_err));
     } else {
         ps_rerror( r, APLOG_DEBUG,
 		  "...ldap_search successfully executed with base / scope / pattern: "
@@ -4454,25 +4450,14 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
 				       binaryAsHref);
 #ifdef USE_LIBXML2_LIBXSL
 	} else {
-	    char * xslUri = ap_pstrcat(r->pool, ap_document_root(r),
-			       r->server->path,
-			       (r->server->path[strlen(r->server->path)-1] ==
-				xslUri1[0]) ? &xslUri1[1] : xslUri1,
-				NULL);
-	    xmlDocPtr doc = gen_dsml_dom_sr(r, conf, ldap, ps, ldap_base, scope,
-					    ldap_query, attr, mimeType,
-					    binaryAsHref);
-	    ps_rerror( r, APLOG_DEBUG,
-		       "Transforming ldap_search results for %s serverside: %s",
-		       mimeType, xslUri);
-	    transform_dom_sr_to_connection(r, conf, doc, xslUri, mimeType);
-	    xmlFreeDoc(doc);
+	    gen_dsml_dom_sr(r, conf, ldap, ps, ldap_base, scope,
+			    ldap_query, attr, mimeType, binaryAsHref);
 #endif
 	}
     }
 
     ps_rerror(r, APLOG_DEBUG, "...%s search response sent - error code = %d",
-	      mimeType, err_code);
+	      mimeType, ps->mod_err);
     
     if (NULL != ld_result) { ldap_msgfree(ld_result); }
 }
@@ -4509,9 +4494,11 @@ static void set_processing_parameter(psldap_status *ps, request_rec *r,
         ps->newrdn = ap_pstrdup(r->pool, val);
     } else if (0 == strcmp(NEW_SUPERIOR, key)) {
         ps->newSuperior = ap_pstrdup(r->pool, val);
-    } else {
-	ps_rerror(r, APLOG_DEBUG, "Unknown processing parameter %s = %s",
-		  key, val);
+    } else if (NULL != val) {
+      if ( (0 != strncmp("SSL_", key, 4)) && (0 != strncmp("GEOIP_", key, 6)) ) {
+	    ps_rerror(r, APLOG_DEBUG, "Unknown processing parameter %s = %s",
+		      key, val);
+	}
     }
 }
 
@@ -4658,12 +4645,14 @@ static const char * get_dsml_action_type(const char * action) {
     return result;
 }
 
-static void write_dsml_request_fragment(psldap_status *ps, const char* dsmlReqType,
+static void write_dsml_request_fragment(psldap_status *ps,
+					const char* dsmlReqType,
 					const char *lPrefix)
 {
     int j;
     static const char * op_names[4] = {"replace", "add", "delete", NULL};
 
+    ps_rerror( ps->rr, APLOG_DEBUG, "Writing request fragment to stream");
     ap_rprintf(ps->rr, "%s\t<%s%s%s%s>\n", lPrefix, dsmlReqType,
 	       (NULL != ps->mod_dn) ? " dn=\"": "",
 	       (NULL != ps->mod_dn) ? ps->mod_dn : "",
@@ -4735,15 +4724,123 @@ static const char* duplicate_value_data(request_rec *r, const char *value)
     return result;
 }
 
+static void rput_children_of_element(psldap_status *ps, const char *xmlUri,
+				    const char **elmtNames)
+{
+    /* Write the XML to the response area ... content in the first
+       "*Response" node */
+    request_rec *r = ps->rr;
+    int j, i = 0, nodeFound = 0;
+
+    for (j = 0; (NULL != elmtNames) && (NULL != elmtNames[j]); j++) {
+        ps_rerror( r, APLOG_DEBUG, "Writing %s node in xml via rput",
+		   elmtNames[j]);
+    }
+
+    if (j > 0) {
+        char element[32];
+        apr_file_t *f = NULL;
+        apr_status_t fs = ap_file_open(&f, xmlUri, APR_READ, APR_OS_DEFAULT,
+				   r->pool);
+	ps_rerror(r, APLOG_DEBUG, "XML file %s opened for read", xmlUri);
+	while (APR_SUCCESS == (fs = ap_file_getc(&element[i], f)) ) {
+	    if (1 <= nodeFound) {
+	        ap_rputc(element[i], r);
+	    }
+	    if ('<' == element[0]) {
+		if ( (i == (sizeof(element)-2)) || ('>' == element[i]) ) {
+		    char *tagNamePtr = NULL;
+		    for (j = 0; (NULL != elmtNames[j]) && (NULL == tagNamePtr);
+			 j++) {
+		        tagNamePtr = strstr(element, elmtNames[j]);
+		    }
+		    
+		    element[i+1] = '\0';
+		    if (NULL != tagNamePtr) {
+		        if (NULL == strstr(element, "</")) {
+			    if (0 == nodeFound) ap_rputs(element, r);
+			    nodeFound++;
+			}
+			else nodeFound--;
+		    }
+
+		    /* Advance to next '>' - assume node name captured */
+		    while ('>' != element[i]) {
+		        element[i-1] = element[i];
+			if (APR_SUCCESS !=
+			    (fs = ap_file_getc(&element[i], f)) ) {
+			    element[i] = '>';
+			}
+			if (nodeFound || (NULL != tagNamePtr)) {
+			    ap_rputc(element[i], r);
+			}
+		    }
+		    element[i = 0] = '\0';
+		} else { i++; }
+	    }
+	}
+	fs = ap_file_close(f);
+    }
+}
+
 static int get_xml_object_template(void *data, const char *key, const char *val)
 {
     psldap_status *ps = (psldap_status*)data;
     request_rec *r = ps->rr;
 
     if (NULL == key ) {
-        if (NULL != val) strncpy((char*)val, "queryResponse", 13);
-        /* Write the response here... */
-        return 0;
+        char *xmlUri;
+	apr_finfo_t xmlInfo;
+	xmlDocPtr doc, cdoc;
+
+        if (NULL == ps->xmlTemplateUri) {
+	  ps_rerror(r, APLOG_INFO, "XML File unspecified when requested");
+	  return FALSE;
+	}
+
+	if (NULL != val) strcpy((char*)val, "searchResponse");
+	xmlUri = ap_pstrcat(r->pool, ap_document_root(r),
+			    r->server->path,
+			    (ps->xmlTemplateUri +
+			     ((r->server->path[strlen(r->server->path)-1] ==
+			       ps->xmlTemplateUri[0]) ? 1 : 0) ),
+			     NULL);
+	bzero(&xmlInfo, sizeof(apr_finfo_t));
+	apr_stat(&xmlInfo, xmlUri, APR_FINFO_NORM, r->pool);
+	ps_rerror(r, APLOG_DEBUG,
+		  "Presenting XML doc %s (%d bytes) via Present action",
+		  xmlUri, (int)xmlInfo.size);
+	if (0 >= xmlInfo.size) {
+	    ps_rerror(r, APLOG_INFO, "URI %s for xml doc not available",
+		      xmlUri);
+	} else if (NULL != ps->pNode) {
+	    /* Write the response here... replace the content of pNode's
+	       doc */
+	    doc = ps->pNode->doc;
+	    if (NULL != doc->last) {
+	        xmlNodePtr cur = xmlDocGetRootElement(doc);
+		xmlUnlinkNode(cur);
+		xmlFreeNode(cur);
+	    }
+	    cdoc = xmlParseFile(xmlUri);
+	    ps_rerror(r, APLOG_DEBUG, "Copying doc nodes from disk file");
+	    if (NULL != cdoc->children) {
+	        xmlNodePtr cur = xmlDocGetRootElement(cdoc);
+		xmlDocSetRootElement(doc, xmlDocCopyNode(cur, doc, 1));
+	    }
+	    xmlFreeDoc(cdoc);
+	    ps->pNode = xmlDocGetRootElement(doc);
+	} else {
+	    /* Write the XML to the response area ... content in the first
+	       "*Response" node */
+	    const char *resElmtNames[] = {"authResponse", "searchResponse",
+					  NULL};
+	    rput_children_of_element(ps, xmlUri, resElmtNames);
+	}
+    } else if (0 == strcmp(CONFIG_HTTP_HEADER, key)) {
+        if (!requestUAProvidesXSLSupport(r)) {
+	    ps->responseType = ap_pstrdup(r->pool, "text/html");
+	}
     } else if (0 != strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN)) {
         set_processing_parameter(ps, r, key, val);
     }
@@ -4758,7 +4855,7 @@ static int add_record_in_ldap(void *data, const char *key, const char *val)
     request_rec *r = ps->rr;
 
     if (NULL == key) {
-        if (NULL != val) strncpy((char*)val, "addResponse", 15);
+        if (NULL != val) strcpy((char*)val, "addResponse");
         if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
 	    /*
             int i;
@@ -4885,8 +4982,8 @@ static int login_and_reply(void *data, const char *key, const char *val)
         ps->responseType = ap_pstrdup(r->pool, "text/html");
 	ap_table_add(r->err_headers_out, "Location", post_login_uri);
 	
-	ps_rerror( r, APLOG_INFO, "Redirecting to URI %s of type %s", post_login_uri,
-		   r->content_type);
+	ps_rerror( r, APLOG_INFO, "Redirecting to URI %s of type %s",
+		   post_login_uri, r->content_type);
     }
 
     return HTTP_MOVED_TEMPORARILY;
@@ -4951,6 +5048,45 @@ static int update_record_in_ldap(void *data, const char *key,
 	}
     }
     return TRUE;
+}
+
+/** This writes a generic DSML response directly to an XML DOM. This response
+ *  is buffered by design and is subject to any overhead that may be incurred
+ *  with overly large datasets.
+ *  @param r request_rec pointer
+ *  @param ps psldap_status record - tracks internal status of session
+ *  @param opName operation name for the batch request subnode
+ *  @param actionHandler FN to execute ldap transactions and creates nodes
+ *  @return a pointer to an allocated xmlDoc that must be freed
+ **/
+static xmlDocPtr gen_dsml_dom_response(request_rec *r, psldap_status *ps,
+				       char *opName,
+				       int (*actionHandler)(void *data,
+							    const char *key,
+							    const char *val) ) {
+    xmlDocPtr result = xmlNewDoc((const xmlChar*)"1.0");
+    xmlNodePtr n1 = NULL, n2 = NULL;
+    char reqStr[16] = "searchRequest", resStr[16] = "searchResponse";
+
+    if (get_dn_attributes_from_ldap != actionHandler) {
+        sprintf(reqStr, "batchRequest");
+        sprintf(resStr, "batchResponse");
+    }
+
+    n1 = xmlNewDocNode(result, NULL, (const xmlChar*)"dsml", NULL);
+    xmlDocSetRootElement(result, n1);
+    n2 = xmlNewChild(n1, NULL, (const xmlChar*)reqStr, NULL);
+    n2 = xmlNewChild(n1, NULL, (const xmlChar*)resStr, NULL);
+
+    if (NULL == ps->mod_dn) ps->mod_dn = ap_pstrdup(r->pool,  "NULL_DN");
+    xmlSetProp(n2, (const xmlChar*)"id", (const xmlChar*)ps->mod_dn);
+
+    ps->pNode = n2;
+    actionHandler(ps, NULL, opName);
+
+    gen_dsml_response_node(r, n2, (const xmlChar *)opName, ps->mod_err);
+
+    return result;
 }
 
 static int (*get_action_handler(request_rec *r, const char **action))(void*, const char *,const char *)
@@ -5058,12 +5194,9 @@ static int ldap_update_handler(request_rec *r)
 	psldap_status_init(&ps, r, ldap, conf);
 
         actionHandler = get_action_handler(r, &action);
-	sendXml = ((get_dn_attributes_from_ldap == actionHandler) ||
-		   (update_record_in_ldap == actionHandler) ||
-		   (add_record_in_ldap == actionHandler) ||
-		   (delete_record_in_ldap == actionHandler) ||
-		   (moddn_record_in_ldap == actionHandler) ||
-		   (compare_record_in_ldap == actionHandler) );
+
+	sendXml = (login_and_reply != actionHandler);
+
 	if (NULL != t_env) {
 	    /*  Collect all supporting values from the request into the
 		psldap_status struct */
@@ -5073,8 +5206,13 @@ static int ldap_update_handler(request_rec *r)
 	    
 	/* Setup and send the HTTP header response ...*/
 	actionHandler(&ps, CONFIG_HTTP_HEADER, "");
+        ps_rerror( r, APLOG_INFO, "Action <%s> specific HTTP header set",
+		   action);
+
 	write_cn_cookie(r, conf, user, password);
-	if (!isXMLMimeType(ps.responseType)) {
+	if (isXMLMimeType(ps.responseType)) {
+	    r->content_type = (sendXml) ? "text/xml" : "text/html";
+	} else {
 	    r->content_type = ps.responseType;
 	    if (NULL != ps.dlFilename) {
 	        /* Add ContentDisposition to r->headers_out table to force
@@ -5089,15 +5227,13 @@ static int ldap_update_handler(request_rec *r)
 			   ps.dlFilename, cdStr);
 	    }
 	    sendXml = 0;
-	} else {
 	    r->content_type = (sendXml) ? "text/xml" : "text/html";
 	}
 	ap_soft_timeout("update ldap data", r);
 	ap_send_http_header(r);
 	
 	/* Send the  actual HTTP response... */
-	if ( (login_and_reply == actionHandler) ||
-	     (get_xml_object_template == actionHandler) ) {
+	if ( login_and_reply == actionHandler) {
 	    res = actionHandler(&ps, NULL, NULL);
 	} else {
 	    char opName[32] = "errorResponse";
@@ -5108,12 +5244,16 @@ static int ldap_update_handler(request_rec *r)
 		const char *dsmlRequestType = get_dsml_action_type(action);
 		char txTypeNm[8] = "search";
 
+		ps_rerror( r, APLOG_INFO, "Sending response as XML");
 		if (get_dn_attributes_from_ldap != actionHandler) {
 		    strcpy(txTypeNm, "batch");
 		}
 
-	        if (!sendXml) { ap_rputs("<body>\n<xml id='errResponse'>\n", r); }
-		else {
+	        if (!sendXml) {
+		    ps_rerror( r, APLOG_INFO, "XML response in data island");
+		    ap_rputs("<body>\n<xml id='errResponse'>\n", r);
+		} else {
+		    ps_rerror( r, APLOG_INFO, "Full response is XML");
 		    ap_rvputs(r,
 			      (NULL != ps.xslPrimaryUri) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
 			      (NULL != ps.xslPrimaryUri) ? ps.xslPrimaryUri : "",
@@ -5137,10 +5277,12 @@ static int ldap_update_handler(request_rec *r)
 			  (NULL != ps.mod_dn) ? ps.mod_dn : "NULL_DN",
 			  "'>\n",
 			  NULL);
+		
+		ps_rerror( r, APLOG_DEBUG, "Action handler response gen...");
 		actionHandler(&ps, NULL, opName);
 		/* Write the status of the request to the response element */
 		write_dsml_response_fragment(r, opName, ps.mod_err, "\t\t");
-		ap_rvputs(r, "\t</", txTypeNm, "Response>\n</dsml>", NULL);
+		ap_rvputs(r, "\n\t</", txTypeNm, "Response>\n</dsml>", NULL);
 		
 		if (NULL != ps.mod_record) {
 		    ldap_msgfree(ps.mod_record);
@@ -5149,7 +5291,32 @@ static int ldap_update_handler(request_rec *r)
 
 		if (!sendXml) { ap_rputs("</xml>\n</body>", r);	}
             } else {
+	        const char *xslUri = ps.xslPrimaryUri;
+#ifdef USE_LIBXML2_LIBXSL
+		ps_rerror( r, APLOG_INFO, "Transforming response as %s",
+			   ps.responseType );
+		if (NULL == xslUri) { xslUri = ps.xslSecondaryUri; }
+		if (NULL != xslUri) {
+		    xmlDocPtr doc = gen_dsml_dom_response(r, &ps, opName,
+							  actionHandler);
+		    xslUri = ap_pstrcat(r->pool, ap_document_root(r),
+					r->server->path,
+					(r->server->path[strlen(r->server->path)-1] ==
+					 xslUri[0]) ? &xslUri[1] : xslUri,
+					NULL);
+		    ps_rerror( r, APLOG_DEBUG,
+			       "Transforming ldap_search results for %s serverside: %s",
+			       ps.responseType, xslUri);
+		    transform_dom_sr_to_connection(r, conf, doc, xslUri, ps.responseType);
+		    xmlFreeDoc(doc);
+		    ps.pNode = NULL;
+		}
+#else
+		/* This doesn't work at all without the server XSL
+		   transformation except when actionHandler sends a binary
+		   response as in the case of jpegPhoto*/
 		actionHandler(&ps, NULL, opName);
+#endif
 	    }
 
             ap_kill_timeout(r);

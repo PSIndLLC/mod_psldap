@@ -1,35 +1,26 @@
-Change to alt_index page xsl transformations to enable embedded editing of records
+Revision 0.91
+===================
+SUMMARY
+The latest release of mod_psldap introduces support on handheld devices and XSLT execution on the Apache server. Users can now download contact records as VCF files from LDAP using these new capabilities and are free to create other complex file types leveraging this new feature. Additional capabilities have been created to introduce HTTP session persistence within LDAP to allow for single sign on across Apache instances - this session management feature is provided in a Beta form and is disabled by default.
 
-Enabled explicit mime type return setting through BinaryType parameter on the URI - enforced setting 'text/xml' type for dn based queries and create, update, delete operations.
+DETAIL
+Fixes to eliminate infinite loop in the vertical wrap to ensure IE displays the card view correctly and does not hang. This is related to a change in XSL based rendering in IE, requiring deferal of the wrap function call through a timeout.
 
-Fixes in XSL to accomodate latest browser releases of firefix and IE
+Introduce session persistence to the LDAP store to offer an alternative to passing credentials in the cookie, replacing content instead with a session id. An additional alternative is also introduced to embed the session id in the URL
 
-Cleanup alternative index page that leverages AJAX and client side application of XSL transforms to reduce server requests to render detail already available in the DSML response to the browser
+Introduced server side XSL transformation - integrated into vcard display for the contact records and in general response handling for blackberry user agents.
 
-Switch alt_index with index to make AJAX processing the default
+Fixed issue with poor handling of '&' in dn for URL reference to jpegPhoto which was causing some transformations to fail due to incorrect XML parsing
 
-Modification to basic index page to make display more compact - page layout modifications to reduce framed content
+Completed the change to DSML response type for jpegPhoto inclusion in the stream to ensure requests from IE return a URL to the photo and not the binary stream while continuing to pass the encoded image to firefox / mozilla based browsers
 
-Segregated base DNs for the application into a shared configuration - introduced psldap_config.js to hold configuration settings
+Established uniform page head elements across all pages through introduction of XSL includes and imports
 
-Minor CSS style sheet enhancements to accomodate browser changes
+Introduced performance improvements by adding indexes in the XSL processing.
 
-Altered image rendering for Mozilla to take advantage of uuencoded jpeg images in the XML - directly embeds image in the transformed page within the image tag. This was disabled inline in the DSML_editform.xsl but can be re-enabled if you are adventurous ;-)
+Introduced first page customizations for handheld user agents - initially only supporting blackberry - to include suppression of JS to wrap columns in the card style. UserAgent parameter added to all xsl templates via the new DSML_sitefrags.xsl inclusion. Telephone dialing, emailing, and SMS functional within handheld devices and tested on the blackberry.
 
-Fixed compilation issues with Apache 2.2 - now compiles and runs. Regression of changes with 2.0 and 1.3 not tested, but believed to be compatible - any issues should be reported to the sourceforge project for mod_psldap.
+Addition of xmlObjectTemplate parameter to ldapupdate handler and the Present action type to present XML documents directly from the server. Formerly, this was achieved by getting XML documents directly via HTTP get requests, but this did not accomodate agents - such as handheld or mobile phone browsers - that did not perform the transform via XSL. 
 
-Repaired cache access error in Apache 2.XX
+Addition of the dlFilename parameter to ldap update handler to allow responses to be provided with an attachment disposition whose filename correlates to the value of the parameter.
 
-Introduced ability to move records to other superior nodes in the edit form. This effectively allows for moving records when someone changes organizations or if an organization restructure occurs
-
-Addition of PSI vendor schema
-
-Fixes to column creation / alignment in card display
-
-XML results modified to be in closer alignment to DSML spec and ennabled XML result return and XSL specification / application on all responses
-
-Realignment of address fields to compact edit form display; auto populate postal address from street, city, state and postal code; eliminated form copy prior to submittal on edit form
-
-Introduction of skype calling and yahoo messaging in card view for contacts with skype or yahoo accounts
-
-Fixed display of ISDN and Telex info

@@ -49,7 +49,7 @@
       <tr>
       <td id="treeCell" style="width: *; ">
         <div style="overflow: auto; height: 100%; ">
-          <xsl:apply-templates select="batchResponse/searchResponse" />
+          <xsl:apply-templates select="searchResponse" />
         </div>
       </td>
       <td id="editCell" style="width: 568px; ">

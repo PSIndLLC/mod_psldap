@@ -1,8 +1,18 @@
 mod_psldap
 ===========
 
-Version 0.90
+Version 0.91
 by David Picard
+
+mod_psldap was created to provide better access to and interaction with 
+directory content and further provide a very lightweight means of managing 
+directory information by leveraging client processing power to render the edit 
+and reporting pages on any web browser without requiring an ActiveX or other 
+binary executable download. It reduces the incremental network traffic for 
+subsequent interactions by 95% or more while still providing a very rich AJAX / 
+Web 2.0 enabled user interface. In addition, the powerful capabilities to 
+transform the content have been further leveraged to download other formats 
+supporting import into other contact management solutions.
 
 This module was originally based on Alexander Mayrhofer's mod_auth_ldap,
 version 0.5.
@@ -634,6 +644,35 @@ passing the '-D USE_LIBXML2_LIBXSL=X -lxml2 -lxslt' options to apxs (prior to
 the -c option).
 
 
+Request Parameters
+==================
+Request parameters may be passed through input elements in an HTML form or in
+the URI passed to the server. mod_psldap provides a number of such parameters to
+specify processing instructions. The following parameters are supported by the
+module:
+  *  "BinaryType" controls the mime type of the HTTP response header
+  *  "BinaryHRef" controls how binary object sfrom LDAP are embedded in the
+                  DSML response. A value of yes places the base64 encoding in
+		  in the value node, no puts an href in place to request the
+		  object directly
+  *  "BinaryData" the name of the LDAP sttribute containing the binary data in
+     		  the result set. If this value is set, only that attribute is
+		  returned in the response and the response mime type is set in
+		  accordance with the BinaryType specifier
+  *  "newrdn" only applies to the modDNRequest FormAction 
+  *  "newSuperior" only applies to the modDNRequest FormAction
+  *  "xsl1" specifies the XSL stylesheet to use for primary transformation
+  *  "xsl2" specifies the XSL stylesheet to use for secondary transformation
+  *  "xmlObjectTemplate" specifies the URI from the server root to an XML
+     			 file to be returned through mod_psldap. If the client
+			 does not support XSLT, then the response is transformed
+			 server side.
+  *  "dlFilename" specifies the filename to be used when the BinaryType is set 
+     		  to a value other than text/xml or text/html
+  *  "FormAction" specifies the action requested on the server side (more about
+     		  this in 'Setting Up Forms'
+
+
 Setting Up Forms
 ================
 So now you've got everybody you know listed in your LDAP server with all their
@@ -651,6 +690,10 @@ buttons, simply create an input element of type="submit", name="FormAction"
 and set the value attribute to one of three strings:
   *  "Update" - causes mod_psldap to update the settings listed on the page
               in the LDAP server.
+  *  "Present" - causes mod_psldap to read the specified XML from the psldap
+              root directory and send it back to the requestor. If the
+	      requestor does not transform XSL, mod_psldap performs the
+	      transformation server side and streams back HTML.
   *  "Create" - creates the record in the LDAP server.
   *  "Delete" - deletes the record from the LDAP server.
   *  "Disable" - deletes the password of the account, making it inaccessible.
@@ -675,6 +718,9 @@ point for creating simple and complex pages:
                       populated in a card type of format.
   *  DSML_table.xsl - allows the user to view specified fields that are
                       visible in a tabular format.
+  *  DSML_vcards.xsl - allows the user to download LDAP records as VCF files
+  *  DSML_org_tree.xsl - presents results as an organizational hierarchy
+  *  DSML_mgmt_tree.xsl - presents results as a management reporting hierarchy
 
 Also note that the samples also ship with a series of XML files intended to provide
 a mechanism by which new records can be entered. With the XSL implementation of
@@ -709,7 +755,6 @@ httpd.conf:
 Note that we set the AuthType to "Basic". It could also be set to "cookie", but
 it should never be set to "form" as the credentials may get confused with
 data that is being inserted or modified on any forms.
-
 
 
 

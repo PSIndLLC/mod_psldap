@@ -35,7 +35,9 @@ Fixed generated dsml structure to better match spec - pushed searchResponse
 back under a batchResponse node and change mgmt and org XSL back to reference 
 the correct XPath
 
-
+Fixed improper ServerPath inclusion in fully qualified path assembly - repairs 
+issue with XML and XSL file parse for server side operations when recursive path
+link is not present
 
 
 Revision 0.91

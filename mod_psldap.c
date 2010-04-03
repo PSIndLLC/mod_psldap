@@ -4793,21 +4793,21 @@ static int get_xml_object_template(void *data, const char *key, const char *val)
 
     if (NULL == key ) {
         char *xmlUri;
+	const char *dr = ap_document_root(r);
 	apr_finfo_t xmlInfo;
 	xmlDocPtr doc, cdoc;
 
         if (NULL == ps->xmlTemplateUri) {
-	  ps_rerror(r, APLOG_INFO, "XML File unspecified when requested");
-	  return FALSE;
+	    ps_rerror(r, APLOG_INFO, "XML File unspecified when requested");
+	    return FALSE;
 	}
 
 	if (NULL != val) strcpy((char*)val, "searchResponse");
-	xmlUri = ap_pstrcat(r->pool, ap_document_root(r),
-			    r->server->path,
+	xmlUri = ap_pstrcat(r->pool, dr,
 			    (ps->xmlTemplateUri +
-			     ((r->server->path[strlen(r->server->path)-1] ==
-			       ps->xmlTemplateUri[0]) ? 1 : 0) ),
-			     NULL);
+			     ((dr[strlen(dr)-1] == ps->xmlTemplateUri[0]) ?
+			      1 : 0) ),
+			    NULL);
 	bzero(&xmlInfo, sizeof(apr_finfo_t));
 	apr_stat(&xmlInfo, xmlUri, APR_FINFO_NORM, r->pool);
 	ps_rerror(r, APLOG_DEBUG,
@@ -5290,12 +5290,12 @@ static int ldap_update_handler(request_rec *r)
 			   ps.responseType );
 		if (NULL == xslUri) { xslUri = ps.xslSecondaryUri; }
 		if (NULL != xslUri) {
+		    const char *dr  = ap_document_root(r);
 		    xmlDocPtr doc = gen_dsml_dom_response(r, &ps, opName,
 							  actionHandler);
-		    xslUri = ap_pstrcat(r->pool, ap_document_root(r),
-					r->server->path,
-					(r->server->path[strlen(r->server->path)-1] ==
-					 xslUri[0]) ? &xslUri[1] : xslUri,
+		    xslUri = ap_pstrcat(r->pool, dr,
+					(dr[strlen(dr)-1] == xslUri[0]) ?
+					&xslUri[1] : xslUri,
 					NULL);
 		    ps_rerror( r, APLOG_DEBUG,
 			       "Transforming ldap_search results for %s serverside: %s",

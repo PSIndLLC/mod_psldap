@@ -13,7 +13,12 @@ SVG based rendering of organizational structures
 Enablement of contact database integration to blackberry devices
 
 
-Revision 0.92 (Upcoming release)
+Revision 0.93 (Upcoming release)
+===================
+N/A
+
+
+Revision 0.92
 ===================
 Moved common capabilities back out of DSML_sitefrags.xsl to leave that 
 stylesheet for site specific customizations only - common capabilities are now 

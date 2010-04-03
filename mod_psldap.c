@@ -4778,6 +4778,7 @@ static void rput_children_of_element(psldap_status *ps, const char *xmlUri,
 			}
 		    }
 		    element[i = 0] = '\0';
+		    if (nodeFound || (NULL != tagNamePtr)) ap_rputc('\n', r);
 		} else { i++; }
 	    }
 	}

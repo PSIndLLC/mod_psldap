@@ -269,6 +269,20 @@ function deleteCurrentSpan(el) {
     }
 }
 
+/**  This function is intended to be invoked when a page is loaded to set the
+ *   selectable DNs to those indicated in the psldap_config.js file
+ **/
+function setOptionsOnAllDNSelects() {
+    var dnElmt = document.getElementById("dn");
+    if (dnElmt.tagName.toUpperCase() == "SELECT") {
+	for (var i=0; i < ldapDomains.length; i++) {
+	    var optStr = '<option ' + ((ldapDomains[i].defaultDomain==1)?"selected ":"") + 'value="' + ldapDomains[i].dn + '">' + ldapDomains[i].label + '</option>';
+	    if (0 == i) dnElmt.innerHTML = optStr;
+	    else dnElmt.innerHTML += optStr;
+	}
+    }
+}
+
 /** Gets all form elements in the specified document. If no document
  *  is specified it defaults to the current document.
  *  @param objWindowArg (optional) a reference to a Window object

@@ -24,3 +24,6 @@ Addition of xmlObjectTemplate parameter to ldapupdate handler and the Present ac
 
 Addition of the dlFilename parameter to ldap update handler to allow responses to be provided with an attachment disposition whose filename correlates to the value of the parameter.
 
+Addition of PspsUserCN and psUserDN cookies to allow for page personalization after authentication
+
+Enhancements to DSML_sitefrags.xsl to abstract out common transformations

@@ -3,6 +3,7 @@
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/html4/loose.dtd'>
 
+<xsl:include href="DSML_commonscript.xsl" />
 <xsl:include href="DSML_sitefrags.xsl" />
 
 <xsl:output method="html" doctype-public="-//W3C//DTD HTML 4.01 Transitional//EN" doctype-system="http://www.w3.org/TR/html4/loose.dtd" omit-xml-declaration="no" media-type="text/html" />

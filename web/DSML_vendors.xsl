@@ -4,31 +4,17 @@
 <xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/REC-html40' xmlns:xs='http://www.w3.org/2001/XMLSchema'>
 
 <xsl:import href="DSML_cards.xsl" />
-<xsl:include href="DSML_sitefrags.xsl" />
 
 <xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
-
-<xsl:template name="searchResultsCache" match="searchResponse" mode="refClass">
-  <xsl:param name="refClass" />
-  <xsl:param name="refClassAttr" />
-  
-  <script language="javascript">
-    var <xsl:value-of select="$refClass" />_ref = new Array();
-    <xsl:for-each select="searchResultEntry/attr[@name='objectClass']/value[(text()=$refClass)]/ancestor::searchResultEntry">
-      <xsl:sort select="attr[@name=$refClassAttr]/value" />
-      <xsl:value-of select="$refClass" />_ref[<xsl:value-of select="position()-1" />] = "<xsl:value-of select="attr[@name=$refClassAttr]/value" />";
-    </xsl:for-each>
-  </script>
-  <script type="text/javascript" src="http://download.skype.com/share/skypebuttons/js/skypeCheck.js">
-  </script>
-</xsl:template>
 
 <xsl:template name="pageSpecificHeader" >
 </xsl:template>
 
 <xsl:template match="/dsml">
   <html>
-    <xsl:call-template name="pageHeader" />
+    <xsl:call-template name="pageHeader" >
+      <xsl:with-param name="title" >PsLDAP Vendor Cards</xsl:with-param>
+    </xsl:call-template>
     <body onload="initializeCards(-3)">
       <xsl:call-template name="siteHeader" />
       <script language="JavaScript" >
@@ -82,101 +68,6 @@
   </html>
 </xsl:template>
 
-<xsl:template name="servicesMgmt" >
-  <script type="text/javascript" language="JavaScript">
-    function synchCompareSelect() {
-      var strQuery = "";
-      var searchByElement = document.queryForm.searchby;
-      var searchCompareElement = document.queryForm.searchcompare;
-      var searchValueElement = document.queryForm.searchvalue;
-      strQuery = searchByElement.options[searchByElement.selectedIndex].value;
-      if ("" == strQuery) {
-        // Advanced choice selected
-        searchCompareElement.selectedIndex = 4;
-      } else if (4 == searchCompareElement.selectedIndex) {
-        searchCompareElement.selectedIndex = 3;
-      }
-    }
-    function generateQueryString() {
-      var searchElement = document.queryForm.search;
-      var searchByElement = document.queryForm.searchby;
-      var searchCompareElement = document.queryForm.searchcompare;
-      var searchValueElement = document.queryForm.searchvalue;
-      var strQuery = searchByElement.options[searchByElement.selectedIndex].value;
-      strQuery = "(" + strQuery +
-      searchCompareElement.options[searchCompareElement.selectedIndex].value.replace(/\?/i, searchValueElement.value) + ")";
-      searchElement.value = strQuery;
-      window.defaultStatus = "Getting LDAP records for filter = " + strQuery;
-      return true;
-    }
-  </script>
-
-  <p><a href="/family_services/zm">Zoneminder Cams</a></p>
-  <p><a href="/psldap/">Picard contacts directory</a></p>
-  <p><a href="javascript:void loadRecordUrl('/psldap/DSML_new_v_o.xml?dn=dc=picard,dc=us');">Add a new vendor</a></p>
-  Lookup contacts in family address book:<br />
-  <form id="queryForm" name="queryForm" onsubmit="return generateQueryString();" method="POST" action="/ldapupdate" target="_new">
-    <table width="100%">
-      <tr>
-	<td align="left">
-	  <input type="submit" name="FormAction" value="Search" tabindex="5" />&nbsp;
-	  <select size="1" id="dn" name="dn" style="font-weight: bold; margin-left: 6px; " tabindex="1">
-	    <option value="dc=psind,dc=com">PSInd, LLC</option>
-	    <xsl:element name="option">
-	      <xsl:attribute name="selected" />
-	      <xsl:attribute name="value">dc=picard,dc=us</xsl:attribute>
-	      Picard Family
-	    </xsl:element>
-	    <option value="dc=ssdca,dc=com">SSDCA</option>
-	  </select>
-	  &nbsp; for &nbsp;
-	  <input type="hidden" name="search" size="32" maxlength="128" value="(mail=*@*)" />
-	  <input type="hidden" name="BinaryHRef" size="4" maxlength="4" value="on" />
-	  <input type="hidden" name="xsl1" size="32" maxlength="32" value="/psldap/DSML_cards.xsl" />
-	  <select onchange="synchCompareSelect();" size="1" name="searchby" style="margin-right: 3px;" tabindex="2">
-	    <option value="mail">eMail</option>
-	    <option value="givenName">First Name</option>
-	    <xsl:element name="option">
-	      <xsl:attribute name="selected" />
-	      <xsl:attribute name="value">sn</xsl:attribute>
-	      Last Name
-	    </xsl:element>
-	    <option value="o">Organization</option>
-	    <option value="ou">Org Unit</option>
-	    <option value="">Advanced...</option>
-	  </select>&nbsp; &nbsp;
-	  <select onchange="synchCompareSelect();" size="1" name="searchcompare" style="margin-right: 3px;" tabindex="3">
-	    <xsl:element name="option">
-	      <xsl:attribute name="selected" />
-	      <xsl:attribute name="value">=?*</xsl:attribute>
-	      begins with
-	    </xsl:element>
-	    <option value="=*?*">contains</option>
-	    <option value="=*?">ends with</option>
-	    <option value="=?">equals</option>
-	    <option value="?">...</option>
-	  </select>
-	  <input type="text" name="searchvalue" size="29" maxlength="128" value="@" tabindex="4" />
-	</td>
-      </tr>
-    </table>
-  </form>
-  <br />
-  Beacon - <xsl:element name="a"><xsl:attribute name="href">#</xsl:attribute><xsl:attribute name="onClick">window.open('family_services/Beacon'+previousMonthStr+'.pdf','Beacon')</xsl:attribute>Previous</xsl:element>, <xsl:element name="a"><xsl:attribute name="href">#</xsl:attribute><xsl:attribute name="onClick">window.open('family_services/Beacon'+currentMonthStr+'.pdf','Beacon')</xsl:attribute>Current</xsl:element>, &amp; <xsl:element name="a"><xsl:attribute name="href">#</xsl:attribute><xsl:attribute name="onClick">window.open('family_services/Beacon'+nextMonthStr+'.pdf','Beacon')</xsl:attribute>Next</xsl:element>
-  <br />
-  <script language="JavaScript" >
-    var now = new Date();
-    var current = now.getMonth() + 1;
-    var previous = current - 1;
-    current = now.getFullYear().toString().substring(2,4) + ((current &lt; 10)?"0":"") + current;
-    if (previous &gt; 0) {
-      previous = current.substring(0,2) + ((previous &lt; 10)?"0":"") + previous;
-    } else {
-      previous = (now.getFullYear() - 1).toString().substring(2,4) + "12";
-    }
-  </script>
-</xsl:template>
-
 <xsl:key name="vendors-by-category" match="searchResultEntry" use="attr[@name='businessCategory']" />
 <xsl:key name="vendors-by-vclass" match="searchResultEntry" use="attr[@name='vendorClass']" />
 
@@ -214,12 +105,6 @@
   <xsl:param name="prevResultPos" select="position()-1" />
   <xsl:param name="prevResultBC" select="ancestor::searchResponse/searchResultEntry[position() = $prevResultPos]/attr[@name='businessCategory']/value" />
 
-  <!--
-  <xsl:if test="(position() = 1) or (not ($heading = $prevResultBC))">
-    <h2><xsl:value-of select="$heading" /></h2>
-    <h3><xsl:value-of select="$prevResultBC" /> <xsl:value-of select="$prevResultPos" /></h3>
-  </xsl:if>
--->
   <xsl:element name="div">
     <xsl:attribute name="name">vendorSummary</xsl:attribute>
     <xsl:attribute name="style">background-color: cyan; border-width: 1px; border-style: solid; border-color: blue; margin: 3px; padding: 2px; -moz-border-radius: 5px; -webkit-border-radius: 5px; behavior:url(border-radius.htc); width: 256px;</xsl:attribute>

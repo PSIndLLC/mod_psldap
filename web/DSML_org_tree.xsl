@@ -3,6 +3,7 @@
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML">
 
+<xsl:include href="DSML_commonscript.xsl" />
 <xsl:include href="DSML_sitefrags.xsl" />
 
 <xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
@@ -49,7 +50,7 @@
       <tr>
       <td id="treeCell" style="width: *; ">
       <div style="overflow: auto; height: 100%; ">
-	<xsl:apply-templates select="searchResponse" />
+	<xsl:apply-templates select="batchResponse/searchResponse" />
       </div>
       </td>
       <td id="editCell" style="width: 568px; ">

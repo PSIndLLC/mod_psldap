@@ -2,7 +2,7 @@ About mod_psldap
 ===================
 mod_psldap was created to provide a very lightweight means of managing directory information by leveraging client processing power to render the edit and reporting pages on any web browser without requiring an ActiveX or other binary executable download. It reduces the incremental network traffic for subsequent edits by 95% or more while still providing a very rich AJAX / Web 2.0 enabled user interface.
 
-Revision X (Upcoming release)
+Revision X (Future)
 ===================
 Enhance mobile / handheld device support to tailor presentation to form factor
 
@@ -11,6 +11,32 @@ Importing / exporting from / to google contact export format
 SVG based rendering of organizational structures
 
 Enablement of contact database integration to blackberry devices
+
+
+Revision 0.92 (Upcoming release)
+===================
+Moved common capabilities back out of DSML_sitefrags.xsl to leave that 
+stylesheet for site specific customizations only - common capabilities are now 
+in DSML_commonscript.xsl
+
+Refactored the pageHeader template with pageHeaderWithRefClass to reduce 
+duplicate code
+
+Removed some hardcoded values from the DSML_vendors.xsl (enabled automatic 
+population of the ldapDomains to all select elements with an id of 'dn') and 
+made the template for servicesMgmt site specific
+
+Corrected minor title setting bug on commonscript XSL
+
+Extended vcard to include KEY, REV, PRODID, and CLASS, also fixing IM references
+to be compliant with RFC 4770
+
+Fixed generated dsml structure to better match spec - pushed searchResponse 
+back under a batchResponse node and change mgmt and org XSL back to reference 
+the correct XPath
+
+
+
 
 Revision 0.91
 ===================

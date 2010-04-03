@@ -4094,8 +4094,8 @@ static void gen_dsml_search_response(request_rec *r, xmlNodePtr n, LDAP *ld,
     BerElement *ber;
     int i, bytesWritten = 0;
 
-    xmlNodePtr sr = n;
-    
+    xmlNodePtr sr = xmlNewChild(n, NULL, (const xmlChar*)"searchResponse",
+				NULL);
     for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
         ldEntry = ldap_next_entry(ld, ldEntry))
     {
@@ -4312,6 +4312,7 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
     BerElement *ber;
     int i, bytesWritten = 0;
 
+    if (isXMLMimeType(mimeType)) ap_rvputs(r, "\t\t<searchResponse>\n", NULL);
     for(ldEntry = ldap_first_entry(ld, ldResult); NULL != ldEntry;
         ldEntry = ldap_next_entry(ld, ldEntry))
     {
@@ -4359,6 +4360,7 @@ static void write_dsml_search_response(request_rec *r, LDAP *ld,
 		     ldap_msgtype(ldEntry) );
         }
     }
+    if (isXMLMimeType(mimeType)) ap_rputs("\t\t</searchResponse>\n", r);
 }
 
 /** Parse the incoming headers - assume that blackberry devices and anything
@@ -5066,15 +5068,10 @@ static xmlDocPtr gen_dsml_dom_response(request_rec *r, psldap_status *ps,
 							    const char *val) ) {
     xmlDocPtr result = xmlNewDoc((const xmlChar*)"1.0");
     xmlNodePtr n1 = NULL, n2 = NULL;
-    char reqStr[16] = "searchRequest", resStr[16] = "searchResponse";
-
-    if (get_dn_attributes_from_ldap != actionHandler) {
-        sprintf(reqStr, "batchRequest");
-        sprintf(resStr, "batchResponse");
-    }
+    char reqStr[16] = "batchRequest", resStr[16] = "batchResponse";
 
     n1 = xmlNewDocNode(result, NULL, (const xmlChar*)"dsml", NULL);
-    xmlDocSetRootElement(result, n1);
+    xmlDocSetRootElement(result, n2);
     n2 = xmlNewChild(n1, NULL, (const xmlChar*)reqStr, NULL);
     n2 = xmlNewChild(n1, NULL, (const xmlChar*)resStr, NULL);
 
@@ -5242,13 +5239,8 @@ static int ldap_update_handler(request_rec *r)
 	    }
 	    if (isXMLMimeType(ps.responseType)) {
 		const char *dsmlRequestType = get_dsml_action_type(action);
-		char txTypeNm[8] = "search";
 
 		ps_rerror( r, APLOG_INFO, "Sending response as XML");
-		if (get_dn_attributes_from_ldap != actionHandler) {
-		    strcpy(txTypeNm, "batch");
-		}
-
 	        if (!sendXml) {
 		    ps_rerror( r, APLOG_INFO, "XML response in data island");
 		    ap_rputs("<body>\n<xml id='errResponse'>\n", r);
@@ -5266,14 +5258,14 @@ static int ldap_update_handler(request_rec *r)
 		}
 
 		/* Write the request node to the response stream */
-		ap_rvputs(r, "\t<", txTypeNm, "Request",
+		ap_rvputs(r, "\t<batchRequest",
 			  (get_dn_attributes_from_ldap != actionHandler) ? "" : " processing=\"parallel\" onError=\"resume\"",
 			  ">\n", NULL);
 		write_dsml_request_fragment(&ps, dsmlRequestType, "\t\t");
-		ap_rvputs(r, "\t</", txTypeNm, "Request>\n", NULL);
+		ap_rvputs(r, "\t</batchRequest>\n", NULL);
 
 		/* Write the response node to the response stream */
-		ap_rvputs(r, "\t<", txTypeNm, "Response id='",
+		ap_rvputs(r, "\t<batchResponse id='",
 			  (NULL != ps.mod_dn) ? ps.mod_dn : "NULL_DN",
 			  "'>\n",
 			  NULL);
@@ -5282,7 +5274,7 @@ static int ldap_update_handler(request_rec *r)
 		actionHandler(&ps, NULL, opName);
 		/* Write the status of the request to the response element */
 		write_dsml_response_fragment(r, opName, ps.mod_err, "\t\t");
-		ap_rvputs(r, "\n\t</", txTypeNm, "Response>\n</dsml>", NULL);
+		ap_rvputs(r, "\n\t</batchResponse>\n</dsml>", NULL);
 		
 		if (NULL != ps.mod_record) {
 		    ldap_msgfree(ps.mod_record);
@@ -5307,6 +5299,7 @@ static int ldap_update_handler(request_rec *r)
 		    ps_rerror( r, APLOG_DEBUG,
 			       "Transforming ldap_search results for %s serverside: %s",
 			       ps.responseType, xslUri);
+
 		    transform_dom_sr_to_connection(r, conf, doc, xslUri, ps.responseType);
 		    xmlFreeDoc(doc);
 		    ps.pNode = NULL;

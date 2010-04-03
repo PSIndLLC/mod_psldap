@@ -4777,8 +4777,8 @@ static void rput_children_of_element(psldap_status *ps, const char *xmlUri,
 			    ap_rputc(element[i], r);
 			}
 		    }
+		    if (tagNamePtr == &element[2]) ap_rputc('\n', r);
 		    element[i = 0] = '\0';
-		    if (nodeFound || (NULL != tagNamePtr)) ap_rputc('\n', r);
 		} else { i++; }
 	    }
 	}
@@ -5072,7 +5072,7 @@ static xmlDocPtr gen_dsml_dom_response(request_rec *r, psldap_status *ps,
     char reqStr[16] = "batchRequest", resStr[16] = "batchResponse";
 
     n1 = xmlNewDocNode(result, NULL, (const xmlChar*)"dsml", NULL);
-    xmlDocSetRootElement(result, n2);
+    xmlDocSetRootElement(result, n1);
     n2 = xmlNewChild(n1, NULL, (const xmlChar*)reqStr, NULL);
     n2 = xmlNewChild(n1, NULL, (const xmlChar*)resStr, NULL);
 
@@ -5300,7 +5300,6 @@ static int ldap_update_handler(request_rec *r)
 		    ps_rerror( r, APLOG_DEBUG,
 			       "Transforming ldap_search results for %s serverside: %s",
 			       ps.responseType, xslUri);
-
 		    transform_dom_sr_to_connection(r, conf, doc, xslUri, ps.responseType);
 		    xmlFreeDoc(doc);
 		    ps.pNode = NULL;

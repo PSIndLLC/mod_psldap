@@ -1,7 +1,7 @@
 Revision 0.92
 ===================
 SUMMARY
-The latest release of mod_psldap is a patch fix against 0.91 to address defects identified in extended testing.
+The latest release of mod_psldap is a patch fix against 0.91 to address defects identified in extended testing. This is a bug fix release to address variations on the initially tested configurations and restores isolation of site specific configurations to simplify an upgrade.
 
 DETAIL
 Moved common capabilities back out of DSML_sitefrags.xsl to leave that 

@@ -34,7 +34,11 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.90"
+#define PSLDAP_VERSION_LABEL "0.93"
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 /*
 #define USE_LIBXML2_LIBXSL
 #define USE_PSLDAP_CACHING
@@ -58,7 +62,7 @@
 #ifdef USE_LIBXML2_LIBXSL
  #include "libxml/tree.h"
  #include "libxml/xmlsave.h"
- #include "transform.h"
+ #include "libxslt/transform.h"
 #endif
 
 #ifdef MPM20_MODULE_STUFF
@@ -193,11 +197,17 @@
 #define SECURE_CLIENT_IP	"clientIP"
 #define SECURE_SESSION_ID	"sessionID"
 #define SECURE_AUTH_NAMES	"authNames"
+#if 0
 #define SECURE_ACCESS_T		"lastAccessTime"
+#endif
+#define SECURE_ACCESS_T		"modifyTimestamp"
+#define ACCESS_T_FORMAT		"%Y%m%d%H%M%S"
 #define LOGIN_ACTION	"Login"
 #define SEARCH_ACTION	"Search"
 #define MODIFY_ACTION	"Modify"
+#define ADDATTR_ACTION	"AddAttributes"
 #define CREATE_ACTION	"Create"
+#define REGISTER_ACTION	"Register"
 #define PRESENT_ACTION	"Present"
 #define DISABLE_ACTION	"Disable"
 #define DELETE_ACTION	"Delete"
@@ -205,6 +215,7 @@
 #define DSML_SEARCH_ACTION	"searchRequest"
 #define DSML_MODIFY_ACTION	"modifyRequest"
 #define DSML_CREATE_ACTION	"addRequest"
+#define DSML_REGISTER_ACTION	"registerRequest"
 #define DSML_PRESENT_ACTION	"presentRequest"
 #define DSML_DELETE_ACTION	"delRequest"
 #define DSML_MODIFYDN_ACTION	"modDNRequest"
@@ -220,6 +231,8 @@ typedef struct  {
     char *psldap_binddn;
     char *psldap_bindpassword;
     char *psldap_basedn;
+    char *psldap_binddn_reg;
+    char *psldap_bindpassword_reg;
     char *psldap_userkey;
     char *psldap_passkey;
     char *psldap_groupkey;
@@ -1238,6 +1251,8 @@ static void *create_ldap_auth_dir_config (pool *p, char *d)
     sec->psldap_binddn = STR_UNSET;
     sec->psldap_bindpassword = STR_UNSET;
     sec->psldap_basedn = STR_UNSET;
+    sec->psldap_binddn_reg = STR_UNSET;
+    sec->psldap_bindpassword_reg = STR_UNSET;
     sec->psldap_user_grp_attr = STR_UNSET;
     sec->psldap_grp_mbr_attr = STR_UNSET;
     sec->psldap_grp_nm_attr = STR_UNSET;
@@ -1309,6 +1324,8 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, n, psldap_binddn);
     set_cfg_str_if_n_set(p, result, n, psldap_bindpassword);
     set_cfg_str_if_n_set(p, result, n, psldap_basedn);
+    set_cfg_str_if_n_set(p, result, n, psldap_binddn_reg);
+    set_cfg_str_if_n_set(p, result, n, psldap_bindpassword_reg);
     set_cfg_str_if_n_set(p, result, n, psldap_userkey);
     set_cfg_str_if_n_set(p, result, n, psldap_passkey);
     set_cfg_str_if_n_set(p, result, n, psldap_groupkey);
@@ -1345,6 +1362,8 @@ void *merge_ldap_auth_dir_config (pool *p, void *base_conf, void *new_conf)
     set_cfg_str_if_n_set(p, result, b, psldap_binddn);
     set_cfg_str_if_n_set(p, result, b, psldap_bindpassword);
     set_cfg_str_if_n_set(p, result, b, psldap_basedn);
+    set_cfg_str_if_n_set(p, result, b, psldap_binddn_reg);
+    set_cfg_str_if_n_set(p, result, b, psldap_bindpassword_reg);
     set_cfg_str_if_n_set(p, result, b, psldap_userkey);
     set_cfg_str_if_n_set(p, result, b, psldap_passkey);
     set_cfg_str_if_n_set(p, result, b, psldap_groupkey);
@@ -1508,6 +1527,19 @@ command_rec ldap_auth_cmds[] = {
       (void*)XtOffsetOf(psldap_config_rec, psldap_basedn),
       OR_AUTHCFG, TAKE1, 
       "The DN in the LDAP directory which contains the per-user subnodes"
+    },
+    { "PsLDAPRegBindDN", (cmd_func)ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_binddn_reg),
+      OR_AUTHCFG, TAKE1, 
+      "DN used to bind to the LDAP directory, if binding with provided"
+      " credentials is not desired. This value is also used to initially bind"
+      " to acquire the DN of the authenticating user. If this is unset, the"
+      " value for PsLDAPBindMethod is forced to 'none' "
+    },
+    { "PsLDAPRegBindPassword", (cmd_func)ap_set_string_slot,
+      (void*)XtOffsetOf(psldap_config_rec, psldap_bindpassword_reg),
+      OR_AUTHCFG, TAKE1, 
+      "The password corresponding to PsLDAPBindDN"
     },
     { "PsLDAPUserKey", (cmd_func)ap_set_string_slot,
       (void*)XtOffsetOf(psldap_config_rec, psldap_userkey),
@@ -1716,6 +1748,22 @@ static LDAP* get_admin_ldap_session(request_rec *r, psldap_config_rec *conf)
 			conf);
 }
 
+static char* get_registration_bindas(request_rec *r, psldap_config_rec *conf,
+				   char **password)
+{
+    char *result = NULL;
+
+    if ((conf->psldap_binddn_reg != NULL) &&
+	(conf->psldap_bindpassword_reg != NULL) ) {
+        result = conf->psldap_binddn_reg;
+	*password = conf->psldap_bindpassword_reg;
+    }
+    ps_rerror(r, APLOG_DEBUG, "Resetting user to registration user DN <%s>",
+	      (result == NULL) ? "=Undefined=" : result); 
+
+    return result;
+}
+  
 static psldap_session_rec* create_psldap_session(request_rec *r,
 						 psldap_config_rec *conf,
 						 const char *dn,
@@ -1723,22 +1771,23 @@ static psldap_session_rec* create_psldap_session(request_rec *r,
 						 const char *passwd,
 						 const char *groups )
 {
-    char sessionId[64] = "";
+    char sessionId[96] = "";
     psldap_session_rec *result = ap_palloc(r->pool, sizeof(psldap_session_rec));
 
     sprintf(sessionId, "SESSIONID:%0lx%0lx%0lx%0lx%0lx%0lx%0lx%0lx:%s",
 	    random(),random(),random(),random(),
 	    random(),random(),random(),random(),
 	    r->connection->remote_ip );
+    ps_rerror(r, APLOG_DEBUG, "Created session <id = %s>", sessionId);
     
     result->sessionId = ap_pstrdup(r->pool, sessionId);
     result->srcIp = ap_pstrdup(r->pool, r->connection->remote_ip);
     result->srcPort = ap_pstrdup(r->pool, "");
     result->last_request_time = r->request_time;
     result->dn = ap_pstrdup(r->pool, dn);
-    result->uid = ap_pstrdup(r->pool, uid);
+    result->uid = ap_pstrdup(r->pool, (NULL != uid) ? uid : "");
     result->passwd = ap_pstrdup(r->pool, passwd);
-    result->groups = ap_pstrdup(r->pool, groups);
+    result->groups = ap_pstrdup(r->pool, (NULL != groups) ? groups : "");
     
     return result;
 }
@@ -1758,7 +1807,8 @@ static psldap_session_rec* read_psldap_session(request_rec *r, LDAP *ldap,
 {
     int err_code;
     LDAPMessage *ld_result = NULL;
-    
+    char *ldap_attrs[3] = {LDAP_ALL_USER_ATTRIBUTES, LDAP_ALL_OPERATIONAL_ATTRIBUTES, NULL};
+
     sess->srcIp = NULL;
     sess->last_request_time = 0;
     sess->groups = NULL;
@@ -1767,8 +1817,8 @@ static psldap_session_rec* read_psldap_session(request_rec *r, LDAP *ldap,
 
     if(LDAP_SUCCESS ==
        (err_code = ldap_search_s(ldap, conf->psldap_basedn, LDAP_SCOPE_BASE,
-			 ap_pstrcat(r->pool, "sessionID=", sess->sessionId, NULL),
-			 NULL, 0, &ld_result))
+		      ap_pstrcat(r->pool, "sessionID=", sess->sessionId, NULL),
+		      ldap_attrs, 0, &ld_result))
        )
     {
         register LDAPMessage *ldEntry = NULL;
@@ -1796,7 +1846,7 @@ static psldap_session_rec* read_psldap_session(request_rec *r, LDAP *ldap,
 		    sess->srcIp = lastValue;
 		} else if (0 == strcmp(SECURE_ACCESS_T, tmp)) {
 		    struct tm tm;
-		    strptime(lastValue,"%y%m%d%H%M",&tm);
+		    strptime(lastValue, ACCESS_T_FORMAT, &tm);
 		    sess->last_request_time = mktime(&tm);
 		} else if (0 == strcmp(SECURE_AUTH_NAMES, tmp)) {
 		    sess->groups = lastValue;
@@ -1823,13 +1873,8 @@ static int update_psldap_session(request_rec *r, LDAP *ldap,
 				 psldap_config_rec *sec,
 				 psldap_session_rec* sess)
 {
-    struct tm curr_req_time;
-    char lastAccessTime[16];
     psldap_status ps;
     table *t = ap_make_table(r->pool, 8);
-
-    gmtime_r(&sess->last_request_time, &curr_req_time);
-    strftime(lastAccessTime, sizeof(lastAccessTime), "%y%m%d%H%M", &curr_req_time);
 
     cleanup_expired_sessions(r, ldap, sec, sess->dn);
 
@@ -1837,7 +1882,16 @@ static int update_psldap_session(request_rec *r, LDAP *ldap,
 				     ",", sec->psldap_basedn, NULL));
     ap_table_add(t, SECURE_SESSION_ID, sess->sessionId);
     ap_table_add(t, SECURE_CLIENT_IP, sess->srcIp);
-    ap_table_add(t, SECURE_ACCESS_T, lastAccessTime);
+    /*Use the operational attr modifyTimestamp... 
+    {
+        struct tm curr_req_time;
+        char lastAccessTime[16];
+	gmtime_r(&sess->last_request_time, &curr_req_time);
+	strftime(lastAccessTime, sizeof(lastAccessTime), ACCESS_T_FORMAT,
+		 &curr_req_time);
+	ap_table_add(t, SECURE_ACCESS_T, lastAccessTime);
+    }
+    */
     ap_table_add(t, SECURE_AUTH_NAMES, sess->groups);
     ap_table_add(t, "user", sess->dn);
     ap_table_add(t, "credential", sess->passwd);
@@ -1855,13 +1909,8 @@ static int persist_psldap_session(request_rec *r, LDAP *ldap,
 				  psldap_config_rec *sec,
 				  psldap_session_rec* sess)
 {
-    struct tm curr_req_time;
-    char lastAccessTime[16];
     psldap_status ps;
     table *t = ap_make_table(r->pool, 8);
-
-    gmtime_r(&sess->last_request_time, &curr_req_time);
-    strftime(lastAccessTime, sizeof(lastAccessTime), "%y%m%d%H%M", &curr_req_time);
 
     cleanup_expired_sessions(r, ldap, sec, sess->dn);
 
@@ -1869,7 +1918,15 @@ static int persist_psldap_session(request_rec *r, LDAP *ldap,
 				     ",", sec->psldap_basedn, NULL));
     ap_table_add(t, SECURE_SESSION_ID, sess->sessionId);
     ap_table_add(t, SECURE_CLIENT_IP, sess->srcIp);
-    ap_table_add(t, SECURE_ACCESS_T, lastAccessTime);
+    /*Use the operational attr modifyTimestamp... 
+    {
+        struct tm curr_req_time;
+        char lastAccessTime[16];
+	gmtime_r(&sess->last_request_time, &curr_req_time);
+	strftime(lastAccessTime, sizeof(lastAccessTime), "%y%m%d%H%M", &curr_req_time);
+	ap_table_add(t, SECURE_ACCESS_T, lastAccessTime);
+    }
+    */
     ap_table_add(t, SECURE_AUTH_NAMES, sess->groups);
     ap_table_add(t, "user", sess->dn);
     ap_table_add(t, "credential", sess->passwd);
@@ -2160,7 +2217,7 @@ static LDAPMessage* get_ldrecords(
 {
     LDAPMessage *result = NULL;
     char *ldap_query = construct_ldap_query(r, conf, "objectclass", "*", user);
-    const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
+    const char *ldap_attrs[3] = {LDAP_ALL_USER_ATTRIBUTES, LDAP_ALL_OPERATIONAL_ATTRIBUTES, NULL};
     int  searchscope, err_code;
 
     searchscope = (INT_UNSET != scopeOverride) ? scopeOverride : 
@@ -2955,17 +3012,23 @@ static const char* def_cookie_session_value(request_rec *r, psldap_config_rec *s
     psldap_session_rec* result;
     LDAP *ldap;
 
-    ps_rerror(r, APLOG_INFO, "Creating session cookie for %s", userValue);
+    ps_rerror(r, APLOG_DEBUG, "Creating session cookie for %s", userValue);
     result = create_psldap_session(r, sec, "", userValue, passValue,
 				   get_ldap_grp(r, userValue, passValue, sec) );
     ldap = get_admin_ldap_session(r, sec);
+    ps_rerror(r, APLOG_DEBUG, "Admin session acquired");
     if (LDAP_SUCCESS != persist_psldap_session(r, ldap, sec, result)) {
+        ps_rerror(r, APLOG_DEBUG, "Session creation failed - attempting update");
         update_psldap_session(r, ldap, sec, result);
+        ps_rerror(r, APLOG_DEBUG, "Session update complete");
+    } else {
+        ps_rerror(r, APLOG_DEBUG, "Session creation completed");
     }
 
     ldap_unbind_s(ldap);
     
-    return result->sessionId;
+    return ap_pstrcat(r->pool, cookie_session_param, "=", result->sessionId,
+		      NULL);
 }
 
 /** Set the auth cookie into the err_headers_out struct on the passed
@@ -2986,6 +3049,7 @@ static void set_psldap_auth_cookie(request_rec *r, psldap_config_rec *sec,
     char *cookie_string;
     const char *cookie_value;
     int secure = sec->psldap_secure_auth_cookie;
+    int xss_prevention = 0;
     const char *cookiedomain = sec->psldap_cookiedomain;
 
     def_cookie_value = (sec->psldap_use_session) ? def_cookie_session_value :
@@ -2994,6 +3058,7 @@ static void set_psldap_auth_cookie(request_rec *r, psldap_config_rec *sec,
     cookie_value = def_cookie_value(r, sec, userValue, passValue);
     ps_rerror( r, APLOG_DEBUG, "Cookie value: %s", cookie_value);
     cookie_string = ap_pstrcat(r->pool, cookie_value, "; path=/",
+			       (xss_prevention) ? "; HttpOnly" : "",
 			       (secure) ? "; secure" : "",
 			       (cookiedomain) ? "; domain=" : "",
 			       (cookiedomain) ? cookiedomain : "",
@@ -3103,7 +3168,7 @@ static int cookie_session_cb(void *data, const char *key, const char *value)
 		    char lastAccessTime[16];
 		    gmtime_r(&sess.last_request_time, &curr_req_time);
 		    strftime(lastAccessTime, sizeof(lastAccessTime),
-			     "%y%m%d%H%M", &curr_req_time);
+			     ACCESS_T_FORMAT, &curr_req_time);
 		    ap_table_set(r->notes, SECURE_ACCESS_T, lastAccessTime);
 		}
 		ap_table_set(r->notes, SECURE_AUTH_NAMES, sess.groups);
@@ -3156,18 +3221,21 @@ static char * get_ldap_grp(request_rec *r, const char *user,
     LDAP *ldap = NULL;
     char *result = NULL;
     
-    if (conf->psldap_cache_auth) {
 #ifdef USE_PSLDAP_CACHING
+    if (conf->psldap_cache_auth) {
         const psldap_cache_item *record = NULL:
         record = psldap_cache_item_find(r, conf->psldap_hosts, user, NULL,
 					pass, CACHE_KEY);
         /* Lookup groups in cache for this user */;
         if(NULL != record) result = ap_pstrdup(r->pool, record->groups);
-#endif
     }
+#endif
+#if 0
+    /* This is insecure - cookies could be created or changed client side */
     if (conf->psldap_use_session) {
         get_cookie_fieldvalue(r, conf, SECURE_AUTH_NAMES, &result);
     }
+#endif
     if (NULL == result) {
         if (conf->psldap_use_ldap_groups)
         {
@@ -3185,7 +3253,8 @@ static char * get_ldap_grp(request_rec *r, const char *user,
         }
     }
 
-    ps_rerror(r, APLOG_DEBUG, "LDAP group for user %s is %s", user, result);
+    ps_rerror(r, APLOG_DEBUG, "LDAP group for user %s is %s", user,
+	      (NULL == result) ? "<empty>" : result );
     return result;
 }
 
@@ -4164,13 +4233,13 @@ static void gen_dsml_dom_sr(request_rec *r, psldap_config_rec *conf,
 			    const char* mimeType, int binaryAsHref)
 {
     LDAPMessage *ld_result = NULL;
-    static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
+    static const char *ldap_attrs[3] = {LDAP_ALL_USER_ATTRIBUTES, LDAP_ALL_OPERATIONAL_ATTRIBUTES, NULL};
 
     ps_rerror( r, APLOG_DEBUG,
 	       "Executing ldap_search with base / scope / pattern: "
 	       "%s / %d / %s ...",
 	       ldap_base, conf->psldap_searchscope, ldap_query);
-    ldap_attrs[0] = attr;
+    if (NULL != attr) { ldap_attrs[0] = attr; ldap_attrs[1] = NULL; }
     if (LDAP_SCOPE_DEFAULT == scope)
     {
 	scope = conf->psldap_searchscope;
@@ -4418,7 +4487,7 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
 					const char* mimeType, int binaryAsHref)
 {
     LDAPMessage *ld_result = NULL;
-    static const char *ldap_attrs[2] = {LDAP_ALL_USER_ATTRIBUTES, NULL};
+    static const char *ldap_attrs[3] = {LDAP_ALL_USER_ATTRIBUTES, LDAP_ALL_OPERATIONAL_ATTRIBUTES, NULL};
 
 #ifdef USE_LIBXML2_LIBXSL
     static const char *htmlResponse = "text/html";
@@ -4428,7 +4497,7 @@ static void write_dsml_sr_to_connection(request_rec *r, psldap_config_rec *conf,
 	       "Executing ldap_search with base / scope / pattern: "
 	       "%s / %d / %s ...",
 	       ldap_base, conf->psldap_searchscope, ldap_query);
-    ldap_attrs[0] = attr;
+    if (NULL != attr) { ldap_attrs[0] = attr; ldap_attrs[1] = NULL; }
     if (LDAP_SCOPE_DEFAULT == scope)
     {
 	scope = conf->psldap_searchscope;
@@ -4631,10 +4700,13 @@ static const char * get_dsml_action_type(const char * action) {
     } else if (0 == strcmp(SEARCH_ACTION, action)) {
         result = DSML_SEARCH_ACTION;
     } else if ((0 == strcmp(MODIFY_ACTION, action)) ||
+	       (0 == strcmp(ADDATTR_ACTION, action)) ||
 	       (0 == strcmp(DISABLE_ACTION, action)) ) {
         result = DSML_MODIFY_ACTION;
     } else if (0 == strcmp(CREATE_ACTION, action)) {
         result = DSML_CREATE_ACTION;
+    } else if (0 == strcmp(REGISTER_ACTION, action)) {
+        result = DSML_REGISTER_ACTION;
     } else if (0 == strcmp(PRESENT_ACTION, action)) {
         result = DSML_PRESENT_ACTION;
     } else if (0 == strcmp(DELETE_ACTION, action)) {
@@ -4657,7 +4729,8 @@ static void write_dsml_request_fragment(psldap_status *ps,
     ps_rerror( ps->rr, APLOG_DEBUG, "Writing request fragment to stream");
     ap_rprintf(ps->rr, "%s\t<%s%s%s%s>\n", lPrefix, dsmlReqType,
 	       (NULL != ps->mod_dn) ? " dn=\"": "",
-	       (NULL != ps->mod_dn) ? ps->mod_dn : "",
+	       (NULL != ps->mod_dn) ? escapeChar(ps->rr, ps->mod_dn,
+						 '&', "&amp;") : "",
 	       (NULL != ps->mod_dn) ? "\"" : "" );
     for (j = 0; NULL != ps->mods[j]; j++) {
         LDAPMod *mod = ps->mods[j];
@@ -4698,7 +4771,8 @@ static void write_dsml_request_fragment(psldap_status *ps,
 	    }
 	} else if (NULL != mod->mod_values) {
 	    for (i = 0; NULL != mod->mod_values[i]; i++) {
-	      ap_rprintf(r, "%s\t\t\t<value>%s</value>%s", lPrefix, mod->mod_values[i],
+	        ap_rprintf(r, "%s\t\t\t<value>%s</value>%s", lPrefix,
+			   escapeChar(r, mod->mod_values[i],'&', "&amp;"),
 			   (op_names[3] != op_name) ? "\n" : "" );
 	    }
 	}
@@ -4860,13 +4934,14 @@ static int add_record_in_ldap(void *data, const char *key, const char *val)
     if (NULL == key) {
         if (NULL != val) strcpy((char*)val, "addResponse");
         if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
-	    /*
+	  /*
             int i;
             for (i = 0; NULL != ps->mods[i]; i++) {
                 rprintf_LDAPMod_instance(ps->rr, ps->mods[i]);
                 ap_rprintf(ps->rr, " <br />\n");
             }
 	    */
+	    ps_rerror( r, APLOG_INFO, "Adding entry with dn %s ", ps->mod_dn);
             ps->mod_err = ldap_add_s(ps->ldap, ps->mod_dn, ps->mods);
         }
     }
@@ -4889,6 +4964,11 @@ static int add_record_in_ldap(void *data, const char *key, const char *val)
         set_processing_parameter(ps, r, key, val);
     }
     return TRUE;
+}
+
+static int register_record_in_ldap(void *data, const char *key, const char *val)
+{
+    return add_record_in_ldap(data, key, val);
 }
 
 static int delete_record_in_ldap(void *data, const char *key, const char *val)
@@ -4944,6 +5024,131 @@ static int compare_record_in_ldap(void *data, const char *key, const char *val)
     return FALSE;
 }
 
+/** get_children_dn provides a list of the immediate children of the passed dn
+ *  @param conf the requests current psldap_config_rec instance
+ *  @param r the current http request_rec instance
+ *  @param ldap a bound LDAP instance
+ *  @param dn the char * representation of the dn of the record whose
+ *            immediate children must be acquired
+ *  @return a pointer to the LDAPMessage containing the search response for the
+ *          children of the dn
+ **/
+static LDAPMessage * get_children_dn(psldap_config_rec *conf, request_rec *r,
+				     LDAP *ldap, const char *dn)
+{
+    int err_code;
+    LDAPMessage *ld_result = NULL;
+    char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
+    
+    ps_rerror(r, APLOG_DEBUG, "Getting immediate children for DN <%s>", dn); 
+
+    if(LDAP_SUCCESS !=
+       (err_code = ldap_search_s(ldap, dn, LDAP_SCOPE_ONELEVEL,
+                                 "objectClass=*", ldap_attrs, 0, &ld_result))
+       )
+    {
+        ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %d : %s",
+		   LDAP_SCOPE_ONELEVEL, ldap_err2string(err_code));
+    }
+    
+    return ld_result;
+}
+
+#if 0
+static int ps_ldap_delete_subtree_s(psldap_status *ps, const char *dn)
+{
+    int result = LDAP_SUCCESS;
+    LDAPMessage *children = get_children_dn(ps->conf, ps->rr, ps->ldap, dn);
+    register LDAPMessage *lde;
+
+    for(lde = ldap_first_entry(ps->ldap, children); (NULL != lde);
+	lde = ldap_next_entry(ps->ldap, lde)) {
+        char *cdn = ldap_get_dn(ps->ldap, lde);
+	result = ps_ldap_delete_subtree_s(ps, cdn);
+    }
+    ldap_msgfree(children);
+    result = ldap_delete_s(ps->ldap, dn);
+
+    return result;
+}
+#endif
+
+static int ps_ldap_copy_s(LDAP *l, const char * dn, const char *newrdn,
+			  const char *newSuperior)
+{
+    int result = ldap_rename_s(l, dn, newrdn, newSuperior, 0, NULL, NULL);
+    return result;
+}
+
+/** Renames an entire subtree in an LDAP directory given the dn of the highest
+ *  record in the tree and the target rdn and superior node. All records are
+ *  removed from the tree as they are moved except for duplicate records, which
+ *  remain in the tree even in the event of a successful outcome otherwise.
+ *  Failure is indicate by a response other than LDAP_SUCCESS or
+ *  LDAP_ALREADY_EXISTS. In the event of failure, all records are renamed back 
+ *  to the original node - failure of this compensating transaction will leave 
+ *  the records under their new location.
+ *
+ *  SADLY - LDAP_RENAME_S DOES NOT ALLOW A RENAME WITH LEAF NODES EVEN IF IT'S
+ *  FLAGGED AS A COPY!!!
+ *  TODO:  NEED TO WRITE A COPY FUNCTION TO DO THIS CLIENT SIDE
+ **/
+static int ps_ldap_rename_subtree_s(psldap_status *ps, const char *dn,
+				    const char *newrdn, const char *newSuperior,
+				    int compensating )
+{
+    int result = ps->mod_err;
+    request_rec *r = ps->rr;
+    LDAPMessage *children = get_children_dn(ps->conf, ps->rr, ps->ldap, dn);
+    int cct = (NULL == children) ? -1 : ldap_count_entries(ps->ldap, children);
+
+    ps_rerror( r, APLOG_INFO, "Moving dn <%s> with %d children to <%s>",
+	       dn, cct, newSuperior);
+    if (NULL == children) {
+        result = ldap_rename_s(ps->ldap, dn, newrdn, newSuperior, 1, NULL,
+			       NULL);
+    } else {
+        result = ps_ldap_copy_s(ps->ldap, dn, newrdn, newSuperior);
+	if ((LDAP_ALREADY_EXISTS == result) || (LDAP_SUCCESS == result)) {
+	    register LDAPMessage *lde = NULL;
+	    char *cSuperior = ap_pstrcat(r->pool, newrdn, newSuperior, NULL);
+
+	    for(lde = ldap_first_entry(ps->ldap, children);
+		((LDAP_ALREADY_EXISTS == result) || (LDAP_SUCCESS == result))
+		  && (NULL != lde);
+		lde = ldap_next_entry(ps->ldap, lde)) {
+	        char *cdn = ldap_get_dn(ps->ldap, lde);
+	        char *cnrdn = ap_pstrndup(r->pool, cdn, strcspn(cdn, ",") );
+		result = ps_ldap_rename_subtree_s(ps, cdn, cnrdn, cSuperior,
+						  compensating);
+		if ((LDAP_ALREADY_EXISTS == result) && compensating)
+		    ldap_delete_s(ps->ldap, cdn);
+	    }
+	    ldap_msgfree(children);
+
+	    if (compensating) {
+	        ldap_delete_s(ps->ldap, dn);
+	        result = LDAP_SUCCESS;
+	    } else if((LDAP_SUCCESS != result) &&
+		      (LDAP_ALREADY_EXISTS != result) ) {
+	        children = get_children_dn(ps->conf, ps->rr, ps->ldap,
+					   cSuperior);
+		for(lde = ldap_first_entry(ps->ldap, children); (NULL != lde);
+		    lde = ldap_next_entry(ps->ldap, lde)) {
+		    char *cdn = ldap_get_dn(ps->ldap, lde);
+		    char *cnrdn = ap_pstrndup(r->pool, cdn, strcspn(cdn, ",") );
+		    /* Should we check and address errors on cleanup? */
+		    ps_ldap_rename_subtree_s(ps, cdn, cnrdn, dn, 1);
+		}
+		ldap_msgfree(children);
+		/* Should we check and address errors on cleanup? */
+		ldap_delete_s(ps->ldap, cSuperior);
+	    }
+	}
+    }
+    return result;
+}
+
 static int moddn_record_in_ldap(void *data, const char *key, const char *val)
 {
     psldap_status *ps = (psldap_status*)data;
@@ -4956,6 +5161,12 @@ static int moddn_record_in_ldap(void *data, const char *key, const char *val)
 	    ps->mod_err = ldap_rename_s(ps->ldap, ps->mod_dn, ps->newrdn,
 					ps->newSuperior, deleteOldRdn,
 					NULL, NULL);
+	    if (LDAP_NOT_ALLOWED_ON_NONLEAF == ps->mod_err) {
+	        /* Recursive rename - duplicates tree leaving original ... */
+	        ps->mod_err = ps_ldap_rename_subtree_s(ps, ps->mod_dn,
+						       ps->newrdn,
+						       ps->newSuperior, 0);
+	    }
         }
     }
     else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
@@ -4992,6 +5203,47 @@ static int login_and_reply(void *data, const char *key, const char *val)
     return HTTP_MOVED_TEMPORARILY;
 }
 
+static int add_attrs_to_record_in_ldap(void *data, const char *key,
+				       const char *val)
+{
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    LDAP *ldap = ps->ldap;
+    psldap_config_rec *conf = ps->conf;
+    char *user;
+
+    if (NULL == key) {
+        if (NULL != val) strncpy((char*)val, "modifyResponse", 15);
+        if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
+	    ps->mod_err = ldap_modify_s(ps->ldap, ps->mod_dn, ps->mods);
+        }
+    } else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN)) {
+        get_provided_username(r, &user);
+	if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN)) {
+	    /* The dn cannot be modified */
+	    ps->mod_dn = ap_pstrdup(r->pool, val);
+	    ps->mod_record = get_ldrecords(r, conf, ldap, ps->mod_dn,
+					   user, LDAP_SCOPE_BASE);
+	    ps->mod_err = get_lderrno(ldap) ;
+	} else {
+	    const char *value = duplicate_value_data(r, val);
+	    const char *oldValue = NULL;
+	    array_header *new_v = parse_arg_string(r, &value, ';');
+	    array_header *old_v = parse_arg_string(r, &oldValue, ';');
+	    LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
+						old_v, new_v);
+	    ps_rerror( r, APLOG_DEBUG, "Adding attributes for key %s",
+		       key);
+	    if (NULL != tmp_mod) {
+	        psldap_status_append_mod(ps, r, tmp_mod);
+	    }
+	}
+    } else {
+        set_processing_parameter(ps, r, key, val);
+    }
+    return TRUE;
+}
+
 static int update_record_in_ldap(void *data, const char *key,
                                  const char *val)
 {
@@ -5014,41 +5266,33 @@ static int update_record_in_ldap(void *data, const char *key,
 	    */
 	    ps->mod_err = ldap_modify_s(ps->ldap, ps->mod_dn, ps->mods);
         }
-    }
-    else
-    {
-        if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN))
-        {
-            get_provided_username(r, &user);
-            if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN))
-            {
-                /* The dn cannot be modified */
-                ps->mod_dn = ap_pstrdup(r->pool, val);
-                ps->mod_record = get_ldrecords(r, conf, ldap, ps->mod_dn,
-                                               user, LDAP_SCOPE_BASE);
-                ps->mod_err = get_lderrno(ldap) ;
-                oldValue = ps->mod_dn;
-            } else {
-                oldValue = get_ldvalues_from_record(r, conf, ldap,
-                                                    ps->mod_record,
-                                                    key + LDAP_KEY_PREFIX_LEN,
-                                                    ";");
-            }
-
-            ps_rerror( r, APLOG_DEBUG, "Finding transactions for key %s", key);
-            {
-                const char *value = duplicate_value_data(r, val);
-                array_header *new_v = parse_arg_string(r, &value, ';');
-                array_header *old_v = parse_arg_string(r, &oldValue, ';');
-                LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
-                                                    old_v, new_v);
-                if (NULL != tmp_mod) {
-                    psldap_status_append_mod(ps, r, tmp_mod);
-                }
-            }
-        } else {
-	    set_processing_parameter(ps, r, key, val);
+    } else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN)) {
+        get_provided_username(r, &user);
+	if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN)) {
+	    /* The dn cannot be modified */
+	    ps->mod_dn = ap_pstrdup(r->pool, val);
+	    ps->mod_record = get_ldrecords(r, conf, ldap, ps->mod_dn,
+					   user, LDAP_SCOPE_BASE);
+	    ps->mod_err = get_lderrno(ldap) ;
+	    oldValue = ps->mod_dn;
+	} else {
+	    oldValue = get_ldvalues_from_record(r, conf, ldap, ps->mod_record,
+						key + LDAP_KEY_PREFIX_LEN, ";");
 	}
+
+	ps_rerror( r, APLOG_DEBUG, "Finding transactions for key %s", key);
+	{
+	    const char *value = duplicate_value_data(r, val);
+	    array_header *new_v = parse_arg_string(r, &value, ';');
+	    array_header *old_v = parse_arg_string(r, &oldValue, ';');
+	    LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
+						old_v, new_v);
+	    if (NULL != tmp_mod) {
+	        psldap_status_append_mod(ps, r, tmp_mod);
+	    }
+	}
+    } else {
+        set_processing_parameter(ps, r, key, val);
     }
     return TRUE;
 }
@@ -5110,9 +5354,17 @@ static int (*get_action_handler(request_rec *r, const char **action))(void*, con
     {
         return update_record_in_ldap;
     }
+    if (0 == strcmp(ADDATTR_ACTION, *action))
+    {
+        return add_attrs_to_record_in_ldap;
+    }
     if (0 == strcmp(CREATE_ACTION, *action))
     {
         return add_record_in_ldap;
+    }
+    if (0 == strcmp(REGISTER_ACTION, *action))
+    {
+        return register_record_in_ldap;
     }
     if (0 == strcmp(PRESENT_ACTION, *action))
     {
@@ -5142,9 +5394,11 @@ static int ldap_update_handler(request_rec *r)
     char *password = NULL;
     char *user = NULL;
     char *bindas = NULL;
+    const char *action = NULL;
     table *t_env = NULL;
     int err_code = LDAP_SERVER_DOWN, res = OK;
     LDAP *ldap = NULL;
+    int (*actionHandler)(void *data, const char *key, const char *val);
     psldap_config_rec *conf =
         (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
                                                    &psldap_module);
@@ -5157,8 +5411,10 @@ static int ldap_update_handler(request_rec *r)
 
     read_get(r, &t_env);
     read_post(r, &t_env);
+    actionHandler = get_action_handler(r, &action);
     
-    if (OK != (res = get_provided_credentials (r, conf, &password, &user)))
+    if ((OK != (res = get_provided_credentials (r, conf, &password, &user))) &&
+	(NULL != user) )
     {
         ps_rerror( r, APLOG_INFO,
 		   "User <%s> ldap update rejected - missing auth info",
@@ -5168,33 +5424,37 @@ static int ldap_update_handler(request_rec *r)
         ps_rerror( r, APLOG_ERR, "ldap_init failed on ldap update <%s>",
 		   conf->psldap_hosts);
         res = HTTP_INTERNAL_SERVER_ERROR;
-    } else if((NULL != (bindas =
-                        get_user_dn(r, &ldap, user, password, conf))) &&
+    } else if((register_record_in_ldap == actionHandler) &&
+	      (NULL == (bindas = get_registration_bindas(r, conf, &password)) )
+	      ) {
+        res = r->status;
+    } else if(((NULL != bindas) ||
+	       (NULL != (bindas =
+			 get_user_dn(r, &ldap, user, password, conf))) ) &&
               (LDAP_SUCCESS !=
                (err_code = ldap_bind_s(ldap, bindas, password,
                                        conf->psldap_bindmethod) ) )
-        ) {
+	      ) {
         ps_rerror( r, APLOG_NOTICE,
-		   "ldap_bind as user <%s> failed on ldap update: %s",
-		   (NULL != bindas) ? bindas : "N/A",
+		   "ldap_bind as user <%s%s> failed on ldap update: %s",
+		   (NULL != bindas) ? "" : "mail=",
+		   (NULL != bindas) ? bindas : user,
 		   ldap_err2string(err_code));
         res = HTTP_UNAUTHORIZED;
     } else {
-        const char *action = NULL;
-	int sendXml = FALSE;
-        int (*actionHandler)(void *data, const char *key,
-                             const char *val);
+        int sendXml = FALSE;
 	psldap_status ps;
 
 	/* Add ldap connection pointer to the request and process
 	   the table entries corresponding to the ldap attributes
 	*/
 	psldap_status_init(&ps, r, ldap, conf);
-
-        actionHandler = get_action_handler(r, &action);
-
 	sendXml = (login_and_reply != actionHandler);
 
+        if (NULL == bindas) {
+	    ps_rerror( r, APLOG_NOTICE, "Anonymous ldap update in progress: %s",
+		       (NULL != action) ? action : "N/A");
+	}
 	if (NULL != t_env) {
 	    /*  Collect all supporting values from the request into the
 		psldap_status struct */
@@ -5266,9 +5526,10 @@ static int ldap_update_handler(request_rec *r)
 		ap_rvputs(r, "\t</batchRequest>\n", NULL);
 
 		/* Write the response node to the response stream */
-		ap_rvputs(r, "\t<batchResponse id='",
-			  (NULL != ps.mod_dn) ? ps.mod_dn : "NULL_DN",
-			  "'>\n",
+		ap_rvputs(r, "\t<batchResponse id=\"",
+			  (NULL == ps.mod_dn) ? "NULL_DN" :
+			  escapeChar(r, ps.mod_dn, '&', "&amp;"),
+			  "\">\n",
 			  NULL);
 		
 		ps_rerror( r, APLOG_DEBUG, "Action handler response gen...");

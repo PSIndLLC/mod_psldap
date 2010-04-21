@@ -2,20 +2,64 @@ About mod_psldap
 ===================
 mod_psldap was created to provide a very lightweight means of managing directory information by leveraging client processing power to render the edit and reporting pages on any web browser without requiring an ActiveX or other binary executable download. It reduces the incremental network traffic for subsequent edits by 95% or more while still providing a very rich AJAX / Web 2.0 enabled user interface.
 
-Revision X (Future)
+Revision X (Upcoming release)
 ===================
+SVG based rendering of organizational hierarchies
+
 Enhance mobile / handheld device support to tailor presentation to form factor
 
 Importing / exporting from / to google contact export format
 
-SVG based rendering of organizational structures
+Import from vCard files uploaded to server
 
-Enablement of contact database integration to blackberry devices
+Enable integration to blackberry contact database
+
+Finish integration of browser support for HttpOnly on secure cookies
 
 
-Revision 0.93 (Upcoming release)
+Revision 0.93 
 ===================
-N/A
+Fixed DocumentManager JS API to accomodate browser technology changes - 
+mod_psldap now supports XSLT on the client without a round trip to the server 
+to reaquire the XML and reset the default XSL
+
+Addition of search status update in the tree div and processing status to
+the record editing div in alt_index.html
+
+Implemented window resizing to fit content in editable forms popups
+
+Enabled anonymous access through the module when a user is not provided
+
+Implemented a Register action to force rebinding to ldap with credentials 
+provided through the PsLDAPRegBindDN and PsLDAPRegBindPassword parameters 
+configured in the Apache configuration for the module
+
+Modified the DSML_editform.xsl to transform for registration specific view
+provided the dn attribute on the searchResultEntry node equals 'dc=registered'
+
+Added operational attributes into the attribute set returned when an LDAP 
+search is executed, allowing visibility to entryUUID, modifyTimestamp, createTimestamp, creatorsName, among other attributes
+
+Eliminated potential security hole when using cookie based sessions
+
+Modified LDAP session persistance to pull timestamp from the operational 
+attribute modifyTimestamp to dtermine last access time for Apache session
+
+Secured session cookies with HttpOnly option to reduce XSS attack risk - pending
+identification of browser support
+
+Introduced validation framework in edit tools - invokes any function set in the
+psvalidate attribute of an input element in the context of the input element on
+form validation passing the argument list identified in a comma separate string
+following the function name in the attribute e.g.
+psvalidate='psldap_validateMinLength,7'
+
+Introduced 4 standard validation methods: psldap_validateMinLength, psldap_validateMaxLength, psldap_validateEMail, psldap_validatePasswordStrength,
+
+Fixed the configure script - the generated Makefile now provides reliable 
+builds, installs, and bundling of the module
+
+Enable drag and drop movement across organizational units and managers in the explorer tree via mouse actions against the image handles on each tree node
 
 
 Revision 0.92

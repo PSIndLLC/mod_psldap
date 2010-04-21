@@ -20,6 +20,7 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
+
 var isNav=0, isMoz=0, isIE=0, isOpera=0;
 
 if (parseInt(navigator.appVersion) >= 4) {
@@ -35,16 +36,442 @@ if (parseInt(navigator.appVersion) >= 4) {
 }
 
 // Update the URI with the bound URIs in the httpd.conf
-//var psldapRootUri = document.URL.substring(0, document.URL.lastIndexOf("/"));
-var psldapSitePrefix = document.URL.substring(8);
-psldapSitePrefix = "http://" + psldapSitePrefix.substring(0,psldapSitePrefix.indexOf("/"));
+var psldapBaseUri = "";
 var psldapRootUri = "/psldap";
 var ldapupdateUri = "/ldapupdate";
+
+function DSML_psldap_init() {
+    try {
+	psldapBaseUri = ps_siteConfig.secureBase;
+	psldapRootUri = ps_siteConfig.homeURI;
+	ldapupdateUri = ps_siteConfig.updateURI;
+	recordNbrElmt = document.getElementById("recordNumber");
+    } catch(e1) {
+	window.status = "Failed initializing with psldap config...";
+    }
+}
+
+/* A race condition may exist in loading the JS files - force reinitialization
+   after the document is loaded */
+try {
+    DSML_psldap_init();
+} catch(e1) {
+    if (window.addEventListener) {
+	window.addEventListener("load", DSML_psldap_init, true);
+    } else if (window.attachEvent) {
+	window.attachEvent("onload", DSML_psldap_init, true);
+    } else {
+	window.onload = DSML_psldap_init;
+    }
+}
+
+function psdnd_deferred_init() {
+    attachDnDEventsForElementTypeWithDNAttr(document, "img");
+}
+
+if (window.addEventListener) {
+    window.addEventListener("load", psdnd_deferred_init, true);
+} else if (window.attachEvent) {
+    window.attachEvent("onload", psdnd_deferred_init, true);
+} else {
+    window.onload = psdnd_deferred_init;
+}
 
 var currentRecord = 0;
 var formElmts = null;
 var recordNbrElmt = null;
 
+var ps_dndState = { srcDn: "", targetDn: "", srcOc: "", targetOc: "", srcCtxt: "", targetCtxt: "", getSrcName: new Function("return this.srcDn.replace(/([^=]*)=([^,]*),.*/,'$2')"), getTargetName: new Function("return this.targetDn.replace(/([^=]*)=([^,]*),.*/,'$2')"), dndForm: null };
+
+var ps_dndActionBindings = [
+       { srcOc: "groupOfUniqueNames", targetOc: "OpenLDAPperson", action: ps_dndChangeOwner, invert: true },
+       { srcOc: "groupOfUniqueNames", targetOc: "inetOrgPerson", action: ps_dndChangeOwner, invert: true },
+       { srcOc: "groupOfUniqueNames", targetOc: "person", action: ps_dndChangeOwner, invert: true },
+       { srcOc: "inetOrgPerson",      targetOc: "inetOrgPerson", action: ps_dndChangeManager, invert: false },
+       { srcOc: "OpenLDAPou",         targetOc: "groupOfUniqueNames", action: null, invert: false },
+       { srcOc: "organizationalUnit", targetOc: "groupOfUniqueNames", action: null, invert: false },
+       { srcOc: "organization",       targetOc: "", action: null, invert: false },
+       { srcOc: "OpenLDAPorg",        targetOc: "", action: null, invert: false },
+       { srcOc: "",                   targetOc: "organization", action: ps_dndModifyDN, invert: false },
+       { srcOc: "",                   targetOc: "OpenLDAPorg", action: ps_dndModifyDN, invert: false },
+       { srcOc: "",                   targetOc: "OpenLDAPou", action: ps_dndModifyDN, invert: false },
+       { srcOc: "",                   targetOc: "organizationalUnit", action: ps_dndModifyDN, invert: false },
+       { srcOc: "",                   targetOc: "groupOfUniqueNames", action: ps_dndAddMember, invert: true }
+			    ];
+
+
+function ps_findOrCreateNextLevel(el)
+{
+    var result = null;
+
+    el = el.lastChild;
+    if (0 != el.lastChild.tagName.indexOf("TABLE")) {
+	var objTableElmt = document.createElement("table");
+	var objTableBody = document.createElement("tbody");
+
+	objTableBody.style.width = "100%";
+	objTableElmt.style.width = "100%";
+	objTableElmt.appendChild(objTableBody);
+	el.appendChild(document.createElement("BR"));
+	el.appendChild(objTableElmt);
+	addNavigationToTree(objTableElmt);
+	
+	result = objTableBody;
+    } else {
+	result = el.lastChild.lastChild;
+    }
+
+    return result;
+}
+
+function ps_getLDAPRecordRow(dn)
+{
+    var result = null;
+    var elmts = document.getElementsByName("LDAPRecord");
+    var i;
+    var dnStr = dn.replace(/\s*,[ ]*\s*/g, ", ");
+    for(i = 0; i < elmts.length; i++) {
+	if(0 == elmts[i].getAttribute('id').replace(/\s*,[ ]*\s*/g, ", ").localeCompare(dnStr)) {
+	    result = elmts[i];
+	    break;
+	}
+    }
+    return result;
+}
+
+function ps_moveRowToNode(dn, newMgrDn)
+{
+    var srcElmt = ps_getLDAPRecordRow(dn);
+    var targetElmt = ps_getLDAPRecordRow(newMgrDn);
+
+    if (srcElmt && targetElmt) {
+	var childTbl = ps_findOrCreateNextLevel(targetElmt);
+	srcElmt.parentNode.removeChild(srcElmt);
+	childTbl.appendChild(srcElmt);
+    } else {
+	window.status = srcElmt +":" + targetElmt;
+    }
+    return srcElmt;
+}
+
+function ps_dndChangeManager(invert, mode) {
+    this.dndForm.FormAction.value = "Modify";
+
+    if (arguments.length > 1) {
+	var src = (invert) ? this.targetDn : this.srcDn;
+	var target = (invert) ? this.srcDn : this.targetDn;
+	var srcNm = (invert) ? this.getTargetName() : this.getSrcName();
+	var targetNm = (invert) ? this.getSrcName() : this.getTargetName();
+	if (mode == "message") {
+	    return window.confirm("Change manager of " + srcNm + " to " +
+				  targetNm );
+	}
+	else if ((mode == "fixTree" ) && (this.srcCtxt  == "mgmtTree") &&
+		 (this.targetCtxt  == "mgmtTree") ) {
+	    window.status = "Fixing management tree";
+	    if (null != ps_moveRowToNode(src, target)) {
+		if (ps_dndState.xslmgr) { ps_dndState.xslmgr.setXmXML(); }
+	    } else {
+		location.reload(true);
+	    }
+	} else {
+	    alert(this.srcCtxt + ":" + this.targetCtxt);
+	}
+    } else if (invert) {
+	this.dndForm.dn.value = this.targetDn;
+	this.dndForm['manager-1'].value = this.srcDn;
+    } else {
+	this.dndForm.dn.value = this.srcDn;
+	this.dndForm['manager-1'].value = this.targetDn;
+    }
+}
+
+function ps_dndAddMember(invert, mode) {
+    this.dndForm.FormAction.value = "AddAttributes";
+
+    if (arguments.length > 1) {
+	var src = (invert) ? this.targetDn : this.srcDn;
+	var target = (invert) ? this.srcDn : this.targetDn;
+	var srcNm = (invert) ? this.getTargetName() : this.getSrcName();
+	var targetNm = (invert) ? this.getSrcName() : this.getTargetName();
+	if (mode == "message") {
+	    return window.confirm("Add " + srcNm + " as member of " +
+				  targetNm + "?" );
+	}
+    } else if (invert) {
+	this.dndForm.dn.value = this.targetDn;
+	this.dndForm['uniqueMember-1'].value = this.srcDn;
+    } else {
+	this.dndForm.dn.value = this.srcDn;
+	this.dndForm['uniqueMember-1'].value = this.targetDn;
+    }
+}
+
+function ps_dndChangeOwner(invert, mode) {
+    this.dndForm.FormAction.value = "Modify";
+
+    if (arguments.length > 1) {
+	var src = (invert) ? this.targetDn : this.srcDn;
+	var target = (invert) ? this.srcDn : this.targetDn;
+	var srcNm = (invert) ? this.getTargetName() : this.getSrcName();
+	var targetNm = (invert) ? this.getSrcName() : this.getTargetName();
+	if (mode == "message") {
+	    return window.confirm("Change owner of " + srcNm + " to " +
+				  targetNm + "?" );
+	}
+    } else if (invert) {
+	this.dndForm.dn.value = this.srcDn;
+	this.dndForm['owner-1'].value = this.targetDn;
+    } else {
+	this.dndForm.dn.value = this.targetDn;
+	this.dndForm['owner-1'].value = this.srcDn;
+    }
+}
+
+function ps_dndModifyDN(invert, mode) {
+    this.dndForm.FormAction.value = "modDNRequest";
+
+    if (arguments.length > 1) {
+	var src = (invert) ? this.targetDn : this.srcDn;
+	var target = (invert) ? this.srcDn : this.targetDn;
+	var srcNm = (invert) ? this.getTargetName() : this.getSrcName();
+	var targetNm = (invert) ? this.getSrcName() : this.getTargetName();
+	if (mode == "message") {
+	    return window.confirm("Move " + srcNm + " to " + targetNm + "?");
+	}
+	else if ((mode == "fixTree" )  && (this.srcCtxt  == "orgTree") &&
+		 (this.targetCtxt  == "orgTree") ) {
+	    window.status = "Fixing organizational tree: " + src + ":" + target;
+	    var el = ps_moveRowToNode(src, target);
+	    if (null != el) {
+		el.setAttribute('id',
+				(src.replace(/([^=]*)=([^,]*),.*/,'$1=$2') +
+				 "," + target).replace(/\s*,[ ]*\s*/g, ", ") );
+		el.setAttribute('recordid', el.getAttribute('id') );
+		el.lastChild.firstChild.setAttribute('dn',
+						     el.getAttribute('id'));
+		el.lastChild.firstChild.setAttribute('alt',
+						     el.getAttribute('id'));
+		el.lastChild.lastChild.setAttribute('href',
+		    "javascript: void getEditableRecord('" +
+		    el.getAttribute('id') + "','editFrame');");
+	    } else if (ps_dndState.xslmgr) {
+		ps_dndState.xslmgr.setXmXML();
+	    } else {
+		location.reload(true);
+	    }
+	}
+    } else if (invert) {
+	this.dndForm.dn.value = this.targetDn;
+	this.dndForm.newrdn.value =
+	    this.targetDn.replace(/([^=]*)=([^,]*),.*/,'$1=$2');
+	this.dndForm.newSuperior.value = this.srcDn;
+    } else {
+	this.dndForm.dn.value = this.srcDn;
+	this.dndForm.newrdn.value =
+	    this.srcDn.replace(/([^=]*)=([^,]*),.*/,'$1=$2');
+	this.dndForm.newSuperior.value = this.targetDn;
+    }
+}
+
+function ps_dndSetSource(ev) {
+    var myEvent = (arguments.length < 1) ? window.event : ev;
+    var elmt = (myEvent.target) ? myEvent.target : myEvent.srcElement;
+    ps_dndState.srcDn = elmt.getAttribute('dn');
+    ps_dndState.srcOc = elmt.getAttribute('oc');
+    ps_dndState.srcCtxt = elmt.getAttribute('dndCtxt');
+    ps_dndState.dndForm = document.getElementById("dndChangeFrame").contentWindow.document.getElementById("dndChangeForm");
+    if(null == ps_dndState.dndForm) document.getElementById("dndChangeDiv").style.display="block";
+    /*
+    try {
+	with (window.clipboardData) {
+	    setData("Text", ps_dndState.srcDn);
+	}
+    } catch (e1) {
+	window.status = "window clipboardData is not supported" + e1;
+    */
+    try {
+	with (myEvent.dataTransfer) {
+	    effectAllowed = "copyLink";
+	    dropEffect = "copy";
+	    clearData();
+	    if (setData("Text", ps_dndState.srcDn) ||
+		setData("text/plain", ps_dndState.srcDn) )
+		window.status = "Successfully set data to " + ps_dndState.srcDn; 
+	}
+    } catch(e2) {
+	window.status = "event dataTransfer is not supported" + e2;
+    }
+/*    } */
+    window.status = "Drag source is " + ps_dndState.srcCtxt + ":" +
+	ps_dndState.srcDn;
+}
+
+function ps_dndSetTarget(ev) {
+    var myEvent = (arguments.length < 1) ? window.event : ev;
+    var elmt = (myEvent.target) ? myEvent.target : myEvent.srcElement;
+    while (! elmt.getAttribute) elmt = elmt.parentNode;
+    ps_dndState.targetDn = elmt.getAttribute('dn');
+    ps_dndState.targetOc = elmt.getAttribute('oc');
+    ps_dndState.targetCtxt = elmt.getAttribute('dndCtxt');
+
+    window.status="Drop target is " + ps_dndState.targetCtxt + ":" +
+	ps_dndState.targetDn;
+
+    /* Ensure further handlers do not fire */
+    if (myEvent.preventDefault) myEvent.preventDefault();
+    else myEvent.returnValue = false;
+
+    /* IE chokes on alerts and confirms in mid-event...*/
+    window.setTimeout(function() { ps_dndHandleDragDrop(ps_dndState); }, 0);
+}
+
+function ps_dndCancelEvent(ev) {
+    var myEvent = (arguments.length < 1) ? window.event : ev;
+    if (myEvent.preventDefault) myEvent.preventDefault();
+    else myEvent.returnValue = false;
+    window.status = "Cancelled event...";
+}
+
+function ps_dndDeleteEmptyFormInputs(dndForm)
+{
+    var i;
+    for (i = 0; i < dndForm.elements.length; i++) {
+	if(dndForm.elements[i].value == "") {
+	    dndForm.removeChild(dndForm.elements[i]);
+	    i--;
+	}
+    }
+}
+
+function ps_dndHandleDragDrop(ds)
+{
+    var i;
+    window.status = ds.srcDn + " dropped on " + ds.targetOc + " " + ds.targetDn;
+    for (i = 0; i < ps_dndActionBindings.length; i++) {
+	if ( ((ds.srcOc == ps_dndActionBindings[i].srcOc) ||
+	      (ps_dndActionBindings[i].srcOc.length == 0) )
+	     &&
+	     ((ds.targetOc == ps_dndActionBindings[i].targetOc) ||
+	      (ps_dndActionBindings[i].targetOc.length == 0) )
+	     ) {
+	    var action_args = [ ps_dndActionBindings[i].invert, "message" ];
+	    window.status = "Performing DnD action " +
+		ps_dndActionBindings[i].action.name;
+	    if ((null != ps_dndActionBindings[i].action) &&
+		(ps_dndActionBindings[i].action.apply(ds, action_args)) ) {
+		var action_args = [ ps_dndActionBindings[i].invert ];
+		ps_dndActionBindings[i].action.apply(ds, action_args);
+		ps_dndDeleteEmptyFormInputs(ds.dndForm);
+		/*
+		document.getElementById("dndChangeDiv").style.display = "block";
+		*/
+		ds.dndForm.submit();
+	    }
+	    break;
+	}
+    }
+    if ((i >= ps_dndActionBindings.length) ||
+	(null == ps_dndActionBindings[i].action) ) {
+	window.alert("Drag and drop not supported for this source and target");
+    }
+}
+
+function ps_showResultsAndReinit()
+{
+    var myFrame = document.getElementById("dndChangeFrame");
+    if (myFrame) {
+	var respDocument = myFrame.contentWindow.document;
+	var myResult = respDocument.getElementsByTagName("resultCode");
+	if (myResult.length > 0) {
+	    if ("0" == myResult[0].getAttribute("code")) {
+		window.status = "Update was successful";
+		var ds = ps_dndState;
+		for (i = 0; i < ps_dndActionBindings.length; i++) {
+		    if ( ((ds.srcOc == ps_dndActionBindings[i].srcOc) ||
+			  (ps_dndActionBindings[i].srcOc.length == 0) )
+			 &&
+			 ((ds.targetOc == ps_dndActionBindings[i].targetOc) ||
+			  (ps_dndActionBindings[i].targetOc.length == 0) )
+			 ) {
+			if ((null != ps_dndActionBindings[i].action)) {
+			    var action_args = [ ps_dndActionBindings[i].invert,
+						"fixTree" ];
+			    window.status = "Performing DnD action " +
+				ps_dndActionBindings[i].action.name;
+			    ps_dndActionBindings[i].action.apply(ds,
+								 action_args);
+			}
+		    }
+		}
+	    } else {
+		var errMsg = respDocument.getElementsByTagName("errorMessage");
+		var msg = (errMsg[0].text) ? errMsg[0].text :
+		    errMsg[0].textContent;
+		top.alert("Update failed: " + msg );
+	    }
+	    myFrame.contentWindow.document.location.href =
+		psldapRootUri + "/dndForm.html";
+	}
+    }
+}
+
+function initDndProcessingForm()
+{
+    var f, e = document.createElement("div");
+    e.setAttribute("id", "dndChangeDiv");
+    e.style.display='none';
+    document.body.appendChild(e);
+    e.appendChild(f = document.createElement('iframe'));
+    f.setAttribute("id", "dndChangeFrame");
+    f.onload = ps_showResultsAndReinit;
+    f.src = psldapRootUri + "/dndForm.html";
+}
+
+function attachDnDEventsForElementTypeWithDNAttr( theDoc, elmtType, myXslMgr)
+{
+    var elmts = theDoc.getElementsByTagName(elmtType);
+    var i = elmts.length;
+    
+    if (i > 0) {
+	initDndProcessingForm(ps_dndState);
+    }
+
+    if (arguments.length > 2) {
+	ps_dndState.xslmgr = myXslMgr;
+    }
+
+    while( i-- > 0 ) { 
+	var src = elmts[i];
+	if (src.addEventListener) {
+	    src.addEventListener("dragstart", ps_dndSetSource, false);
+	    src.addEventListener("draggesture", ps_dndSetSource, false); // alternate to drag start
+	    /*
+	    src.addEventListener("drag", ps_dndCancelEvent, false);
+	    src.addEventListener("dragend", ps_dndCancelEvent, false);
+	    */
+	    
+	    src.addEventListener("dragenter", ps_dndCancelEvent, false);
+	    src.addEventListener("dragover", ps_dndCancelEvent, false);
+	    src.addEventListener("dragleave", ps_dndCancelEvent, false);
+	    src.addEventListener("dragexit", ps_dndCancelEvent, false);
+	    src.addEventListener("drop", ps_dndSetTarget, false);
+	    src.addEventListener("dragdrop", ps_dndSetTarget, false);
+	} else {
+	    src.attachEvent("ondragstart", ps_dndSetSource);
+	    /*
+	    src.attachEvent("ondrag", ps_dndCancelEvent);
+	    src.attachEvent("ondragend", ps_dndCancelEvent);
+	    */
+	    
+	    src.attachEvent("ondragenter", ps_dndCancelEvent);
+	    src.attachEvent("ondragover", ps_dndCancelEvent);
+	    src.attachEvent("ondrop", ps_dndSetTarget);
+	    src.attachEvent("ondragleave", ps_dndCancelEvent);
+	}
+    }
+}
+    
 /** Alert with xml content **/
 function showMyXML() {
     if (window.document.XMLDocument.xml) {
@@ -56,25 +483,43 @@ function showMyXML() {
 
 /** Provides the value associate with name from loaded cookies
  *  @param c_name the cookie name
+ *  @param c_value the value to set
+ *  @return the unescaped value stored in the cookie
+ **/
+function ps_set_cookie ( c_name, c_value )
+{
+    var result = true;
+    if (document.cookie) {
+	;
+    } else if (document.cookies) {
+	;
+    } else {
+	window.status = "Cookies not accessible, personalization disabled";
+	result = false;
+    }
+    return result;
+}
+
+/** Provides the value associate with name from loaded cookies
+ *  @param c_name the cookie name
  *  @return the unescaped value stored in the cookie
  **/
 function ps_get_cookie ( c_name )
 {
     var c = null;
-    if (document.cookie) {
-	index = document.cookie.indexOf(c_name);
+    var cookieStr = (document.cookie) ? document.cookie : document.cookies;
+    if (cookieStr) {
+	index = cookieStr.indexOf(c_name);
 	if (index != -1) {
-	    var v_start = (document.cookie.indexOf("=", index) + 1);
-	    var v_end = document.cookie.indexOf(";", v_start);
-	    if (v_end == -1) {
-		v_end = v_start;
-	    }
-	    c = document.cookie.substring(v_start, v_end);
+	    var v_start = (cookieStr.indexOf("=", index) + 1);
+	    var v_end = cookieStr.indexOf(";", v_start);
+	    if (v_end == -1) { v_end = cookieStr.length; }
+	    c = cookieStr.substring(v_start, v_end);
+	} else {
+	    window.status = "Missing cookie " + c_name + ": <" + cookieStr + ">";
 	}
-	/*
     } else {
-	window.alert("Cookies not accessible, personalization disabled");
-	*/
+	window.status = "Cookies not accessible, personalization disabled";
     }
     return c;
 }
@@ -99,6 +544,132 @@ function writeDomainOptions() {
     for (var i=0; i < ldapDomains.length; i++) {
 	document.write('<option ' + ((ldapDomains[i].defaultDomain==1)?"selected ":"") + 'value="' + ldapDomains[i].dn + '">' + ldapDomains[i].label + '</option>');
     }
+}
+
+/** This function should be assigned as a method on the input element bound to
+ *  the email edit
+ **/
+function psldap_validateEMail() {
+    var value = this.value;
+    var result = value.indexOf("@");
+    if (-1 != result) {
+	result = value.indexOf(".", result + 2);
+	if (-1 != result) {
+	    result = value.length - result - 2;
+	}
+    }
+    if (result <= -1) {
+	this.psValidationMsg = "Poorly formatted email: " + value;
+    }
+    return (result > -1);
+}
+
+/** This function should be assigned as a method on the input element bound to
+ *  the value.
+ **/
+function psldap_validateMinLength(minLength) {
+    var value = this.value;
+    var result = value.length >= minLength;
+    if (!result) {
+	this.psValidationMsg = "Value for " + this.name +
+	    " is less than min length of " + minLength;
+    }
+    return result;
+}
+
+/** This function should be assigned as a method on the input element bound to
+ *  the value.
+ **/
+function psldap_validateMaxLength(maxLength) {
+    var value = this.value;
+    var result = value.length >= maxLength;
+    if (!result) {
+	this.psValidationMsg = "Value for " + this.name +
+	    " is greater than max length of " + maxLength;
+    }
+    return result;
+}
+
+/** This function should be assigned as a method on the input element bound to
+ *  the value.
+ **/
+function psldap_validatePasswordStrength(_strength) {
+    var value = this.value;
+    var strength = (arguments.length < 1) ? 1 : _strength;
+    var result = true;
+    var msg = "";
+    if (strength > 0) {
+	result = (value.length >= 6);
+	msg = "greater than 5 characters";
+    }
+    if (strength > 1) {
+	if (false) {
+	    result = false;
+	    msg = "have letters AND numbers";
+	}
+    }
+    if (strength > 2) {
+	if (false) {
+	    result = false;
+	    msg = "have non-sequential numbers";
+	}
+    }
+    if (strength > 3) {
+	if (false) {
+	    result = false;
+	    msg = "have non-alphanumeric characters";
+	}
+	if (false) {
+	    result = false;
+	    msg = "have 8 or more characters";
+	}
+    }
+    if (!result) {
+	this.psValidationMsg = "Value for password must be: " +  msg;
+    }
+    return result;
+}
+
+/** Bound to the onsubmit action for the form - iterates across all input 
+ *  elements and invokes the validations bound to psvalidate, returning false 
+ *  if a validation fails and true otherwise
+ **/
+function psldap_validateFormInput() {
+    var result = true;
+    var errBuffer = "";
+    var elmts = document.getElementsByTagName('input');
+    var objForm = getFocusedFormElement();
+
+    elmts = objForm.elements;
+
+    var i = elmts.length;
+
+    while ( --i >= 0) {
+	var fr;
+	var elmt = elmts[i];
+	var psv_attr = elmt.getAttribute('psvalidate');
+
+	if ((null != psv_attr) && ('' != psv_attr))  {
+	    var psv_args = psv_attr.split(',');
+	    var psv_func = psv_args.shift(); 
+	    var msg = "";
+	    elmt.psValidationMsg = "";
+	    try {
+		var f = new Function("return " + psv_func + ".apply(this, arguments);");
+		result = ((fr = f.apply(elmt, psv_args)) && result);
+		msg = "<li>" + elmt.psValidationMsg + "</li>";
+	    }
+	    catch(e1) {
+		result = false;
+		msg = "<li>Form validation flaw (" + e1 + ")detected on field " +
+		    elmt.name + "</li>";
+	    }
+	    if (!fr) errBuffer = errBuffer + msg;
+	}
+    }
+    if (!result) setProcessWindowMsg("<body style='background-color: #FFFFFF; font-family: arial; font-size: 14px' ><p>The following errors were encountered:</p><ul>" + errBuffer + "</ul></body>");
+
+    return result;
 }
 
 /** Forces the visibility of the images in the objSpan to be shown or hidden
@@ -183,6 +754,7 @@ function showInfo(personal, work, other, im, vendor )
 	    }
 	}
     }
+    sizeWindowToFitDocument(window);
 }
 
 /** Clear the input element value within the specified span. Currently only
@@ -274,7 +846,7 @@ function deleteCurrentSpan(el) {
  **/
 function setOptionsOnAllDNSelects() {
     var dnElmt = document.getElementById("dn");
-    if (dnElmt.tagName.toUpperCase() == "SELECT") {
+    if ((null != dnElmt) && (dnElmt.tagName.toUpperCase() == "SELECT") ) {
 	for (var i=0; i < ldapDomains.length; i++) {
 	    var optStr = '<option ' + ((ldapDomains[i].defaultDomain==1)?"selected ":"") + 'value="' + ldapDomains[i].dn + '">' + ldapDomains[i].label + '</option>';
 	    if (0 == i) dnElmt.innerHTML = optStr;
@@ -303,10 +875,77 @@ function getAllFormElements(objWindowArg) {
     return result;
 }
 
+function getFocusedFormElement() {
+    var objForm = getAllFormElements();
+    objForm = objForm[currentRecord-1];
+    return objForm;
+}
+
+function refreshOpenerAndClose()
+{
+    window.opener.location.href = window.opener.location.href;
+    window.close();
+}
+
+function authenticateViaBasic(userkey, password)
+{
+    try {
+	var reqW = new RequestWrapper();
+	reqW.init();
+	reqW.open(psldapBaseUri + ldapupdateUri + "?FormAction=Search&search=(mail=zzz)&scope=base&xsl1=DSML_response.xsl", false, refreshOpenerAndClose, userkey, password);
+    } catch(e1) {
+	window.status("Page does not support (re)authentication via Basic");
+    }
+}
+
+function postRegistrationResponse() {
+    var result = 99;
+    wt = document.getElementById("processWindow");
+    if (null != wt) {
+	var responseDoc = wt.contentWindow.document;
+	var elmts = responseDoc.getElementsByTagName('resultCode');
+	if ((null != elmts) && (elmts.length > 0) ) {
+	    var l = elmts.length;
+	    var ff = getFocusedFormElement();
+	    var action = ff.FormAction.value;
+	    while (--l >= 0) {
+		result = elmts[l].getAttribute('code');
+		dn = elmts[l].getAttribute('dn');
+	    }
+	    if ((("0" == result) && (action == "Register")) ||
+		(("68" == result) &&
+		 window.confirm("Account exists - would you like to login?"))
+		 ) {
+		authenticateViaBasic(ff.elements[ps_siteConfig.userKey+'-1'].value, ff.elements[ps_siteConfig.passKey+'-1'].value);
+		/*ps_set_cookie( 'PsLDAPNextUri', 'statusPage.html');*/
+		ff.target="_self";
+		submitVisibleRecord("Login", false);
+	    }
+	} else {
+	    window.status = "Status for last update unavailable";
+	}
+    }
+    return result;
+}
+
+function setProcessWindowMsg(htmlStr) {
+    var wt = document.getElementById("processWindow");
+    if (null != wt) {
+	wt.contentWindow.document.open();
+	wt.contentWindow.document.write(htmlStr);
+	wt.contentWindow.document.close();
+    }
+}
+
 function resetProcessWindow() {
     var wt = document.getElementById("processWindow");
     if (null != wt) {
-        wt.src = wt.src;
+	wt.src = wt.src;
+	/*
+	wt.contentWindow.document.open();
+	wt.contentWindow.document.write("<p><em>Processing request...</em></p>");
+	wt.contentWindow.document.close();
+	*/
     }
 }
 
@@ -433,6 +1072,37 @@ function cloneFormToWindow(objForm, wt) {
  *  data.
  *  @param objForm the form containing the data and the hidden dn input elmt
  **/
+function setRegistrationDNFromFormData(objForm) {
+    var objCNElement = (objForm.elements["cn"]) ? objForm.elements["cn"] :
+	objForm.elements["cn-1"];
+    
+    objForm.dn.value = getBaseDNFromMyUrl();
+    if ("" == objForm.dn.value) {
+	objForm.dn.value = prompt("Enter the base DN to contain this record");
+    }
+    
+    if (objCNElement) {
+	if (objForm.elements["givenName"] && objForm.elements["sn"] ) {
+	    objCNElement.value = objForm.elements["givenName"].value + " " +
+		objForm.elements["sn"].value;
+	}
+	else if (objForm.elements["givenName-1"] && objForm.elements["sn-1"] ) {
+	    objCNElement.value = objForm.elements["givenName-1"].value + " " +
+		objForm.elements["sn-1"].value;
+	}
+	if (objCNElement.value != "") {
+	    objForm.dn.value = "cn=" + objCNElement.value + ", " + objForm.dn.value;
+	}
+    }
+    /*
+      objForm.dn.value = window.prompt("Confirm the DN for this record:", objForm.dn.value);
+    */
+}
+
+/** Sets the value of the distinguished name in the form based on the form
+ *  data.
+ *  @param objForm the form containing the data and the hidden dn input elmt
+ **/
 function setDNFromFormData(objForm) {
     var objOrgElement = (objForm.elements["o"]) ? objForm.elements["o"] :
 	objForm.elements["o-1"];
@@ -470,18 +1140,21 @@ function setDNFromFormData(objForm) {
     objForm.dn.value = window.prompt("Confirm the DN for this record:", objForm.dn.value);
 }
 
-function moveVisibleRecord(action) {
-    var objForm = getAllFormElements();
-    objForm = objForm[currentRecord-1];
+function moveVisibleRecord(action, doConfirm) {
+    var objForm = getFocusedFormElement();
+    var confirmSubmit = ((arguments.length < 2) || doConfirm);
+    if (confirmSubmit) {
+	if (objForm.elements["newrdn"]) {
+	    objForm.newrdn.value = prompt("Enter the new RDN for this record",
+					  objForm.newrdn.value);
+	}
+	if (objForm.elements["newSuperior"]) {
+	    objForm.newSuperior.value = prompt("Enter the new superior for this record", objForm.newSuperior.value);
+	}
+    }
 
-    if (objForm.elements["newrdn"]) {
-	objForm.newrdn.value = prompt("Enter the new RDN for this record", objForm.newrdn.value);
-    }
-    if (objForm.elements["newSuperior"]) {
-	objForm.newSuperior.value = prompt("Enter the new superior for this record", objForm.newSuperior.value);
-    }
     if (objForm.elements["newrdn"] && objForm.elements["newSuperior"]) {
-	submitVisibleRecord(action);
+	submitVisibleRecord(action, confirmSubmit);
     } else {
 	alert("New RDN and new Superior are not defined - aborting move request");
     }
@@ -492,32 +1165,41 @@ function moveVisibleRecord(action) {
  *  iframe and maintaining the integrity of the pending form.
  *  @param action one of three string constants: Create, Delete, Update
  **/
-function submitVisibleRecord(action) {
-    var objForm = getAllFormElements();
-    var wt = document.getElementById("processWindow");
-    var i;
-    if (null != wt) {
-	/* reset the content to the cleanSrc page to ensure submission ability */
-        wt = wt.contentWindow;
-    }
-    
-    objForm = objForm[currentRecord-1];
+function submitVisibleRecord(action, doConfirm) {
+    var objForm = getFocusedFormElement();
+    var userConfirmed = true;
+
     objForm.FormAction.value = action;
-    if (action == "Create") {
-	setDNFromFormData(objForm);
+
+    if (action == "Register") {
+	setRegistrationDNFromFormData(objForm);
+    } else {
+	if (action == "Create") { setDNFromFormData(objForm); }
+	if((arguments.length < 2) || doConfirm) {
+	    userConfirmed = window.confirm("Are you sure you wish to " +
+					   action +
+					   " this record?");
+	}
     }
     
-    if (wt.confirm("Are you sure you wish to " + action + " this record?") ) {
-	//var objClone = cloneFormToWindow(objForm, wt);
+    if (userConfirmed ) {
 	var objClone = objForm;
+	/*
+	  var wt = document.getElementById(objForm.target);
+	  if (null != wt) { wt = wt.contentWindow; }
+	  objClone = cloneFormToWindow(objForm, wt);
+	*/
         showProcessDocument(true);
-        objClone.submit();
+
+        if ((undefined == objClone.onsubmit) || objClone.onsubmit()) {
+	    objClone.submit();
+	}
     }
 }
 
 function resetVisibleRecord() {
-    var objForm = getAllFormElements();
-    objForm[currentRecord-1].reset();
+    var objForm = getFocusedFormElement();
+    objForm.reset();
 }
 
 function toggleClassInfo() {
@@ -609,7 +1291,7 @@ function showRecord(current) {
         currentRecord = current;
         pvt_setRecordDisplay(objForm, currentRecord, "inline");
     }
-    if (objForm.length > 1) {
+    if ((objForm.length > 1) && (recordNbrElmt)) {
         recordNbrElmt.value = currentRecord;
     }
 }
@@ -627,7 +1309,7 @@ function loadRecordUrl(sel, target, olcb) {
     if (sel != "") {
 	var objFrame = null;
         if ((arguments.length < 2) || (null == target)) {
-            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, height=480, width=544");
+            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, location=no, height=400, width=400");
 	    objFrame = objWindow;
         } else {
             objFrame = document.getElementById(target);
@@ -745,6 +1427,7 @@ function getXmlNodeByDN(xmlDom) {
 function writeEditableRecord(dn, target, xslName, xslUri, xslManager,
                              docTargetId) {
     var theMgr = (arguments.length > 3) ? xslManager : xslmgr;
+    theMgr.addStylesheet("edittools", psldapRootUri + "/DSML_edittools.xsl");
     theMgr.addStylesheet(xslName, xslUri);
     getXmlNodeByDN.dn = dn;
     theMgr.transform(xslName, getXmlNodeByDN, target, docTargetId);
@@ -757,7 +1440,6 @@ function getEditableRecord(dn, target, xmgr) {
 	    "search=(objectClass=*)&scope=base&dn=" + encodeURIComponent(dn) +
             "&BinaryHRef=" + bhref +
             "&xsl1=" + psldapRootUri + "/DSML_editform.xsl";
-	//+ "&xsl2=" + psldapRootUri + "/DSML_cards.xsl";
         loadRecordUrl(getUrl, target);
     } else {
         window.status = "Targeting window / iframe " + top.document.getElementById(target).id;
@@ -813,8 +1495,32 @@ function getVCard(dn, target) {
     loadRecordUrl(getUrl, target);
 }
 
+function getWindowWidth(objWindow) {
+    var myWidth = 0;
+
+    if( objWindow.innerWidth && typeof( objWindow.innerWidth ) == 'number' ) {
+        //Non-IE
+        myWidth = objWindow.innerWidth;
+    } else if( document.documentElement &&
+	       ( undefined != document.documentElement.clientWidth ) &&
+	       ( 0 < document.documentElement.clientWidth ) ) {
+        //IE 6+ in 'standards compliant mode'
+        myWidth = document.documentElement.clientWidth;
+    } else if( document.body && ( undefined != document.body.clientWidth ) ) {
+        //IE 4 / 5 compatible
+        myWidth = document.body.clientWidth;
+    }
+    if (myWidth < 100) {
+	window.alert ("Window width: " + objWindow.innerWidth + ", " + 
+		      document.documentElement.clientWidth + ", " +
+		      document.body.clientWidth);
+	myWidth = 150;
+    }
+    return myWidth;
+}
+
 function getWindowHeight(objWindow) {
-    var myHeight = 0;
+    var myHeight = 480;
 
     if( objWindow.innerHeight && typeof( objWindow.innerHeight ) == 'number' ) {
         //Non-IE
@@ -829,9 +1535,10 @@ function getWindowHeight(objWindow) {
         myHeight = document.body.clientHeight;
     }
     if (myHeight < 100) {
-	window.alert ("Window height: " + objWindow.innerHeight + ", " + 
-		      document.documentElement.clientHeight + ", " +
-		      document.body.clientHeight);
+	window.status = "Window height defaulting: " +
+	    objWindow.innerHeight + ", " + 
+	    document.documentElement.clientHeight + ", " +
+	    document.body.clientHeight;
 	myHeight = 150;
     }
     return myHeight;
@@ -848,6 +1555,36 @@ function getClientHeight(cellElmt)
     return ht;
 }
 
+function windowIsAllOnScreen(wo) {
+    var x = wo.screenX, y = wo.screenY;
+    var de = wo.document.documentElement;
+    var dw = de.scrollWidth - getWindowWidth(wo);
+    var dh = de.scrollHeight - getWindowHeight(wo);
+
+    if (x == undefined) x = wo.screenTop;
+    if (y == undefined) x = wo.screenLeft;
+
+    return (wo.screen.width > (x + dw)) && (wo.screen.height > (y + dh));
+}
+
+function sizeWindowToFitDocument(wo) {
+    /* If the window is not embedded, resize to fit the form */
+    if (wo.top == wo) {
+	var de = wo.document.documentElement;
+	/*
+	var width = de.scrollWidth - de.clientWidth;
+	var height = de.scrollHeight - de.clientHeight;
+	*/
+	var width = de.scrollWidth - getWindowWidth(wo);
+	var height = de.scrollHeight - getWindowHeight(wo);
+ 
+	wo.resizeBy(width, height);
+	if (!windowIsAllOnScreen(wo)) {
+	    wo.moveTo((wo.screen.width - de.clientWidth) / 2,
+		      (wo.screen.height - de.clientHeight) / 2);
+	}
+    }
+}
 
 function verticalWrapNColumns(objCellElmt, ncol)
 {
@@ -935,45 +1672,13 @@ function verticalWrapChildren(objCellElmt, reservedSize)
     } while (undefined != nextChild);
 }
 
-function initializeCardsCB() {
-    var cardTable = document.getElementById("cardTable");
-    var cardTd = cardTable;
-    while ((null != cardTd) && (0 != cardTd.tagName.indexOf("TD"))) {
-        cardTd = cardTd.firstChild;
-    }
-    if (null != cardTd) {
-	if (window.reservedSizeValue < 0) {
-	    verticalWrapNColumns(cardTd, -1 * window.reservedSizeValue);
-	} else {
-	    verticalWrapChildren(cardTd, window.reservedSizeValue);
-	}
-    }
-    window.status = "Done";
-}
-
-function initializeCards(reservedSize) {
-    window.status = "Organizing cards...";
-    // Allow rendering to finish ... wrap after a timeout
-    window.reservedSizeValue = reservedSize;
-    window.setTimeout(initializeCardsCB, 20);
-}
-
-function initialize() {
-    window.status = "Loading forms...";
-
-    recordNbrElmt = document.getElementById("recordNumber");
-
-    showRecord(1);
-    window.status = getAllFormElements().length + " records loaded";
-}
-
 function sortByTreeParentId(objItem1, objItem2)
 {
     if (!objItem1.parentElmtCount) {
-        objItem1.parentElmtCount = objItem1.treeParentId.split(",").length;
+        objItem1.parentElmtCount = objItem1.treeParentId.match(/=/gi).length;
     }
     if (!objItem2.parentElmtCount) {
-        objItem2.parentElmtCount = objItem2.treeParentId.split(",").length;
+        objItem2.parentElmtCount = objItem2.treeParentId.match(/=/gi).length;
     }
     var result = objItem1.parentElmtCount - objItem2.parentElmtCount;
     if (0 == result) {
@@ -1004,6 +1709,7 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
 
     if (null == objTable) {
         alert("Could not find table " + tableIdStr + " to build tree");
+	window.status = "Tree " + tableIdStr + " not found in document";
     } else {
         var objElmtArray;
         if (objTable.rows) {
@@ -1014,23 +1720,27 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
         var objRecord;
         var objRecordArray = new Array();
         var parentRegex = /([^,]*,)/;
-        var managerTree = (0 == parentDelimStr.indexOf("manager"));
+        var managerTree = (0 == parentDelimStr.indexOf("refattr"));
 
+	objTable.mode = (managerTree) ? "manager" : "org" ;
         for (var i = 0; i < objElmtArray.length; i++) {
             var manager = null;
-            var reNormal = /\s*,\s*/g;
+            var reNormal = /\s*,[ ]*\s*/g;
+
             objRecord = objElmtArray[i];
             if (managerTree) {
-                objRecord.treeParentId = objRecord.getAttribute("manager");
+                objRecord.treeParentId = objRecord.getAttribute("refattr");
+		objRecord.setAttribute("refattr",
+		   objRecord.getAttribute("refattr").replace(reNormal, ", "));
             } else  {
-                objRecord.treeParentId = objRecord.getAttribute(rowIdStr).replace(parentRegex, "");
+                objRecord.treeParentId =
+		    objRecord.getAttribute(rowIdStr).replace(parentRegex, "");
             }
 
             // Assign parent and normalize white space in id attributes
             objRecord.treeParentId = objRecord.treeParentId.replace(reNormal, ", ");
             objRecord.setAttribute(rowIdStr,
                    objRecord.getAttribute(rowIdStr).replace(reNormal, ", "));
-            objRecord.id = objRecord.id.replace(reNormal, ", ");
 
             objRecordArray.push(objRecord);
         }
@@ -1071,8 +1781,8 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
                 //   under the parent record. If there is no parent, leave them
                 //   at the top level
                 if (null != objParentRecord) {
-                    var objTableElmt = document.createElement("TABLE");
-                    var objTableBody = document.createElement("TBODY");
+                    var objTableElmt = document.createElement("table");
+                    var objTableBody = document.createElement("tbody");
                     var objParentCell = objParentRecord;
                     objTableElmt.appendChild(objTableBody);
                     objTableBody.style.width = "100%";
@@ -1089,21 +1799,11 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
                     while (0 < childGroup.length) {
                         var childRecord = childGroup.pop();
                         objTableBody.appendChild(childRecord);
-    
-                        var strNewLabel = childRecord.getAttribute(rowIdStr).replace(/([^=]*)=([^,]*),.*/,"$2");
-                        var newTextNode = document.createTextNode(strNewLabel);
-                        var objAnchor = childRecord.firstChild.nextSibling.firstChild;
-                        //if (objAnchor.tagName != "A") {
-                        //    objAnchor = objAnchor.nextSibling;
-                        //}
-                        while (objAnchor.hasChildNodes()) {
-                            objAnchor.removeChild(objAnchor.firstChild);
-                        }
-                        objAnchor.appendChild(newTextNode);
                     }
                 }
             }
         }
         addNavigationToTree(tableIdStr);
+	window.status = "Tree " + tableIdStr + " is fully loaded";
     }
 }

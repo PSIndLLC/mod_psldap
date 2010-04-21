@@ -121,7 +121,8 @@ function expandTreeHierarchy(treeNodeId) {
 }
 
 function collapseAllTreeNodes(rootNodeId) {
-  var rootnode = document.getElementById(rootNodeId);
+  var rootnode = (typeof(rootNodeId) != "string") ? rootNodeId :
+      document.getElementById(rootNodeId);
   if (null == rootnode) throw new Error("Root of tree not found: " + rootNodeId);
   var nodeList = rootnode.getElementsByTagName("TABLE");
   for (var i = 0; i < nodeList.length; i++) {
@@ -174,7 +175,8 @@ function getLastRowOfTable(objTable)
  **/
 function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs) {
   var expandNodeId = selectedNodeId;
-  var rootnode = document.getElementById(nodeId);
+  var rootnode = (typeof(nodeId) != "string") ? nodeId :
+      document.getElementById(nodeId);
   if (null == rootnode) throw new Error("Root of tree not found: " + nodeId);
   var nodeList = rootnode.getElementsByTagName("TABLE");
   for (var i = 0; i < nodeList.length; i++) {
@@ -188,7 +190,7 @@ function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs) {
     var lastRow = getLastRowOfTable(nodeList[i]);
     if (null != lastRow) lastRow.setAttribute("lastnode", "true");
   }
-  collapseAllTreeNodes(nodeId);
+  collapseAllTreeNodes(rootnode);
   if (arguments.length > 2) {
     requestArgList = top.document.URL.split("?");
     if (requestArgList.length > 1) {

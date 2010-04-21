@@ -20,6 +20,28 @@
  *   along with this program; if not, write to the Free Software
  *   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
+
+/*  Instructions for use of psajax_docmgr:
+ *  
+ *  Include the psajax_docmgr.js script in your web page to leverage the 
+ *  capabilities of any DocumentManager class in your application. The highest
+ *  level class is the XSLManager. To use the XSL Manager, follow these steps:
+ *  
+ *  1.  Create a XSLManager using new XSLManager();
+ *  2.  Set the templates on the XSLManager with the addStylesheet function
+ *      bound to the XSLManager object.
+ *  3.  Add any parameters required for transformation using the addMgrParameter
+ *      function bound to the XSLManager object.
+ *  4.  Set the XML to be transfered by specifying the generating URL through 
+ *      the setXmXML method bound to the XSLManager object
+ *  5.  Call the transform method bound to the XSLManager object to force a
+ *      transformation to an HTML fragment to be written into the specified id 
+ *      from append_to_id in the passed document specified as doc against a
+ *      DOM node returned by the passed getXMLNodeFunc function to that returns 
+ *      the appropriate node to be transformed from the loaded XML DOM, which is
+ *      passed as a parameter to the getXMLNodeFunc function.
+ */
+
 function docmgr_unsupported(txt) {
     alert("DOM functionality not implemented to support this script " + txt);
 }
@@ -39,7 +61,7 @@ function RequestWrapper()
 
 RequestWrapper.prototype.initActiveX = function()
 {
-    window.status = "using activex controls";
+    window.status = "Using activex controls in psajax_docmgr.js";
     try {
         window.status = "Trying msxml2.xmlhttp.3.0";
         this.reqObj = new ActiveXObject("Msxml2.XMLHTTP.3.0");
@@ -56,7 +78,7 @@ RequestWrapper.prototype.initActiveX = function()
 
 RequestWrapper.prototype.initDOMImpl = function()
 {
-    window.status = "using document implementation";
+    window.status = "Using document implementation in psajax_docmgr.js";
     if (typeof XMLHttpRequest != 'undefined') {
         this.reqObj = new XMLHttpRequest();
     } else {
@@ -66,6 +88,7 @@ RequestWrapper.prototype.initDOMImpl = function()
 
 RequestWrapper.prototype.init = function()
 {
+    this.location = null;
     if (window.ActiveXObject) {
         this.initActiveX();
     } else if (document.implementation && document.implementation.createDocument) {
@@ -74,11 +97,43 @@ RequestWrapper.prototype.init = function()
         this.reqObj = new DummyDOM();
     }
     this.getResponse = function() {
-	return ((undefined != this.reqObj.responseText) ? this.reqObj.responseText :
-		((undefined != this.reqObj.responseXML) ? this.reqObj.responseXML : 
-		 this.reqObj.documentElement.xml) );
+	return ((undefined != this.reqObj.responseXML) ? this.reqObj.responseXML : 
+		(((undefined != this.reqObj.documentElement) && (undefined != this.reqObj.documentElement.xml)) ? this.reqObj.documentElement.xml :
+		 this.reqObj.responseText) );
     }
 };
+
+RequestWrapper.prototype.open = function(docref, async, onload, user, passwd)
+{
+    this.location = docref;
+    this.readyload = onload;
+    try {
+	this.reqObj.async = async;
+	this.reqObj.validateOnParse = false;
+	// For some reason this is failing with the freethreadeddomdocument...
+	if ((undefined == this.reqObj.load) ||
+	    (!this.reqObj.load(docref))){ 
+	    throw("load undefined on request object");
+	} else {
+	    window.status = "Loaded doc " + docref;
+	}
+    } catch(e1) {
+	window.status = "Exception loading doc: " + e1.message;
+	if (arguments.length < 5) {
+	    this.reqObj.open("GET", docref, false);
+	} else {
+	    this.reqObj.open("GET", docref, false, user, passwd);
+	}
+	this.reqObj.send(null);
+	window.status = "Pending onload... ";
+    }
+    onload.call(this, null);
+    window.status = "Done";
+}
+
+RequestWrapper.prototype.reload = function() {
+    this.open(this.location, false, this.readyload);
+}
 
 DocumentManager.prototype = new RequestWrapper();
 DocumentManager.prototype.reqObj = null;
@@ -113,22 +168,7 @@ function DocumentManager(docref, onload, load_info, is_html)
                 }
             }
         }
-        try {
-            this.reqObj.async = false;
-            this.reqObj.validateOnParse = false;
-            // For some reason this is failing with the freethreadeddomdocument...
-	    if ((undefined == this.reqObj.load) ||
-		(!this.reqObj.load(docref))){ 
-		throw("load undefined on Request Object");
-	    } else {
-                window.status = "docref loaded " + docref;
-	    }
-        } catch(e1) {
-            window.status = "Exception raise loading docref: " + e1.message;
-            this.reqObj.open("GET", docref, false);
-            this.reqObj.send(null);
-        }
-        onload.call(this, null);
+	this.open(docref, false, onload);
     }
 }
 
@@ -205,7 +245,7 @@ if (window.ActiveXObject) {
         this.xsl.transform();
         fragElmt.innerHTML = this.xsl.output;
 
-        window.status = "Frag Text is: " + fragElmt.innerHTML;
+        window.status = "XML transformed ";
 
         return fragElmt;
     }
@@ -227,18 +267,35 @@ XSLManager.prototype.addStylesheet = function(id,uri) {
     }
 };
 XSLManager.prototype.setXmXML = function(xml_uri) {
-        this.xmldoc = new DocumentManager(xml_uri, LoadXMLOnManager, this);
-        var resp = this.xmldoc.getResponse();
-        this.xmldoc = resp;
+    if (arguments.length > 0) {
+	this.location = xml_uri;
+    } else {
+	xml_uri = this.location;
+    }
+    this.xmldoc = new DocumentManager(xml_uri, LoadXMLOnManager, this);
+    var resp = this.xmldoc.getResponse();
+    this.xmldoc = resp;
 };
 
+/**  Transforms the XML content contained in the XSLManager into the document
+ *   element with and id corresponding to append_to_id in the DOM specified by
+ *   the doc parameter.
+ *   @param xsl_id a string matching the label passed when a URI is registered
+ *                 with the XSLManager via addStylesheet
+ *   @param getXMLNodeFunc a function that returnes the desired node for 
+ *                         transformation when passed the XML DOM
+ *   @param doc a DOM instance in which the transformed results are to be 
+ *              written
+ *   @param append_to_id a string correlating to the id of the element in doc
+ *                       to which the resultant DOM fragment will be appended
+ **/
 XSLManager.prototype.transform = function(xsl_id,getXMLNodeFunc,doc,append_to_id) {
     var selStyle = this.txstyles[xsl_id];
-    window.status = "Transforming " + this.xmldoc + " with " + xsl_id + ":" + selStyle;
-    if ((null == this.xmldoc) || (undefined == selStyle) ||
-        (null == selStyle) ) {
-        if (null != this.xmldoc) window.status = "Transform failed...";
-        else window.status = "";
+
+    if ((null == this.xmldoc) || (undefined == this.xmldoc.getElementById) ||
+	(undefined == selStyle) || (null == selStyle) ) {
+        if (null != this.xmldoc) window.status = "Transform failed, no results";
+        else window.status = "Transform failed, no style templates";
         return false;
     }
     var txNode = this.xmldoc;
@@ -261,7 +318,7 @@ XSLManager.prototype.transform = function(xsl_id,getXMLNodeFunc,doc,append_to_id
                 }
             }
         }
-        window.status = "Transforming fragment... target = " + append_to_id;
+        window.status = "Transforming result from target: " + append_to_id;
         var fragment = this.transformToFragment(txNode, document);
         var elmt = document.getElementById(append_to_id);
         if (null != elmt) {
@@ -273,9 +330,9 @@ XSLManager.prototype.transform = function(xsl_id,getXMLNodeFunc,doc,append_to_id
             } else {
                 elmt.innerHTML = fragment.innerHTML;
             }
-            window.status = "elmt html is now : " + elmt.innerHTML;
+            window.status = "Done";
         } else {
-            window.status = "Transformation element " + append_to_id +
+            window.status = "Failed: transformation element " + append_to_id +
                 " not found on page";
         }
     }

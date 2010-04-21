@@ -16,7 +16,7 @@ td.menubar_center input { margin-top: 3px; margin-bottom: 3px; font-family: aria
 
 label { font-size: 10px; margin-top: 0px; margin-bottom: 0px; }
 
-pre, input, textarea, select { padding-top: -3px; font-family: arial; font-size: 10px; margin-top: -1px; margin-bottom: -1px; }
+pre, input, textarea, select { padding-top: 0px; font-family: arial; font-size: 10px; margin-top: 0px; margin-bottom: 0px; }
 
 table { border-collapse: collapse; border: none; border-spacing: 3px; }
 
@@ -66,36 +66,43 @@ table#orgTable table tr[lastnode="true"]>td:first-child {
 
 table#orgTable td[objectclass] {
       background-repeat: no-repeat;
-      padding-left: 18px;
+      padding-left: 2px;
       padding-right: 2px;
+      padding-top: 0px;
+      padding-bottom: 0px;
 }
 
 table#orgTable td[objectclass="organization"] {
       background: url(/psldap/images/organization.gif);
       background-repeat: no-repeat;
-      padding-left: 18px;
-      padding-right: 2px;
 }
 
 table#orgTable td[objectclass="organizationalUnit"] {
       background: url(/psldap/images/orgUnit.gif);
       background-repeat: no-repeat;
-      padding-left: 18px;
-      padding-right: 2px;
 }
 
 table#orgTable td[objectclass="groupOfUniqueNames"] {
       background: url(/psldap/images/group.gif);
       background-repeat: no-repeat;
-      padding-left: 18px;
-      padding-right: 2px;
 }
 
 table#orgTable td[objectclass="organizationalPerson"] {
       background: url(/psldap/images/person.gif);
       background-repeat: no-repeat;
-      padding-left: 18px;
-      padding-right: 2px;
+}
+
+table#orgTable td[objectclass] a {
+    vertical-align: top;
+}
+
+tr[recordid] td img {
+    height: 16px;
+}
+    
+img.dragHandle {
+    height: 16px;
+    cursor: move;
 }
 
 table#directoryTable tr td pre {

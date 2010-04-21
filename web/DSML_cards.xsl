@@ -11,6 +11,33 @@
 <xsl:key name="searchEntryLookup" match="searchResultEntry" use="@dn" />
 
 <xsl:template name="pageSpecificHeader" >
+  <xsl:element name="script">
+    <xsl:attribute name="language">JavaScript</xsl:attribute>
+    <![CDATA[
+    function initializeCardsCB() {
+        var cardTable = document.getElementById("cardTable");
+        var cardTd = cardTable;
+        while ((null != cardTd) && (0 != cardTd.tagName.indexOf("TD"))) {
+            cardTd = cardTd.firstChild;
+        }
+        if (null != cardTd) {
+	    if (window.reservedSizeValue < 0) {
+	        verticalWrapNColumns(cardTd, -1 * window.reservedSizeValue);
+            } else {
+	        verticalWrapChildren(cardTd, window.reservedSizeValue);
+	    }
+        }
+        window.status = "Done";
+    }
+
+    function initializeCards(reservedSize) {
+        window.status = "Organizing cards...";
+        // Allow rendering to finish ... wrap after a timeout
+        window.reservedSizeValue = reservedSize;
+        window.setTimeout(initializeCardsCB, 20);
+    }
+    ]]>
+  </xsl:element>
 </xsl:template>
 
 <xsl:template match="/dsml">

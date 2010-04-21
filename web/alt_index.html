@@ -24,7 +24,8 @@
     <script type="text/javascript" language="JavaScript" src="/psldap/DSML_treemanager.js" ></script>
 
     <script type="text/javascript" language="JavaScript" >
-        var xslmgr;
+        var xslmgr = null;
+	var xslNRmgr = null;
         function synchCompareSelect() {
             var strQuery = "";
             var searchByElement = document.queryForm.searchby;
@@ -48,14 +49,28 @@
                 searchCompareElement.options[searchCompareElement.selectedIndex].value.replace(/\?/i, searchValueElement.value) + ")";
             strQuery = document.queryForm.action + "?FormAction=Search&scope=subtree&search=" + encodeURIComponent(searchElement.value) + "&dn=" + encodeURIComponent(getLDAPBase()) + "&BinaryHRef=" + (isIE?"on":"off");
             window.status = "Acquiring XML " + strQuery;
+            document.getElementById('tree').innerHTML = "Initiating search: " + strQuery;
             xslmgr.setXmXML(strQuery);
             xslmgr.addMgrParameter("xslManager", "xslmgr");
             if (!xslmgr.transform(getTransformMode(), getSearchResponse, document, "tree")) {
                 window.alert("Failed to render search results");
-            }
+            } else {
+		attachDnDEventsForElementTypeWithDNAttr(document, "img", xslmgr);
+	    }
             window.defaultStatus = "LDAP records for filter = " + strQuery + " acquired";
             return false;
         }
+        function loadNewRecordForm(xmlUri) {
+            document.getElementById('editFrame').innerHTML = "Loading new record template: " + xmlUri;
+	    alert("setting new record xml to uri = " + xmlUri);
+            xslNRmgr.setXmXML(xmlUri);
+            xslNRmgr.addMgrParameter("xslManager", "xslNRmgr");
+            if (!xslNRmgr.transform("rwcards", getSearchResponseNR, document, "editFrame")) {
+                window.alert("Could not load new record form");
+            }
+            window.defaultStatus = "Could not load new record for " + xmlUri;
+            resizeTopTable(true);
+	}
         function getLDAPBase() {
             var searchBase = document.queryForm.dn;
             return searchBase.value;
@@ -67,10 +82,15 @@
         function setFormBaseDN() {
             alert("Loaded window - new dn is ");
         }
-        function loadDNInitializationFormUrl(objUrl) {
-            var objWindow = loadRecordUrl(objUrl + "?dn=" +
-                                          document.queryForm.dn.value);
-            objWindow.onload='setFormBaseDN';
+        function loadDNInitializationFormUrl(xmlUrl, xslUrl) {
+	    var addArgs = "&dn=" + encodeURIComponent(document.queryForm.dn.value);
+	    loadTemplateRecord(xmlUrl, xslUrl, null, addArgs, 'setFormBaseDN');
+/*
+            loadNewRecordForm(ldapupdateUri + "?FormAction=Present&" +
+                          "xmlObjectTemplate=" + encodeURIComponent(xmlUrl) +
+                          "&BinaryHRef=" +
+                          (uaSupportsInlineImages() ? "off" : "on") );
+*/
         }
         function resizeResultIframe() {
             var objIframe = document.getElementById("resultSet");
@@ -93,6 +113,7 @@
             }
             return result;
         }
+
         function resizeTopTable() {
             if (0 == arguments.length) {
                 if (0 != resizeTimeOutId) {
@@ -119,31 +140,66 @@
             }
         }
 
-        function getSearchResponse(myxml) {
-            var result = myxml.getElementsByTagName("searchResponse");
-            if (0 < result.length) {
-                return  result[0];
-            } else {
-                return myxml;
+        function getSearchResponse(myxml,elementId) {
+            var result;
+            var elmtId = (arguments.length < 2) ? 'tree' : elementId;
+	    try {
+		resultCount = myxml.getElementsByTagName("searchResultEntry").length;
+                result = myxml.getElementsByTagName("searchResponse");
+                document.getElementById(elmtId).innerHTML = resultCount + " records found in " + result.length + " responses";
+                if (0 < result.length) {
+                    return  result[0];
+                }
+            } catch(e1) {
+                document.getElementById(elmtId).innerHTML = e1;
             }
+            return myxml;
         }
+
+        function getSearchResponseNR(myxml) {
+            alert("Element of id editFrame to be written to");
+            return getSearchResponse(myxml, 'editFrame');
+        }
+
         function LoadData() {
+            /* Create the XSL Manager object */
             xslmgr = new XSLManager("/psldap/DSML_new_o.xml");
+            /* Add common stylesheets too the manager */
+            xslmgr.addStylesheet("common1", "/psldap/DSML_commonscript.xsl");
+            xslmgr.addStylesheet("common2", "/psldap/DSML_edittools.xsl");
+            xslmgr.addStylesheet("common3", "/psldap/DSML_sitefrags.xsl");
+            /* Add stylesheets to the manager */
             xslmgr.addStylesheet("orgtree", "/psldap/DSML_org_tree.xsl");
             xslmgr.addStylesheet("mgmttree", "/psldap/DSML_mgmt_tree.xsl");
             xslmgr.addStylesheet("rocards", "/psldap/DSML_cards.xsl");
             xslmgr.addStylesheet("rwcards", "/psldap/DSML_editform.xsl");
+            xslmgr.addStylesheet("vcards", "/psldap/DSML_vcard.xsl");
+            /* Set the parameter xslManager to be passed to the stylesheets -
+               we use this within the HTML generated by the stylesheets to
+               reference the manager for re-rendering */
             xslmgr.addMgrParameter("xslManager", "xslmgr");
-            //document.getElementById("editFrame").src="DSML_new_o.xml"
+
+            /* Initialize the new ldap record xsl manager instance */
+            xslNRmgr = new XSLManager("/psldap/DSML_new_o.xml");
+            /* Add stylesheets to the manager */
+            xslNRmgr.addStylesheet("rwcards", "/psldap/DSML_editform.xsl");
+            xslNRmgr.addMgrParameter("xslManager", "xslNRmgr");
+
             resizeTopTable(true);
         }
 
         function transformTemplateChange() {
-            xslmgr.addMgrParameter("xslManager", "xslmgr");
-            xslmgr.transform(getTransformMode(), getSearchResponse, document, 'tree');
-            resizeTopTable(true);
+            if (null != xslmgr) {
+                xslmgr.addMgrParameter("xslManager", "xslmgr");
+                xslmgr.transform(getTransformMode(), getSearchResponse, document, 'tree');
+		attachDnDEventsForElementTypeWithDNAttr(document, "img", xslmgr);
+                resizeTopTable(true);
+            }
         }
     </script>
+    <style type="text/css">
+      div#processDiv {  z-index: 0; background-color: beige; border: 1px solid silver; margin: 0px; display: none; position: absolute; left: 30%; width: 384px; }
+    </style>
     <title>Search Results</title>
 </head>
 
@@ -153,7 +209,7 @@
 <table width="100%">
   <tr width="100%">
     <td align="left" width="*" style="padding-top: 12px;">
-      <form id="queryForm" name="queryForm" onsubmit="return generateQueryString();" method="POST" action="/ldapupdate" target="_new">
+      <form id="queryForm" name="queryForm" onsubmit="return generateQueryString();" method="POST" action="/ldapupdate" target="responseData">
         <table width="100%">
           <tr>
             <td align="left">
@@ -192,7 +248,7 @@
     <td align="right" width="5px">
       <fieldset>
         <legend>Create a New ...</legend>
-        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(this.value); this.value='';" tabindex="6">
+        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(psldapRootUri + '/' + this.value, psldapRootUri + '/DSML_editform.xsl'); this.value='';" tabindex="6">
           <option selected value="">Select One ...</option>
           <option value="DSML_new_o.xml">Organization</option>
           <option value="DSML_new_ou.xml">Organizational Unit</option>
@@ -218,6 +274,7 @@
   <table id="contentTable" width="100%" height="150px" style="margin-top: 6px; " >
     <tr>
       <td id="tree_cell" width="25%" onmousedown="" onmouseup="" onmousemove="">
+	<iframe id="responseData" name="responseData" src="about:blank" cleanSrc="about:blank" width="50px" style="display: none; border: none" onload="transformTemplateChange();" ></iframe>
         <div id="tree" >
         </div>
       </td>
@@ -228,25 +285,29 @@
 	    currentRecord = 2;
 	  </script>
 	  <span>
-	    <a href="javascript: void submitVisibleRecord('Modify')" title="Modify this record"><img src="/psldap/images/editRecord.gif" alt="Edit Record" ></a>
+	    <a href="javascript: void submitVisibleRecord('Modify')" title="Modify this record"><img src="images/editRecord.gif" alt="Edit Record" ></a>
 	  </span>
 	  <span>
-	    <a href="javascript: void submitVisibleRecord('Delete')" title="Delete this record"><img src="/psldap/images/delRecord.gif" alt="Delete Record" ></a>
+	    <a href="javascript: void moveVisibleRecord('modDNRequest')" title="Move this record"><img src="images/moveRecord.gif" alt="Move Record"></a>
 	  </span>
 	  <span>
-	    <a href="javascript: void resetVisibleRecord()" title="Reset changes on current form"><img src="/psldap/images/resetRec.gif" alt="Reset Record" ></a>
+	    <a href="javascript: void submitVisibleRecord('Delete')" title="Delete this record"><img src="images/delRecord.gif" alt="Delete Record" ></a>
 	  </span>
 	  <span>
-	    <a href="javascript: void toggleClassInfo()" title="Change record classification"><img src="/psldap/images/showClass.gif" alt="Show record type" ></a>
+	    <a href="javascript: void resetVisibleRecord()" title="Reset changes on current form"><img src="images/resetRec.gif" alt="Reset Record" ></a>
+	  </span>
+	  <span>
+	    <a href="javascript: void toggleClassInfo()" title="Change record classification"><img src="images/showClass.gif" alt="Show Type" ></a>
 	  </span>
 	</div>
 	<br />
-	<div id="processDiv">
-	  <iframe id="processWindow" name="processWindow" src="/psldap/statusPage.html" cleanSrc="/psldap/statusPage.html" width="50px" style="display: none; border: none" onload="showProcessDocument();" >
-	  </iframe>
-	</div>
       </td>
       <td width="*" style="padding-top: 0; padding-bottom: 0;">
+	<div id="processDiv">
+	  <a href="javascript: void showProcessDocument(false);">Hide results<br /></a>
+	  <iframe id="processWindow" name="processWindow" src="/psldap/statusPage.html" cleanSrc="/psldap/statusPage.html" width="100%" style="border: none" >
+	  </iframe>
+	</div>
 	<div id="editFrame" name="editableRecords" width="*" height="100%" />
       </td>
     </tr>

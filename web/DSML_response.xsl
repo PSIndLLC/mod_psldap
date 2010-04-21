@@ -102,53 +102,45 @@
 </xsl:template>
 
 
+<xsl:template match="resultCode" >
+  <xsl:if test="(not(resultCode/attribute::code='0'))">
+    <xsl:element name="p">&nbsp; Error <xsl:element name="resultCode"><xsl:attribute name='code'><xsl:value-of select="./attribute::code" /></xsl:attribute><xsl:attribute name='dn'><xsl:value-of select="../../attribute::id" /></xsl:attribute><xsl:value-of select="./attribute::code" /></xsl:element>: <xsl:value-of select="../errorMessage" /></xsl:element>
+  </xsl:if>
+</xsl:template>
+
 <xsl:template match="authResponse" >
   <xsl:element name="p">Authorization operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 <xsl:template match="delResponse" >
   <xsl:element name="p">Delete operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error <xsl:value-of select="resultCode/attribute::code" />: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 <xsl:template match="addResponse" >
   <xsl:element name="p">Add operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error <xsl:value-of select="resultCode/attribute::code" />: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 <xsl:template match="modifyResponse" >
   <xsl:element name="p">Modify operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error <xsl:value-of select="resultCode/attribute::code" />: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 <xsl:template match="searchResponse" >
   <xsl:element name="p">Search operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error <xsl:value-of select="resultCode/attribute::code" />: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 <xsl:template match="modDNResponse" >
   <xsl:element name="p">DN Modification operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error <xsl:value-of select="resultCode/attribute::code" />: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 <xsl:template match="compareResponse" >
   <xsl:element name="p">Compare operation: <xsl:value-of select="errorMessage" /></xsl:element>
-  <xsl:if test="(not(resultCode/attribute::code='0'))">
-    <xsl:element name="p">&nbsp; Error: <xsl:value-of select="errorMessage" /></xsl:element>
-  </xsl:if>
+  <xsl:apply-templates select="resultCode" />
 </xsl:template>
 
 </xsl:stylesheet>

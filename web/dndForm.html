@@ -1,0 +1,32 @@
+<html>
+  <head>
+    <meta content="text/html; charset=iso-8859-1" http-equiv="Content-Type">
+    <meta content="text/javascript" http-equiv="Content-Script-Type">
+    <meta content="David J. Picard" name="Author">
+    <link href="/psldap/DSML_psldap.css" media="Screen,print" type="text/css" rel="STYLESHEET">
+    <link href="/psldap/DSML_desktop.css" media="Screen,print" type="text/css" rel="STYLESHEET">
+    <script src="/psldap/psldap_config.js" language="JavaScript" type="text/javascript"></script>
+    <title>Edit LDAP Records</title>
+    <style type="text/css">
+      div#processDiv {  z-index: 0; background-color: beige; border: 1px solid silver; margin: 0px; display: none; position: absolute; left: 48px; width: 384px; }
+    </style>
+  </head>
+  <body>
+    <div id="editNavControls">
+      <span><a title="Modify this record" href="javascript: void submitVisibleRecord('Modify')"><img src="/psldap/images/editRecord.gif"></a></span>
+      <span><a title="Move this record" href="javascript: void moveVisibleRecord('modDNRequest')"><img src="/psldap/images/moveRecord.gif"></a></span>
+    </div>
+    
+    <form enctype="multipart/form-data" action="/ldapupdate" method="post" id="dndChangeForm">
+      <input value="" type="text" name="FormAction" >
+      <input value="" type="text" name="dn" >
+      <input value="" type="text" name="newrdn" >
+      <input value="" type="text" name="newSuperior" >
+      <input value="" type="text" name="o-1" >
+      <input value="" type="text" name="ou-1" >
+      <input value="" type="text" name="manager-1" >
+      <input value="" type="text" name="owner-1" >
+      <input value="" type="text" name="uniqueMember-1" >
+    </form>
+  </body>
+</html>

@@ -15,6 +15,10 @@
 <xsl:template name="pageSpecificHeader">
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
+    var urlBase = "/psldap";
+  </xsl:element>
+  <xsl:element name="script">
+    <xsl:attribute name="language">JavaScript</xsl:attribute>
     <xsl:attribute name="src">/psldap/DSML_treemanager.js</xsl:attribute>
   </xsl:element>
   <xsl:element name="script">
@@ -78,18 +82,18 @@
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
     <xsl:attribute name="defer">true</xsl:attribute>
-      buildOrgTree('orgTable', 'LDAPRecord', 'recordid', ','); 
+      buildOrgTree('orgTable', 'TreeNode', 'recordid', ','); 
   </xsl:element>
 </xsl:template>
 
 <xsl:template match="searchResultEntry">
   <xsl:element name="tr">
-    <xsl:attribute name="name">LDAPRecord</xsl:attribute>
+    <xsl:attribute name="name">TreeNode</xsl:attribute>
     <xsl:attribute name="recordid"><xsl:value-of select="@dn"/></xsl:attribute>
     <xsl:attribute name="id"><xsl:value-of select="@dn"/></xsl:attribute>
     <xsl:element name="td" >
       <xsl:element name="img">
-	<xsl:attribute name="src">/psldap/images/transparent.gif</xsl:attribute>
+	<xsl:attribute name="src">/psldap/images/nconnect.gif</xsl:attribute>
       </xsl:element>
     </xsl:element>
     <xsl:element name="td">

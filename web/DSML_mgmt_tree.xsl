@@ -18,6 +18,10 @@
 <xsl:template name="pageSpecificHeader" >
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
+    var urlBase = "/psldap";
+  </xsl:element>
+  <xsl:element name="script">
+    <xsl:attribute name="language">JavaScript</xsl:attribute>
     <xsl:attribute name="src">/psldap/DSML_treemanager.js</xsl:attribute>
   </xsl:element>
   <xsl:element name="script">
@@ -73,8 +77,8 @@
       <xsl:for-each select="searchResultEntry/attr[@name='objectClass']/value[text()='organizationalPerson']/ancestor::searchResultEntry">
         <xsl:sort select="attr[@name='o']/value" />
         <xsl:sort select="attr[(@name=$refAttr)]/value" />
-        <xsl:sort select="attr[@name='sn']/value" />
         <xsl:sort select="attr[@name='givenName']/value" />
+        <xsl:sort select="attr[@name='sn']/value" />
         <xsl:variable name="myManager" select="attr[(@name=$refAttr)]/value" />
         <xsl:if test="((@dn=$myManager) or (not (count(ancestor::searchResponse/searchResultEntry[@dn=$myManager]))))">
           <xsl:apply-templates select="." mode="refRecord">
@@ -85,7 +89,7 @@
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
     <xsl:attribute name="defer">true</xsl:attribute>
-    buildOrgTree('orgTable', 'LDAPRecord', 'recordid', 'refattr'); 
+    buildOrgTree('orgTable', 'TreeNode', 'recordid', 'refattr'); 
   </xsl:element>
 </xsl:template>
 
@@ -93,13 +97,13 @@
   <xsl:param name="refValue"><xsl:value-of select="@dn" disable-output-escaping="yes" /></xsl:param>
   <xsl:variable name="reportCount" select="count(ancestor::searchResponse/searchResultEntry/attr[(@name=$refAttr)]/value[text()=$refValue])" />
   <xsl:element name="tr">
-    <xsl:attribute name="name">LDAPRecord</xsl:attribute>
+    <xsl:attribute name="name">TreeNode</xsl:attribute>
     <xsl:attribute name="recordid"><xsl:value-of select="@dn"/></xsl:attribute>
     <xsl:attribute name='refattr'><xsl:value-of select="attr[(@name=$refAttr)]/value"/></xsl:attribute>
     <xsl:attribute name="id"><xsl:value-of select="@dn"/></xsl:attribute>
     <xsl:element name="td" >
       <xsl:element name="img">
-	<xsl:attribute name="src">/psldap/images/transparent.gif</xsl:attribute>
+	<xsl:attribute name="src">/psldap/images/nconnect.gif</xsl:attribute>
       </xsl:element>
     </xsl:element>
     <xsl:element name="td">
@@ -127,8 +131,8 @@
         <xsl:element name="table">
           <xsl:element name="tbody">
             <xsl:apply-templates select="ancestor::searchResponse/searchResultEntry[(not (@dn=$refValue))]/attr[(@name=$refAttr)]/value[(text()=$refValue)]/ancestor::searchResultEntry" mode="refRecord">
-              <xsl:sort select="attr[@name='sn']/value" />
               <xsl:sort select="attr[@name='givenName']/value" />
+              <xsl:sort select="attr[@name='sn']/value" />
             </xsl:apply-templates>
           </xsl:element>
         </xsl:element>

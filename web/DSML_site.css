@@ -1,3 +1,5 @@
+@import url(DSML_skin_green.css);
+
 body { color: #0000FF ; background-color: #000000; font-family: arial; font-size: 12px; margin: 1em; }
 
 .mobile { display:none; }

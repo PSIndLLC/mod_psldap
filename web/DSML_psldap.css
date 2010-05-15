@@ -16,11 +16,11 @@ td.menubar_center input { margin-top: 3px; margin-bottom: 3px; font-family: aria
 
 label { font-size: 10px; margin-top: 0px; margin-bottom: 0px; }
 
-pre, input, textarea, select { padding-top: 0px; font-family: arial; font-size: 10px; margin-top: 0px; margin-bottom: 0px; }
+pre, input, textarea, select { padding-top: 0px; font-family: arial; font-size: 10px; margin-top: 0px; margin-bottom: 2px;  }
 
 table { border-collapse: collapse; border: none; border-spacing: 3px; }
 
-table.boxed, tr.boxed { border-collapse: collapse; border: 3px solid #008A00; border-spacing: 3px; margin: 0px; padding: 0px; }
+table.boxed, tr.boxed { margin: 0px; padding: 0px; }
 
 table.menubar, tr.menubar { width: 100%; border-spacing: 0px; margin: 0px; padding: 0px; }
 table.menubar *, tr.menubar * { border-spacing: 0px; margin: 0px; padding: 0px; }
@@ -28,156 +28,88 @@ table.menubar *, tr.menubar * { border-spacing: 0px; margin: 0px; padding: 0px; 
 table.std { border-style: hidden; border-spacing: 3px; }
 
 td { border: none; font-size: 12px; }
-td#tree_cell { padding-top: 0; padding-bottom: 0; cursor:e-resize; }
+td#tree_cell { padding-top: 0px; padding-bottom: 0px; cursor:e-resize; }
 td#tree_cell div { cursor:auto; }
 
-td.cardColumn { vertical-align:top; border-left-width: 3px; border-left-style: ridge; padding-left: 10px; padding-right: 10px; }
+td.cardColumn { vertical-align: top; padding-left: 10px; padding-right: 10px; }
 
 td.data { padding-left: 4px; padding-right: 4px; padding-top: 3px; vertical-align:top; white-space:nowrap; }
+
+td.data span input, td.data span { vertical-align: top; }
 
 td.label { padding-left: 4px; padding-right: 4px; padding-top: 3px; vertical-align:top; text-align: right; white-space: nowrap; }
 
 table[name=cardInstance] { table-layout: auto; margin-top: 6px; margin-bottom: 0px; padding: 0px; border-spacing: 0px; }
 table[name=cardInstance] tr { width: 100%; margin-top: 0px; margin-bottom: 0px; border: 0px; }
-td.menubar_center { background: url(/psldap/images/header_bg.gif); background-repeat: repeat-x; white-space: nowrap; }
-td.menubar_center * { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; vertical-align:middle; padding: 1px; }
+td.menubar_center { white-space: nowrap; }
+td.menubar_center * { vertical-align:middle; padding: 1px; }
 td.menubar_center img { margin-left: 2px; margin-right: 1px; }
-td.menubar_left { background: url(/psldap/images/left_header.gif); background-repeat: no-repeat; width: 20px; }
-td.menubar_right { background: url(/psldap/images/right_header.gif); background-repeat: no-repeat; width: 20px; }
 td.menubar_right img, td.menubar_left img { width: 20px; height: 12px; opacity: 0.0; filter: alpha(opacity=0); }
 
-table#orgTable tr td a {
-      text-decoration: none;
-}
-
-table#orgTable tr td a:hover {
-      text-decoration: none;
-      font-weight: bold;
-}
-
-table#orgTable tr td a:active {
-      text-decoration: none;
-      font-weight: bold;
-}
-
-table#orgTable table tr[lastnode="true"]>td:first-child {
-      background-color: white;
-}
-
-table#orgTable td[objectclass] {
-      background-repeat: no-repeat;
-      padding-left: 2px;
-      padding-right: 2px;
-      padding-top: 0px;
-      padding-bottom: 0px;
-}
-
 table#orgTable td[objectclass="organization"] {
-      background: url(/psldap/images/organization.gif);
-      background-repeat: no-repeat;
+    background: url(/psldap/images/organization.gif);
 }
 
 table#orgTable td[objectclass="organizationalUnit"] {
-      background: url(/psldap/images/orgUnit.gif);
-      background-repeat: no-repeat;
+    background: url(/psldap/images/orgUnit.gif);
 }
 
 table#orgTable td[objectclass="groupOfUniqueNames"] {
-      background: url(/psldap/images/group.gif);
-      background-repeat: no-repeat;
+    background: url(/psldap/images/group.gif);
 }
 
 table#orgTable td[objectclass="organizationalPerson"] {
-      background: url(/psldap/images/person.gif);
-      background-repeat: no-repeat;
+    background: url(/psldap/images/person.gif);
 }
 
-table#orgTable td[objectclass] a {
-    vertical-align: top;
-}
-
-tr[recordid] td img {
-    height: 16px;
-}
-    
-img.dragHandle {
-    height: 16px;
-    cursor: move;
+table#orgTable td[objectclass] {
+    background-repeat: no-repeat;
 }
 
 table#directoryTable tr td pre {
-      font-family: arial;
+    font-family: arial;
 }
 
 table#directoryTable tr td {
-      padding-left: 5px;
-      padding-right: 5px;
-      padding-top: 2px;
-      padding-bottom: 2px;
-      vertical-align:top;
-      border-width: 3px;
-      border-style: ridge;
-      font-size: 12px;
+    padding-left: 5px;
+    padding-right: 5px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    vertical-align:top;
+    font-size: 12px;
 }
 
 div#editNavControls {
-      text-align: center;
-      font-family: arial;
-      font-size: 12px;
+    text-align: center;
+    font-family: arial;
+    font-size: 12px;
 }
 div#editNavControls span {
-      display: block;
-      width: 29px;
-      line-height: 29px;
-      margin: 5px;
-      height: 29px;
-      cursor: pointer;
+    display: block;
+    width: 36px;
+    line-height: 36px;
+    margin: 5px;
+    height: 36px;
+    cursor: pointer;
 }
-div#editNavControls span img {
-      margin: 1px;
-      display: block;
-      width: 29px;
-      height: 29px;
-}
-div#editNavControls_bak span a {
-      display: block;
-      text-decoration: none;
-      font-size: 12px;
-      shape: 14 14 14;
-      color: #000000;
-      background-position: 0px 0px;
-      background-image: url(/psldap/images/button_all.gif);
-      background-repeat: no-repeat;
+div#editNavControls span a img {
+    margin: 1px;
+    padding: 3px;
+    display: block;
+    width: 29px;
+    height: 29px;
+    opacity: 0.9; filter: alpha(opacity=90);
 }
 div#editNavControls span a {
-      display: block;
-      text-decoration: none;
-      font-size: 12px;
-      color: #000000;
-      background-position: 0px 0px;
-      background-image: url(/psldap/images/button_all.gif);
-      background-repeat: no-repeat;
-}
-div#editNavControls span a:link {
-      color: #000000;
-      background-position: 0px 0px;
-}
-div#editNavControls span a:visited {
-      color: #000000;
-      background-position: 0px 0px;
+    display: block;
+    text-decoration: none;
+    font-size: 12px;
 }
 div#editNavControls span a:hover {
-      color: #000000;
-      font-weight: bold;
-      background-image: url(/psldap/images/button_over.gif);
-      background-repeat: no-repeat;
+    font-weight: bold;
 }
 div#editNavControls span a:active {
-      color: #000000;
-      font-weight: bold;
-      background-position: 0px -58px;
-      background-image: url(/psldap/images/button_all.gif);
-      background-repeat: no-repeat;
+    font-weight: bold;
 }
 
 img.cloneNode {

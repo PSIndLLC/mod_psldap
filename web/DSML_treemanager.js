@@ -3,7 +3,7 @@
  *
  * User Authentication against and maintenance of an LDAP database
  *
- * Copyright (C) 2004 David Picard dpicard@psind.com
+ * Copyright (C) 2004-2010 David Picard dpicard@psind.com
  *
  * http://www.psind.com/projects/mod_psldap/
  *
@@ -25,12 +25,23 @@
  *************************************************************************
  */
 
+var tmBaseUrl = "";
+try {
+    if (urlBase.length > 0) tmBaseUrl = urlBase;
+} catch (ex) {
+    window.status = "Using psajax treemanager...";
+}
+
+function generateEmptyNodeString() {
+    return "<img style='width: 12px; height: 12px; margin-left: 2px;' src='"+tmBaseUrl+"/images/nconnect.gif' alt=' ' />";
+}
+
 function generateExpandNodeString(navNode, treeNode) {
-  return "<a style=\"padding-right: 1px; padding-left: 1px; font-family: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none;\" href=\"javascript:void(0);\" onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">+</a>"
+    return "<a style=\"border-width: 0px; text-decoration: none;\" href=\"javascript:void(0);\" onClick=\"expandTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\"><img style='width: 12px; height: 12px;' src='"+tmBaseUrl+"/images/ebutton.gif' alt='+' /></a>";
 }
 
 function generateCollapseNodeString(navNode, treeNode) {
-  return "<a style=\"padding-right: 2px; padding-left: 2px; font-family: fixedsys, monospace; border-width: 1px; border-style: dotted; text-decoration: none; \" href=\"javascript:void(0);\" onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\">-</a>"
+    return "<a style=\"border-width: 0px; text-decoration: none; \" href=\"javascript:void(0);\" onClick=\"collapseTreeNode(\'" + navNode.id + "\',\'" + treeNode.id + "\');\"><img style='width: 12px; height: 12px;' src='"+tmBaseUrl+"/images/cbutton.gif' alt='-' /></a>";
 }
 
 function collapseTreeNode(navNodeId, treeNodeId) {
@@ -92,15 +103,15 @@ function getTreeNodeByLabel2(label) {
   var result = null;
 
   for (var i = 0; !result && (i < anchorList.length); i++) {
-    var childList = "Node children: " + anchorList[i].childNodes.length;
-    for (var j = 0; j < anchorList[i].childNodes.length; j++) {
-      childList += "  type = " + anchorList[i].childNodes[j].nodeType + ": " + anchorList[i].childNodes[j].nodeValue;
-      if ((anchorList[i].childNodes[j].nodeType == 3) &&
-          (anchorList[i].childNodes[j].nodeValue == label) ) {
-        result = anchorList[i];
-        break;
+      var childList = "Node children: " + anchorList[i].childNodes.length;
+      for (var j = 0; j < anchorList[i].childNodes.length; j++) {
+	  var alcn = anchorList[i].childNodes[j];
+	  childList += "  type = " + alcn.nodeType + ": " + alcn.nodeValue;
+	  if ((alcn.nodeType == 3) && (alcn.nodeValue == label) ) {
+	      result = anchorList[i];
+	      break;
+	  }
       }
-    }
   }
 
   return result;
@@ -144,13 +155,131 @@ function runAnchorHref(selectedNode) {
   }
 }
 
-function getLastRowOfTable(objTable)
+function pstm_getAllRowsOfTable(objTable)
 {
-    var result = objTable.lastChild;
-    if (0 != result.tagName.indexOf("TR")) {
-        result = objTable.lastChild.lastChild;
+    var result = objTable.getElementsByTagName("TR");
+    var next_tr = objTable.lastChild;
+    while (next_tr && (!next_tr.tagName || (0 != next_tr.tagName.indexOf("TR")) ) ) {
+        next_tr = next_tr.lastChild;
+	while (next_tr.nodeType != 1) next_tr = next_tr.previousSibling;
+    }
+
+    result = new Array();
+    while (next_tr) {
+	result.unshift(next_tr);
+	for (next_tr = next_tr.previousSibling; next_tr && (next_tr.nodeType != 1);
+	     next_tr = next_tr.previousSibling);
+    }
+
+    return result;
+}
+
+function pstm_findOrCreateNextLevel(el)
+{
+    var result = null;
+
+    el = el.lastChild;
+    if (0 != el.lastChild.tagName.indexOf("TABLE")) {
+	var objTableElmt = document.createElement("table");
+	var objTableBody = document.createElement("tbody");
+
+	var alltns = document.getElementsByName("treeNodeTable");
+	for (var i = alltns.length; i >= 0; i--) {
+	    if ( ! document.getElementById('tntable'+i)) {
+		objTableElmt.id = 'tntable'+i;
+		objTableElmt.setAttribute('id','tntable'+i);
+	    }
+	}
+	objTableBody.style.width = "100%";
+	objTableElmt.setAttribute('name','treeNodeTable');
+	objTableElmt.style.width = "100%";
+	objTableElmt.appendChild(objTableBody);
+	el.appendChild(document.createElement("BR"));
+	el.appendChild(objTableElmt);
+	addNavigationToTree(objTableElmt);
+	
+	result = objTableBody;
+
+	var navElmt = getNavElementForNode(objTableElmt);
+	var allnes = document.getElementsByName("treeNavigationElement");
+	for (var i = allnes.length; i >= 0; i--) {
+	    if ( ! document.getElementById('nav'+i)) {
+		navElmt.id ='nav'+i;
+		navElmt.setAttribute('id','nav'+i);
+	    }
+	}
+	navElmt.setAttribute('name', "treeNavigationElement");
+	navElmt.style.verticalAlign="top";
+	navElmt.style.width="12px";
+	navElmt.innerHTML = generateCollapseNodeString(navElmt, objTableElmt);
+    } else {
+	result = el.lastChild.lastChild;
+    }
+
+    return result;
+}
+
+function pstm_getRecordRow(nodeId, _attrName)
+{
+    var result = null;
+    var elmts = document.getElementsByName("TreeNode");
+    var i;
+    var idStr = nodeId.replace(/\s/g, "");
+    var attrName = (arguments.length > 1) ? _attrName : "tnid";
+    for(i = 0; i < elmts.length; i++) {
+	if(0 == elmts[i].getAttribute(attrName).replace(/\s/g, "").localeCompare(idStr)) {
+	    result = elmts[i];
+	    break;
+	}
     }
     return result;
+}
+
+function pstm_moveRowToNode(nodeId, newNodeId, _attrName, sortFunc)
+{
+    var attrName = (arguments.length > 2) ? _attrName : 'tnid';
+    var srcElmt = pstm_getRecordRow(nodeId, attrName);
+    var targetElmt = pstm_getRecordRow(newNodeId, attrName);
+
+    if (srcElmt && targetElmt) {
+	var childTbl = pstm_findOrCreateNextLevel(targetElmt);
+	if ("true" == srcElmt.getAttribute("lastnode")) {
+	    var prvSib = srcElmt.previousSibling;
+	    if (prvSib) { prvSib.setAttribute("lastnode", "true"); }
+	    else {
+		var navElmt = srcElmt.parentNode;
+		while (navElmt && (0 != navElmt.tagName.indexOf("TABLE"))) {
+		    navElmt = navElmt.parentNode;
+		}
+		if (navElmt) {
+		    var tableNode = navElmt;
+		    navElmt = getNavElementForNode(navElmt);
+		    navElmt.innerHTML = generateEmptyNodeString();
+		    tableNode.parentNode.removeChild(tableNode.previousSibling);
+		    tableNode.parentNode.removeChild(tableNode);
+		}
+	    }
+	    srcElmt.removeAttribute("lastnode");
+	}
+	srcElmt.parentNode.removeChild(srcElmt);
+	var ns = childTbl.firstChild;
+	if (arguments.length > 3) {
+	    while (ns && (0 > sortFunc(srcElmt,ns))) {
+		ns = ns.nextSibling;
+	    }
+	}
+	if (ns) childTbl.insertBefore(srcElmt, ns);
+	else {
+	    childTbl.appendChild(srcElmt);
+	    srcElmt.setAttribute("lastnode", "true");
+	}
+	var currDS = childTbl.style.display;
+	childTbl.style.display = 'none';
+	childTbl.style.display = currDS;
+    } else {
+	window.status = "Moved row "+ srcElmt +" to " + targetElmt;
+    }
+    return srcElmt;
 }
 
 /**
@@ -173,46 +302,75 @@ function getLastRowOfTable(objTable)
  *        should be checked for an argument, album, whose value will override
  *        the default selectedNodeId
  **/
-function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs) {
-  var expandNodeId = selectedNodeId;
-  var rootnode = (typeof(nodeId) != "string") ? nodeId :
-      document.getElementById(nodeId);
-  if (null == rootnode) throw new Error("Root of tree not found: " + nodeId);
-  var nodeList = rootnode.getElementsByTagName("TABLE");
-  for (var i = 0; i < nodeList.length; i++) {
-    nodeList[i].id = "tntable" + i;
-    var navElement = getNavElementForNode(nodeList[i]);
-    navElement.id="nav" + i;
-    navElement.name="treeNavigationElement"
-    navElement.style.verticalAlign="top";
-    navElement.style.width="12px";
-    navElement.innerHTML = generateCollapseNodeString(navElement, nodeList[i]);
-    var lastRow = getLastRowOfTable(nodeList[i]);
-    if (null != lastRow) lastRow.setAttribute("lastnode", "true");
-  }
-  collapseAllTreeNodes(rootnode);
-  if (arguments.length > 2) {
-    requestArgList = top.document.URL.split("?");
-    if (requestArgList.length > 1) {
-      var passedNodeId = "";
-      requestArgList = requestArgList[1].split("&");
-      for (var i = 0; i < requestArgList.length; i++) {
-        var thisArg = decodeURIComponent(requestArgList[i]);
-        if ((0 == thisArg.indexOf("node=")) && (thisArg.length > 5) ) {
-          passedNodeId = thisArg.split("=")[1];
-          break;
-        }
-      }
-      if (passedNodeId != "") {
-        expandNodeId = passedNodeId;
-      }
+function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs, nodeName) {
+    var expandNodeId = selectedNodeId;
+    var rootnode = (typeof(nodeId) != "string") ? nodeId :
+	document.getElementById(nodeId);
+    if (null == rootnode) throw new Error("Root of tree not found: " + nodeId);
+    
+    rootnode.className = "pstree";
+    rootnode.setAttribute('tnid', 'tn.root');
+
+    var hNode = document.getElementsByTagName("head")[0];         
+    var cssNode = document.createElement('link');
+    cssNode.type = 'text/css';
+    cssNode.rel = 'stylesheet';
+    cssNode.href = tmBaseUrl + '/treemanager.css';
+    cssNode.media = 'screen';
+    hNode.appendChild(cssNode);
+
+    var nodeList = rootnode.getElementsByTagName("TABLE");
+    for (var i = 0; i < nodeList.length; i++) {
+	nodeList[i].id = "tntable" + i;
+	nodeList[i].setAttribute('name', "treeNodeTable");
+	var navElement = getNavElementForNode(nodeList[i]);
+	navElement.id="nav" + i;
+	navElement.setAttribute('name',"treeNavigationElement");
+	navElement.style.verticalAlign="top";
+	navElement.style.width="12px";
+	navElement.innerHTML = generateCollapseNodeString(navElement, nodeList[i]);
+	var navRows = pstm_getAllRowsOfTable(nodeList[i]);
+	for (var j = 0; j < navRows.length; j++) {
+	    navRows[j].setAttribute('tnid', 'tn.'+i+'.'+j);
+	    var nrName = navRows[j].getAttribute('name');
+	    var nrtd = navRows[j].firstChild;
+	    while (nrtd && (nrtd.nodeType != 1)) nrtd = nrtd.nextSibling;
+	    if (!nrName || (0 != nrName.localeCompare("treeNavigationElement") ) ) {
+		if (nrtd) nrtd.innerHTML = generateEmptyNodeString();
+	    }
+	    for (nrtd = nrtd.nextSibling; nrtd && (nrtd.nodeType != 1);
+		 nrtd = nrtd.nextSibling );
+	    if (nrtd && !nrtd.getAttribute('tnclass'))
+		nrtd.setAttribute('tnclass', 'misc');
+	    navRows[j].setAttribute("name", "TreeNode");
+	}
+	if (navRows.length > 0) {
+	    navRows[navRows.length-1].setAttribute("lastnode", "true");
+	}
     }
-  }
-  if (arguments.length > 1) {
-    var selectedNode = expandTreeHierarchy(expandNodeId);
-    if (null == selectedNode) {
-      selectedNode = expandTreeHierarchy(selectedNodeId);
+    collapseAllTreeNodes(rootnode);
+    if (arguments.length > 2) {
+	requestArgList = top.document.URL.split("?");
+	if (requestArgList.length > 1) {
+	    var passedNodeId = "";
+	    requestArgList = requestArgList[1].split("&");
+	    for (var i = 0; i < requestArgList.length; i++) {
+		var thisArg = decodeURIComponent(requestArgList[i]);
+		if ((0 == thisArg.indexOf("node=")) && (thisArg.length > 5) ) {
+		    passedNodeId = thisArg.split("=")[1];
+		    break;
+		}
+	    }
+	    if (passedNodeId != "") {
+		expandNodeId = passedNodeId;
+	    }
+	}
     }
-    runAnchorHref(selectedNode);
-  }
+    if (arguments.length > 1) {
+	var selectedNode = expandTreeHierarchy(expandNodeId);
+	if (null == selectedNode) {
+	    selectedNode = expandTreeHierarchy(selectedNodeId);
+	}
+	runAnchorHref(selectedNode);
+    }
 }

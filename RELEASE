@@ -1,29 +1,6 @@
-Revision 0.92
+Revision 0.94
 ===================
 SUMMARY
-The latest release of mod_psldap is a patch fix against 0.91 to address defects identified in extended testing. This is a bug fix release to address variations on the initially tested configurations and restores isolation of site specific configurations to simplify an upgrade.
+The latest release of mod_psldap provides new core capabilities to support new actions to register users, add ldap attributes and client side drag and drop editing of the LDAP records to reassign records to superiors, people to managers, and members to groups. A client side form validation framework was also introduced that simplifies validation through leverage of custom attributes on the input elements.
 
 DETAIL
-Moved common capabilities back out of DSML_sitefrags.xsl to leave that 
-stylesheet for site specific customizations only - common capabilities are now 
-in DSML_commonscript.xsl
-
-Refactored the pageHeader template with pageHeaderWithRefClass to reduce 
-duplicate code
-
-Removed some hardcoded values from the DSML_vendors.xsl (enabled automatic 
-population of the ldapDomains to all select elements with an id of 'dn') and 
-made the template for servicesMgmt site specific
-
-Corrected minor title setting bug on commonscript XSL
-
-Extended vcard to include KEY, REV, PRODID, and CLASS, also fixing IM references
-to be compliant with RFC 4770
-
-Fixed generated dsml structure to better match spec - pushed searchResponse 
-back under a batchResponse node and change mgmt and org XSL back to reference 
-the correct XPath
-
-Fixed improper ServerPath inclusion in fully qualified path assembly - repairs 
-issue with XML and XSL file parse for server side operations when recursive path
-link is not present

@@ -100,60 +100,6 @@ var ps_dndActionBindings = [
 			    ];
 
 
-function ps_findOrCreateNextLevel(el)
-{
-    var result = null;
-
-    el = el.lastChild;
-    if (0 != el.lastChild.tagName.indexOf("TABLE")) {
-	var objTableElmt = document.createElement("table");
-	var objTableBody = document.createElement("tbody");
-
-	objTableBody.style.width = "100%";
-	objTableElmt.style.width = "100%";
-	objTableElmt.appendChild(objTableBody);
-	el.appendChild(document.createElement("BR"));
-	el.appendChild(objTableElmt);
-	addNavigationToTree(objTableElmt);
-	
-	result = objTableBody;
-    } else {
-	result = el.lastChild.lastChild;
-    }
-
-    return result;
-}
-
-function ps_getLDAPRecordRow(dn)
-{
-    var result = null;
-    var elmts = document.getElementsByName("LDAPRecord");
-    var i;
-    var dnStr = dn.replace(/\s*,[ ]*\s*/g, ", ");
-    for(i = 0; i < elmts.length; i++) {
-	if(0 == elmts[i].getAttribute('id').replace(/\s*,[ ]*\s*/g, ", ").localeCompare(dnStr)) {
-	    result = elmts[i];
-	    break;
-	}
-    }
-    return result;
-}
-
-function ps_moveRowToNode(dn, newMgrDn)
-{
-    var srcElmt = ps_getLDAPRecordRow(dn);
-    var targetElmt = ps_getLDAPRecordRow(newMgrDn);
-
-    if (srcElmt && targetElmt) {
-	var childTbl = ps_findOrCreateNextLevel(targetElmt);
-	srcElmt.parentNode.removeChild(srcElmt);
-	childTbl.appendChild(srcElmt);
-    } else {
-	window.status = srcElmt +":" + targetElmt;
-    }
-    return srcElmt;
-}
-
 function ps_dndChangeManager(invert, mode) {
     this.dndForm.FormAction.value = "Modify";
 
@@ -169,7 +115,7 @@ function ps_dndChangeManager(invert, mode) {
 	else if ((mode == "fixTree" ) && (this.srcCtxt  == "mgmtTree") &&
 		 (this.targetCtxt  == "mgmtTree") ) {
 	    window.status = "Fixing management tree";
-	    if (null != ps_moveRowToNode(src, target)) {
+	    if (null != pstm_moveRowToNode(src, target, 'id', sortByNodeId) ) {
 		if (ps_dndState.xslmgr) { ps_dndState.xslmgr.setXmXML(); }
 	    } else {
 		location.reload(true);
@@ -242,7 +188,7 @@ function ps_dndModifyDN(invert, mode) {
 	else if ((mode == "fixTree" )  && (this.srcCtxt  == "orgTree") &&
 		 (this.targetCtxt  == "orgTree") ) {
 	    window.status = "Fixing organizational tree: " + src + ":" + target;
-	    var el = ps_moveRowToNode(src, target);
+	    var el = pstm_moveRowToNode(src, target, 'id', sortByNodeId);
 	    if (null != el) {
 		el.setAttribute('id',
 				(src.replace(/([^=]*)=([^,]*),.*/,'$1=$2') +
@@ -1672,18 +1618,9 @@ function verticalWrapChildren(objCellElmt, reservedSize)
     } while (undefined != nextChild);
 }
 
-function sortByTreeParentId(objItem1, objItem2)
+function sortByNodeId(objItem1, objItem2)
 {
-    if (!objItem1.parentElmtCount) {
-        objItem1.parentElmtCount = objItem1.treeParentId.match(/=/gi).length;
-    }
-    if (!objItem2.parentElmtCount) {
-        objItem2.parentElmtCount = objItem2.treeParentId.match(/=/gi).length;
-    }
-    var result = objItem1.parentElmtCount - objItem2.parentElmtCount;
-    if (0 == result) {
-        result = objItem1.treeParentId.localeCompare(objItem2.treeParentId);
-    }
+    var result = 0;
     if (0 == result) {
         result = objItem1.id.localeCompare(objItem2.id);
     }
@@ -1693,11 +1630,38 @@ function sortByTreeParentId(objItem1, objItem2)
 function sortByTreeParentIdManager(objItem1, objItem2)
 {
     var result = 0;
+
     if (0 == result) {
         result = objItem1.treeParentId.localeCompare(objItem2.treeParentId);
     }
     if (0 == result) {
-        result = objItem1.id.localeCompare(objItem2.id);
+        result = sortByNodeId(objItem1, objItem2);
+    }
+    return result;
+}
+
+function sortByTreeParentId(objItem1, objItem2)
+{
+    var parentRegex = /([^,]*,)/;
+    var reNormal = /\s*,[ ]*\s*/g;
+
+    if (!objItem1.treeParentId) {
+	objItem1.treeParentId = objItem1.getAttribute('recordid').replace(parentRegex, "").replace(reNormal, ", ");
+    }
+    if (!objItem2.treeParentId) {
+	objItem2.treeParentId = objItem2.getAttribute('recordid').replace(parentRegex, "").replace(reNormal, ", ");
+    }
+
+    if (!objItem1.parentElmtCount) {
+        objItem1.parentElmtCount = objItem1.treeParentId.match(/=/gi).length;
+    }
+    if (!objItem2.parentElmtCount) {
+        objItem2.parentElmtCount = objItem2.treeParentId.match(/=/gi).length;
+    }
+
+    var result = objItem1.parentElmtCount - objItem2.parentElmtCount;
+    if (0 == result) {
+        result = sortByTreeParentIdManager(objItem1, objItem2);
     }
     return result;
 }
@@ -1711,12 +1675,8 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
         alert("Could not find table " + tableIdStr + " to build tree");
 	window.status = "Tree " + tableIdStr + " not found in document";
     } else {
-        var objElmtArray;
-        if (objTable.rows) {
-            objElmtArray = objTable.rows;
-        } else {
-            objElmtArray = document.getElementsByName(recordNameStr);
-        }
+        var objElmtArray  = (objTable.rows) ? objTable.rows :
+	    document.getElementsByName(recordNameStr);
         var objRecord;
         var objRecordArray = new Array();
         var parentRegex = /([^,]*,)/;
@@ -1732,7 +1692,7 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
                 objRecord.treeParentId = objRecord.getAttribute("refattr");
 		objRecord.setAttribute("refattr",
 		   objRecord.getAttribute("refattr").replace(reNormal, ", "));
-            } else  {
+            } else {
                 objRecord.treeParentId =
 		    objRecord.getAttribute(rowIdStr).replace(parentRegex, "");
             }
@@ -1745,11 +1705,10 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
             objRecordArray.push(objRecord);
         }
 
-        if (managerTree) {
-            objRecordArray.sort(sortByTreeParentIdManager);
-        }  else {
-            objRecordArray.sort(sortByTreeParentId);
+	objTable.setAttribute('nodeSorter', (managerTree) ? sortByTreeParentIdManager : sortByTreeParentId);
 
+	objRecordArray.sort((managerTree) ? sortByTreeParentIdManager : sortByTreeParentId);
+        if (!managerTree) {
             // Iterate in reverse, identify each child group, removing it from
             //   the array and moving those tr nodes under a table within the
             //   tr node of the parent record.

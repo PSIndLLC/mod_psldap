@@ -17,6 +17,10 @@ Enable integration to blackberry contact database
 Finish integration of browser support for HttpOnly on secure cookies
 
 
+Revision 0.94 
+===================
+
+
 Revision 0.93 
 ===================
 Fixed DocumentManager JS API to accomodate browser technology changes - 

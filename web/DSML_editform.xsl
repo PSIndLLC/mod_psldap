@@ -343,10 +343,10 @@
       <xsl:apply-templates select="." mode="hiddenAttributes" />
 
       <table border='0' cellspacing='0'>
-	<tr><td>
+	<tr><td style="padding-bottom: 0px; " >
 	    <xsl:apply-templates select="." mode="recordHead" />
 	</td></tr>
-	<tr><td>
+	<tr><td style="padding-top: 0px; ">
 	    <table class='boxed' width='100%'>
 	      <xsl:apply-templates select="attr" mode="genericForm" >
 		<xsl:sort select='@name' />
@@ -377,12 +377,12 @@
       <xsl:apply-templates select="." mode="hiddenAttributes" />
 
       <table border='0' cellspacing='0'>
-	<tr><td>
+	<tr><td style="padding-bottom: 0px; ">
 	    <xsl:apply-templates select="." mode="recordHead">
 	      <xsl:with-param name='oClass'>organization</xsl:with-param>
 	    </xsl:apply-templates>
 	</td></tr>
-	<tr><td>
+	<tr><td style="padding-top: 0px; ">
 	    <table class='boxed' width='100%'>
 	      <tr><td>
 		  <table>
@@ -520,12 +520,12 @@
       <xsl:apply-templates select="." mode="hiddenAttributes" />
 
       <table border='0' cellspacing='0'>
-	<tr><td>
+	<tr><td style="padding-bottom: 0px; ">
 	    <xsl:apply-templates select="." mode="recordHead">
 	      <xsl:with-param name='oClass'>organizationalUnit</xsl:with-param>
 	    </xsl:apply-templates>
 	</td></tr>
-	<tr><td>
+	<tr><td style="padding-top: 0px; ">
 	    <table class='boxed' width='100%'>
 	      <tr><td>
 		  <table>
@@ -741,12 +741,12 @@
       </xsl:element>
 
       <table border='0' cellspacing='0'>
-	<tr><td>
+	<tr><td style="padding-bottom: 0px; ">
 	    <xsl:apply-templates select="." mode="recordHead">
 	      <xsl:with-param name='oClass'>organizationalPerson</xsl:with-param>
 	    </xsl:apply-templates>
 	</td></tr>
-	<tr><td>
+	<tr><td style="padding-top: 0px; ">
 	    <table class='boxed' width='100%'>
 	      <tr><td>
 		  <xsl:apply-templates select="." mode="personalCore" />
@@ -947,12 +947,12 @@
       <xsl:apply-templates select="." mode="hiddenAttributes" />
 
       <table >
-	<tr><td>
+	<tr><td  style="padding-bottom: 0px; ">
 	    <xsl:apply-templates select="." mode="recordHead">
 	      <xsl:with-param name='oClass'>Groups</xsl:with-param>
 	    </xsl:apply-templates>
 	</td></tr>
-	<tr><td>
+	<tr><td style="padding-top: 0px; ">
 	    <table class='boxed' width='100%'>
 	      <tr>
 		<xsl:call-template name="editableAttr">

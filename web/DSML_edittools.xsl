@@ -150,7 +150,7 @@
       <xsl:element name="img">
 	<xsl:attribute name="class">deleteNode</xsl:attribute>
 	<xsl:attribute name="name">delete</xsl:attribute>
-	<xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/delAttr.gif</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/transparent.gif</xsl:attribute>
 	<xsl:attribute name="alt">Del </xsl:attribute>
 	<xsl:attribute name="title">Delete attribute</xsl:attribute>
 	<xsl:attribute name="onmouseup">deleteCurrentSpan(this)</xsl:attribute>
@@ -161,7 +161,7 @@
       <xsl:element name="img">
 	<xsl:attribute name="class">cloneNode</xsl:attribute>
 	<xsl:attribute name="name">clone</xsl:attribute>
-	<xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/newAttr.gif</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/transparent.gif</xsl:attribute>
 	<xsl:attribute name="alt">New </xsl:attribute>
 	<xsl:attribute name="title">Add attribute</xsl:attribute>
 	<xsl:attribute name="onmouseup">cloneAndAppendCurrentSpan(this)</xsl:attribute>

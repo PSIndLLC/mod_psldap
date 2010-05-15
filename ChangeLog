@@ -19,8 +19,12 @@ Finish integration of browser support for HttpOnly on secure cookies
 
 Revision 0.94 
 ===================
+Introduced skinning capability with two skins available and shipping with the module: green and blue
 
+Fixed sorting defect in tree view
 
+Segregated tree management scripting and styling
+	
 Revision 0.93 
 ===================
 Fixed DocumentManager JS API to accomodate browser technology changes - 

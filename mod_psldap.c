@@ -34,7 +34,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.93"
+#define PSLDAP_VERSION_LABEL "0.94"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"

@@ -1,0 +1,48 @@
+tr[tnid] td img {
+    height: 16px;
+}
+    
+table.pstree, table.pstree tr, table.pstree tr td {
+    margin: 0px;
+    padding: 0px 2px;
+    border-spacing: 0px;
+}
+
+table.pstree tr td a {
+    text-decoration: none;
+}
+
+table.pstree tr td a:hover {
+    text-decoration: none;
+    font-weight: bold;
+}
+
+table.pstree tr td a:active {
+    text-decoration: none;
+    font-weight: bold;
+}
+
+table.pstree table tr>td:first-child {
+    background: url(/psldap/images/vconnect.gif);
+    background-repeat: repeat-y;
+    padding-top: 0px;
+    padding-left: 0px;
+}
+
+table.pstree table tr[lastnode="true"]>td:first-child {
+    background: none;
+}
+
+table.pstree td[tnclass] {
+    background-repeat: no-repeat;
+    padding: 0px 2px;
+}
+
+table.pstree td[tnclass] a, table.pstree td a {
+    vertical-align: top;
+}
+
+img.dragHandle {
+    height: 16px;
+    cursor: move;
+}

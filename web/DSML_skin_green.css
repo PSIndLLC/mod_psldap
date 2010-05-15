@@ -1,0 +1,50 @@
+table.boxed, tr.boxed { border-collapse: collapse; border: 3px solid #008A00; border-spacing: 3px; }
+
+td.cardColumn { border-left-width: 3px; border-left-style: ridge; }
+
+td.menubar_center { background: url(/psldap/images/green/header_bg.gif); background-repeat: repeat-x; }
+td.menubar_center * { font-size: 14px; font-weight: bold; font-style: italic; color: #F0FF00; }
+td.menubar_left { background: url(/psldap/images/green/left_header.gif); background-repeat: no-repeat; width: 20px; }
+td.menubar_right { background: url(/psldap/images/green/right_header.gif); background-repeat: no-repeat; width: 20px; }
+
+fieldset { border-color: #008A00; }
+
+img.deleteNode { background: url(/psldap/images/green/delAttr.gif); background-repeat: no-repeat; height: 14px; }
+
+img.cloneNode { background: url(/psldap/images/green/newAttr.gif); background-repeat: no-repeat; height: 14px; }
+
+table#orgTable tr td a, fieldset legend a {
+      color: #008A00;
+}
+
+table#directoryTable tr td {
+      border-width: 3px;
+      border-style: ridge;
+}
+
+div#editNavControls span a {
+      color: #000000;
+      background-position: 0px 0px;
+      background-image: url(/psldap/images/green/button_all.gif);
+      background-repeat: no-repeat;
+}
+div#editNavControls span a:link {
+      color: #000000;
+      background-position: 0px 0px;
+}
+div#editNavControls span a:visited {
+      color: #000000;
+      background-position: 0px 0px;
+}
+div#editNavControls span a:hover {
+      color: #000000;
+      background-image: url(/psldap/images/green/button_over.gif);
+      background-repeat: no-repeat;
+}
+div#editNavControls span a:active {
+      color: #000000;
+      background-position: 0px -72px;
+      background-image: url(/psldap/images/green/button_all.gif);
+      background-repeat: no-repeat;
+}
+

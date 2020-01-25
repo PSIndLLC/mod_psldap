@@ -34,7 +34,7 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.94"
+#define PSLDAP_VERSION_LABEL "0.96"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -81,6 +81,7 @@
  #define ap_clear_table apr_table_clear
  #define ap_file_close apr_file_close
  #define ap_file_getc apr_file_getc
+ #define ap_file_gets apr_file_gets
  #define ap_file_open apr_file_open
  #define ap_iscntrl apr_iscntrl
  #define ap_isprint apr_isprint
@@ -106,6 +107,15 @@
 #else
  #include "apr_compat.h"
 #endif
+#if AP_SERVER_MINORVERSION_NUMBER > 3
+ #define ap_base64_decode apr_base64_decode
+ #define ap_base64_decode_len apr_base64_decode_len
+ #define client_ip(r) r->useragent_ip
+#else
+ #define client_ip(r) r->connection->remote_ip
+#endif
+#else
+ #define client_ip(r) r->connection->remote_ip
 #endif
  #include "apr_errno.h"
  #include "apr_general.h"
@@ -121,7 +131,7 @@
  #define DEBUG_ERRNO ,APR_SUCCESS
  #define ap_log_reason(a,b,c)
  #define ap_sha1_base64 apr_sha1_base64
- typedef apr_shm_t psldap_shm_mgr;
+typedef apr_shm_t psldap_shm_mgr;
  #define AP_MM apr_rmm_t
  #define AP_MM_LOCK_RD apr_anylock_readlock
  #define AP_MM_LOCK_RW apr_anylock_writelock
@@ -202,8 +212,13 @@
 #endif
 #define SECURE_ACCESS_T		"modifyTimestamp"
 #define ACCESS_T_FORMAT		"%Y%m%d%H%M%S"
+#define ACCESS_T_STRLEN		14
+#define LDAP_T_FORMAT		"%Y%m%d%H%M%S%Z"
+#define HTML5_T_FORMAT		"%Y-%m-%d %H:%M:%S"
+#define HTML5_T_STRLEN		20
 #define LOGIN_ACTION	"Login"
 #define SEARCH_ACTION	"Search"
+#define PWCHANGE_ACTION	"PasswordChange"
 #define MODIFY_ACTION	"Modify"
 #define ADDATTR_ACTION	"AddAttributes"
 #define CREATE_ACTION	"Create"
@@ -213,6 +228,7 @@
 #define DELETE_ACTION	"Delete"
 #define DSML_LOGIN_ACTION	"authRequest"
 #define DSML_SEARCH_ACTION	"searchRequest"
+#define DSML_PWCHANGE_ACTION	"passwordChangeRequest"
 #define DSML_MODIFY_ACTION	"modifyRequest"
 #define DSML_CREATE_ACTION	"addRequest"
 #define DSML_REGISTER_ACTION	"registerRequest"
@@ -1146,7 +1162,20 @@ static LDAP* ps_ldap_init(psldap_config_rec *conf, LDAP_CONST char *host,
 			  int port)
 {
     int connectVersion = conf->psldap_ldap_version;
-    LDAP *ld = ldap_init(host, port);
+    LDAP *ld = NULL;
+#if 0
+    if (port = 636) {
+        int reqcert = LDAP_OPT_X_TLS_NEVER;
+	if (LDAP_OPT_SUCCESS !=
+	    ldap_set_option(NULL, LDAP_OPT_X_TLS_REQUIRE_CERT, &reqcert) ) {
+	    /* Indicate failure in logs - maybe try require and set
+	       cacertfile first ... */
+	} else {
+	    /* ldap_set_options(); */
+	}
+    }
+#endif
+    ld = ldap_init(host, port);
     ldap_set_option(ld, LDAP_OPT_PROTOCOL_VERSION, &connectVersion);
     return ld;
 }
@@ -1730,6 +1759,15 @@ static char * get_user_name(request_rec *r)
 #endif
 }
 
+static void set_user_name(request_rec *r, const char *user)
+{
+#ifdef APACHE_V2
+    r->user = ap_pstrdup(r->pool, user);
+#else
+    r->connection->user = ap_pstrdup(r->pool, user);
+#endif
+}
+
 static LDAP* ps_bind_ldap(request_rec *r, LDAP **ldap,
                           const char *user, const char *pass,
                           psldap_config_rec *conf );
@@ -1777,11 +1815,11 @@ static psldap_session_rec* create_psldap_session(request_rec *r,
     sprintf(sessionId, "SESSIONID:%0lx%0lx%0lx%0lx%0lx%0lx%0lx%0lx:%s",
 	    random(),random(),random(),random(),
 	    random(),random(),random(),random(),
-	    r->connection->remote_ip );
+	    client_ip(r) );
     ps_rerror(r, APLOG_DEBUG, "Created session <id = %s>", sessionId);
     
     result->sessionId = ap_pstrdup(r->pool, sessionId);
-    result->srcIp = ap_pstrdup(r->pool, r->connection->remote_ip);
+    result->srcIp = ap_pstrdup(r->pool, client_ip(r));
     result->srcPort = ap_pstrdup(r->pool, "");
     result->last_request_time = r->request_time;
     result->dn = ap_pstrdup(r->pool, dn);
@@ -1832,7 +1870,7 @@ static psldap_session_rec* read_psldap_session(request_rec *r, LDAP *ldap,
 	    for (tmp = ldap_first_attribute(ldap, ldEntry, &ber); NULL != tmp;
 		 tmp = ldap_next_attribute(ldap, ldEntry, ber)) {
 	        int i;
-		char *lastValue;
+		char *lastValue = NULL;
 		values = ldap_get_values_len(ldap, ldEntry, tmp);
 		if ((NULL != values) &&
 		    (0 <= (i = ldap_count_values_len(values) - 1)) ) {
@@ -1940,51 +1978,22 @@ static int persist_psldap_session(request_rec *r, LDAP *ldap,
     return ps.mod_err;
 }
 
-static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
-                          const char *pass, psldap_config_rec *conf)
+static char * get_user_dn_bound(request_rec *r, LDAP **ldap, const char *user,
+				psldap_config_rec *conf)
 {
+    char *user_dn = NULL;
     int err_code;
     LDAPMessage *ld_result = NULL, *ld_entry = NULL;
     const char *ldap_attrs[2] = {LDAP_NO_ATTRS, NULL};
-    char *ldap_query = NULL, *ldap_base = NULL, *user_dn = NULL;
-    
-    ps_rerror(r, APLOG_DEBUG, "Getting user DN for user <%s>", user); 
-    /* If the user dn is set as the user name, parse out the value and
-       return it ... */
-    if (0 == strncmp("dn=", user, 3)) {
-        user_dn = ap_pstrdup(r->pool, &user[3]);
-        goto AbortDNAcquisition;
-    }
-
-    if(LDAP_SUCCESS != (err_code = ldap_bind_s(*ldap,
-					       (conf->psldap_binddn == NULL) ?
-					       "" : conf->psldap_binddn,
-					       (conf->psldap_bindpassword == NULL) ?
-                                               "" : conf->psldap_bindpassword,
-					       conf->psldap_bindmethod) )
-       )
-    {
-        ps_rerror( r, APLOG_NOTICE,
-		   "ldap_bind as user <%s> to get username for <%s> failed:"
-		   " %s", (NULL != conf->psldap_binddn) ?
-		   conf->psldap_binddn : "N/A", user,
-		   ldap_err2string(err_code));
-        /* Don't abort - try to get the username anyway if anonymous access is
-	   available ***
-	   goto AbortDNAcquisition;
-	 */
-    }
-    
-    ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=", user, NULL);
+    char *ldap_base = NULL;
+    char *ldap_query = ap_pstrcat(r->pool, conf->psldap_userkey, "=",
+				  user, NULL);
     
     /* check for search scope, build the base dn query */
-    if(LDAP_SCOPE_BASE == conf->psldap_searchscope)
-    {
+    if(LDAP_SCOPE_BASE == conf->psldap_searchscope) {
         ldap_base = ap_pstrcat(r->pool, ldap_query, ",", conf->psldap_basedn,
                                NULL);
-    }
-    else
-    {
+    } else {
         ldap_base = ap_pstrdup(r->pool, conf->psldap_basedn);
     }
 	    
@@ -2001,23 +2010,52 @@ static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
     {
         ps_rerror( r, APLOG_NOTICE, "ldap_search failed: %s : %s",
 		   ldap_base, ldap_err2string(err_code));
-        goto CleanAbortDNAcquisition;
-    }
-    
-    if(NULL == (ld_entry = ldap_first_entry(*ldap, ld_result)))
-    {
+    } else if(NULL == (ld_entry = ldap_first_entry(*ldap, ld_result))) {
         ps_rerror( r, APLOG_NOTICE, "attr <%s> for user <%s> not found in <%s>",
 		   ldap_attrs[0], ldap_query, ldap_base);
-        goto CleanAbortDNAcquisition;
+    } else {
+        user_dn = ap_pstrdup(r->pool, ldap_get_dn(*ldap, ld_entry) );
     }
 
-    user_dn = ap_pstrdup(r->pool, ldap_get_dn(*ldap, ld_entry) );
-
- CleanAbortDNAcquisition:
     if (NULL != ld_result)
     {
         ldap_msgfree(ld_result);
     }
+
+    return user_dn;
+}
+
+static char * get_user_dn(request_rec *r, LDAP **ldap, const char *user,
+                          const char *pass, psldap_config_rec *conf)
+{
+    int err_code;
+    char *user_dn = NULL;
+    
+    ps_rerror(r, APLOG_DEBUG, "Getting user DN for user <%s>", user); 
+    /* Parse and return the DN if in the user param ... */
+    if (0 == strncmp("dn=", user, 3)) {
+        user_dn = ap_pstrdup(r->pool, &user[3]);
+        goto AbortDNAcquisition;
+    }
+
+    if(LDAP_SUCCESS != 
+       (err_code = ldap_bind_s(*ldap,
+			       (conf->psldap_binddn == NULL) ?
+			       "" : conf->psldap_binddn,
+			       (conf->psldap_bindpassword == NULL) ?
+			       "" : conf->psldap_bindpassword,
+			       conf->psldap_bindmethod) )
+       )
+    {
+        ps_rerror( r, APLOG_NOTICE,
+		   "ldap_bind as user <%s> to get username for <%s> failed:"
+		   " %s", (NULL != conf->psldap_binddn) ?
+		   conf->psldap_binddn : "N/A", user,
+		   ldap_err2string(err_code));
+    }
+    
+    user_dn = get_user_dn_bound(r, ldap, user, conf);
+
     ldap_unbind_s(*ldap);
     *ldap = ps_ldap_init(conf, conf->psldap_hosts, LDAP_PORT);
 
@@ -2073,7 +2111,7 @@ static char* construct_ldap_query(request_rec *r, psldap_config_rec *conf,
     }
     else
     {
-        result = ap_pstrcat(r->pool, query_by, "=", query_for,
+      result = ap_pstrcat(r->pool, "(", query_by, "=", query_for, ")",
                             NULL);
     }
     ps_rerror( r, APLOG_DEBUG, "User = <%s = %s> : ldap_query = <%s>",
@@ -2297,26 +2335,33 @@ static char * get_ldvalues_from_connection(request_rec *r, psldap_config_rec *co
                                  ldap_query, (char**)ldap_attrs, 0, &ld_result))
        )
     {
-        ps_rerror( r, APLOG_NOTICE, "ldap_search - %s | %d | %s- failed: %s",
-		   ldap_base, searchscope, ldap_query,
+        ps_rerror( r, APLOG_NOTICE,
+		   "ldap_search - %s | %d | %s- failed: %d : %s",
+		   ldap_base, searchscope, ldap_query, err_code,
 		   ldap_err2string(err_code));
     }
     else if(!(ld_entry = ldap_first_entry(ldap, ld_result)))
     {
         ps_rerror( r, APLOG_NOTICE, "user <%s> not found", user);
+    } else {
+        ps_rerror( r, APLOG_DEBUG, "%d entries found: query <%s>",
+		   ldap_count_entries(ldap, ld_result), ldap_query);
+        while (NULL != ld_entry) {
+	    if(!(ld_values = ldap_get_values_len(ldap, ld_entry, attr))) {
+	        ps_rerror( r, APLOG_NOTICE,
+			   "ldap_get_values <%s | %d | %s | %s> failed",
+			   ldap_base, searchscope, ldap_query, attr);
+	    } else if (NULL == result) {
+	        result = build_string_list(r, ld_values, separator);
+	    } else {
+	        result = ap_pstrcat(r->pool, result, separator, 
+				    build_string_list(r, ld_values, separator),
+				    NULL);
+	    }
+	    if (NULL != ld_values) { ldap_value_free_len(ld_values); }
+	    ld_entry = ldap_next_entry(ldap, ld_entry);
+	}
     }
-    else if(!(ld_values = ldap_get_values_len(ldap, ld_entry, attr)))
-    {
-        ps_rerror( r, APLOG_NOTICE,
-		   "ldap_get_values <%s | %d | %s | %s> failed",
-		   ldap_base, searchscope, ldap_query, attr);
-    }
-    else
-    {
-        result = build_string_list(r, ld_values, separator);
-    }
-
-    if (NULL != ld_values) { ldap_value_free_len(ld_values); }
     if (NULL != ld_result) { ldap_msgfree(ld_result);    }
 
     return result;
@@ -2431,9 +2476,16 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
     }
 
     if (NULL != ps_bind_ldap(r, &ldap, user, pass, conf) ) {
-        groupkey = (NULL == conf->psldap_user_grp_attr) ? NULL :
-            get_ldap_val_bound(r, ldap, conf, user, conf->psldap_userkey, user,
-                               conf->psldap_user_grp_attr, ":", NULL, '\0');
+        groupkey = conf->psldap_user_grp_attr;
+        if (NULL != groupkey) {
+	    if ( 0 == strcmp(groupkey,"dn")) {
+	        groupkey = get_user_dn_bound(r, &ldap, user, conf);
+	    } else {
+	        groupkey = get_ldap_val_bound(r, ldap, conf, user,
+					      conf->psldap_userkey, user,
+					      groupkey, ":", NULL, '\0');
+	    }
+	}
         if (NULL != groupkey)
         {
 	    ps_rerror( r, APLOG_DEBUG, "Getting groups referencing %s=<%s>",
@@ -2443,8 +2495,8 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
                 char *v = ap_getword(r->pool, &groupkey,':');
                 char *groups = (NULL == conf->psldap_grp_mbr_attr) ? NULL :
                     get_ldap_val_bound(r, ldap, conf, user,
-                                       conf->psldap_grp_mbr_attr,
-                                       v, conf->psldap_grp_nm_attr, delim,
+                                       conf->psldap_grp_mbr_attr, v,
+				       conf->psldap_grp_nm_attr, delim,
 				       NULL, '\0');
                 if(NULL != groups)
                 {
@@ -2466,31 +2518,21 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
     return retval;
 }
 
-static int ldap_grp_matches(request_rec *r, const char **groupList,
+static int ldap_grp_matches(request_rec *r, const char *groupList,
 			    const char *group)
 {
     char *v;
-    int result = 0, ll = strlen(*groupList), gl = strlen(group);
-    /* Group starts the string ...*/
-    if (0 == strncmp(*groupList + (ll-gl), group, gl)) {
-        result = 1;
-    /* Group ends the string ...*/
-    } else if ((0 == strncmp(*groupList + (ll-gl), group, gl)) &&
-	       (*groupList[gl] == ',') ) {
-        result = 1;
-    /* Group in the middle of the string ...*/
-    } else if (NULL != (v = strstr(*groupList, group)) ) {
-        if ( (v[-1] == ',') && (v[gl] == ',') ) {
-	    result = 1;
+    int result = 0, gl = strlen(group);
+
+    for (v = strstr(groupList, group); NULL != v; v = strstr(v+1, group) ) {
+        if ((v == groupList) || (v[-1] == ',') ) { /* beginning matches... */
+	    if ( (v[gl] == ',') || (v[gl] == '\0') ) {
+	        result = 1;
+		break;
+	    }
 	}
     }
-    /*
-    while('\0' != *groupList[0])
-    {
-	v = ap_getword(r->pool, groupList,',');
-	if(0 == strcmp(v,group)) { result = 1; break; }
-    }
-    */
+
     return result;
 }
 
@@ -2503,7 +2545,7 @@ static int password_matches(const psldap_config_rec *sec, request_rec *r,
     if (sec->psldap_schemeprefix)
     {
         /* we do use scheme prefixes as described in RFC2307 - currently sha,
-           crypt are supported
+           ssha, crypt are supported
         */
         if (0 == strncasecmp("{crypt}", real_pw, 7) )
         {
@@ -2522,6 +2564,27 @@ static int password_matches(const psldap_config_rec *sec, request_rec *r,
                 sha1_digest(sent_pw, strlen(sent_pw), digest);
             */
             if (0 != strcmp(real_pw+5, digest))
+            {
+                ap_snprintf(errstr, sizeof(errstr),
+                            "user %s: password mismatch",
+                            get_user_name(r) );
+            }
+        }
+        else if (!strncasecmp("{ssha}", real_pw, 6) )
+        {
+	    /* ssha is seeded with a salt - need to acquire and then append
+	       salt before encoding */
+	    int salt_len = apr_base64_decode_len(real_pw + 6);
+	    char *salt = ap_palloc(r->pool, salt_len + 1);
+	    char *seededpw, *digest;
+
+	    salt_len = apr_base64_decode(salt, real_pw + 6);
+	    /* Assume 4 char salt - get last 4 */
+	    salt = salt + (salt_len - 4);
+            digest = ap_palloc (r->pool, SHA1_DIGEST_LENGTH + strlen(salt) + 1 );
+	    seededpw = ap_pstrcat(r->pool, sent_pw, salt, NULL);
+	    ap_sha1_base64(seededpw, strlen(seededpw), digest);
+            if (0 != strcmp(real_pw+6, digest))
             {
                 ap_snprintf(errstr, sizeof(errstr),
                             "user %s: password mismatch",
@@ -2697,6 +2760,13 @@ const char* get_qualified_field_name(request_rec *r, const char *fieldname)
     return result;
 }
 
+static int attrIsTimestampType(const char *key)
+{
+  int result = FALSE;
+  if (NULL != strstr(key,"Timestamp")) result = TRUE;
+  return result;
+}
+
 /** Parses the key/value pairs out of a multipart/form-data response from the
  *  client as passed through the data pointer, which is a raw read of the
  *  client response. The data string is altered as part of the parse
@@ -2786,6 +2856,18 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
             val = build_psldap_magic_string(r, val, val_len + 1);
         }
 
+	if (attrIsTimestampType(key)) {
+	    /* Reformat timestamp <val> from HTML5 readable to shorter LDAP format */
+	    struct tm tm;
+	    int tmlen = strlen(val) + 1;
+	    if (NULL != strptime(val, HTML5_T_FORMAT, &tm) ) {
+	        strftime(val, tmlen, ACCESS_T_FORMAT, &tm);
+	    } else {
+	        /* TODO: Add parse for HTML5 time string */
+	        ps_rerror( r, APLOG_NOTICE,
+			   "Failed to parse HTML5 time string: %.*s", tmlen, val );
+	    }
+	}
         if (NULL != (tmp = ap_table_get(*tab, key)) )
         {
             if (NULL != filename) {
@@ -2839,6 +2921,17 @@ static void parse_client_data(request_rec *r, char **data, table **tab)
             if(*vptr == '+') *vptr = ' ';
             vptr++;
         }
+	if (attrIsTimestampType(key)) {
+	    /* Reformat timestamp <val> from HTML5 readable to shorter LDAP format */
+	    struct tm tm;
+	    int tmlen = strlen(val) + 1;
+	    if (NULL != strptime(val, HTML5_T_FORMAT, &tm) ) {
+	        strftime(val, tmlen, ACCESS_T_FORMAT, &tm);
+	    } else {
+	        ps_rerror( r, APLOG_NOTICE,
+			   "Failed to parse HTML5 time string: %.*s", tmlen, val );
+	    }
+	}
         if (NULL != (tmp = ap_table_get(*tab, key)) )
         {
             ap_table_setn(*tab, key,
@@ -3148,7 +3241,7 @@ static int cookie_session_cb(void *data, const char *key, const char *value)
         ps_rerror( r, APLOG_DEBUG, "getting cookie value for %s from %s:%s",
 		   key, sessionId, reqIp);
 
-	if (0 == strcmp(reqIp, r->connection->remote_ip)) {
+	if (0 == strcmp(reqIp, client_ip(r))) {
 	    psldap_session_rec sess;
 
 	    sess.sessionId = sessionId;
@@ -3310,11 +3403,23 @@ static int get_provided_authvalue(request_rec *r, const char* field,
             }
             return HTTP_UNAUTHORIZED;
         } else if (0 == strcmp("form", authType)) {
-            return get_first_form_fieldvalue(r, fieldKey, sent_value) ? OK:
-                HTTP_UNAUTHORIZED;
+	    if ( get_first_form_fieldvalue(r, fieldKey, sent_value) ) {
+	        if (fieldKey == sec->psldap_userkey) {
+		    set_user_name(r, *sent_value);
+		}
+	        return OK;
+	    } else {
+	        return HTTP_UNAUTHORIZED;
+	    }
         } else if (0 == strcmp("cookie", authType)) {
-	    return get_cookie_fieldvalue(r, sec, fieldKey, sent_value) ? OK:
-                HTTP_UNAUTHORIZED;
+	    if ( get_cookie_fieldvalue(r, sec, fieldKey, sent_value) ) {
+	        if (fieldKey == sec->psldap_userkey) {
+		    set_user_name(r, *sent_value);
+		}
+	        return OK;
+	    } else {
+	        return HTTP_UNAUTHORIZED;
+	    }
         } else {
 	    /* Default handling assumes the request has the user info...
 	       From where do we get the password? This is only useful on
@@ -3475,7 +3580,7 @@ static int ldap_redirect_handler(request_rec *r)
     return HTTP_MOVED_TEMPORARILY;
 }
 
-static char* escapeChar(request_rec *r, char *str, char c, const char* frag)
+static char* escapeChar(request_rec *r, const char *str, char c, const char* frag)
 {
     char *result = str, *tmp = result, *last = result;
     char search[] = {'\0', '\0'};
@@ -3497,15 +3602,16 @@ static void write_cn_cookie(request_rec *r, psldap_config_rec *sec,
     char *cookie_string;
     char *dn = get_user_dn(r, &ldap, sent_user, sent_pw, sec);
     char *cn = get_ldap_val(r, sent_user, sent_pw, sec, NULL, NULL,
-			    "cn", " ", NULL, '\0');
+			    "cn", "|", NULL, '\0');
 
     if (NULL != dn) {
+      char *cn_p = cn;
         ldap_unbind(ldap);
 
 	ps_rerror( r, APLOG_DEBUG, "Setting post login cn cookie to %s",
 		   (NULL == cn) ? "(blank)" : cn );
 	cookie_string = ap_pstrcat(r->pool, "psUserCn=",
-				   (NULL == cn) ? "(blank)" : cn,
+				   (NULL == cn) ? "(blank)" : ap_strtok(cn,"|",&cn_p),
 				   "; path=/", NULL);
 	ap_table_add(r->err_headers_out, "Set-Cookie", cookie_string);
 
@@ -3650,18 +3756,16 @@ static int ldap_authenticate_user (request_rec *r)
 
 /* Checking ID */
     
-static int ldap_check_authz(request_rec *r)
-{
-    psldap_config_rec *sec =
-        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
-                                                   &psldap_module);
-    long methodMask = 1 << r->method_number;
-    char *errstr = NULL;
-    
-    const array_header *reqs_arr = ap_requires (r);
-    require_line *reqs = reqs_arr ? (require_line *)reqs_arr->elts : NULL;
+#ifdef AUTHZ_PROVIDER_GROUP
+typedef struct apr_array_header_t array_header;
+#endif
 
+static int ldap_check_authz_int(request_rec *r, psldap_config_rec *sec,
+				long methodMask, require_line *reqs,
+				const array_header *reqs_arr)
+{
     register int x;
+    char *errstr = NULL;
     char *user = NULL;
     char *sent_pw = NULL;
     const char *orig_groups = NULL;
@@ -3672,14 +3776,15 @@ static int ldap_check_authz(request_rec *r)
         return (!sec->psldap_authoritative) ? DECLINED : HTTP_UNAUTHORIZED;
     }
     ps_rerror( r, APLOG_INFO, "Checking LDAP user authorization");
-    if (!reqs_arr ||
-	((OK != get_provided_credentials (r, sec, &sent_pw, &user)) &&
-	 !sec->psldap_authsimple)
-	)
+    if (!reqs_arr) {
+      return (!sec->psldap_authoritative) ? DECLINED : OK;
+    }
+    if((OK != get_provided_credentials (r, sec, &sent_pw, &user)) &&
+       !sec->psldap_authsimple)
     {
         return DECLINED;
     }
-
+    
     /* Check the membership in any required groups.*/
     for(x=0; x < reqs_arr->nelts; x++)
     {
@@ -3690,15 +3795,18 @@ static int ldap_check_authz(request_rec *r)
         t = reqs[x].requirement;
         w = ap_getword(r->pool, &t, ' ');
 	
+	ps_rerror( r, APLOG_INFO, "Checking authz requirement for %s...", w );
         if(0 == strcmp(w,"group"))
         {
             const char *groups;
 
             groupRequirementExists = 1;
-            if (NULL != (groups = get_ldap_grp(r, user, sent_pw, sec))) {
+	    if (NULL != (groups = get_ldap_grp(r, user, sent_pw, sec)) ) {
                 /* orig_groups is never set to NULL here, we rely on this to
                    determine if a group requirement was present
                 */
+	        ps_rerror( r, APLOG_INFO, "User %s authz groups are %s...",
+			   user, groups );
                 orig_groups = groups;
                 while('\0' != t[0])
                 {
@@ -3712,7 +3820,12 @@ static int ldap_check_authz(request_rec *r)
                         w = ap_getword(r->pool, &t, ' ');
                     }
                     groups = orig_groups;
-		    if (1 == ldap_grp_matches(r, &groups, w)) {
+		    ps_rerror( r, APLOG_DEBUG, "Checking grp %s -> %s...",
+			       w, groups );
+		    if (1 == ldap_grp_matches(r, groups, w)) {
+		        ps_rerror( r, APLOG_INFO,
+				   "User %s group %s matched %s",
+				   user, groups, w );
 		        return OK;
 		    }
                 }
@@ -3728,15 +3841,42 @@ static int ldap_check_authz(request_rec *r)
     }
 
     /* If no groups were required, return OK */
-    if ((NULL == sec->psldap_groupkey) || !groupRequirementExists) return OK;
+    if ((!sec->psldap_use_ldap_groups && (NULL==sec->psldap_groupkey)) ||
+	!groupRequirementExists) {
+        ps_rerror( r, APLOG_INFO,
+		   "User %s authorized - no group spec (%d:%d:%s)",
+		   user, groupRequirementExists,sec->psldap_use_ldap_groups,
+		   (NULL==sec->psldap_groupkey)?"NULL":sec->psldap_groupkey);
+        return OK;
+    }
     
-    if (!sec->psldap_authoritative) return DECLINED;
+    if (!sec->psldap_authoritative) {
+        ps_rerror( r, APLOG_INFO, "Declining authz for %s - not authoritative",
+		   user);
+	return DECLINED;
+    }
 
+    ps_rerror( r, APLOG_INFO, "User %s failed authorization", user);
     if (NULL != errstr) ap_log_reason (errstr, r->filename, r);
     ap_note_basic_auth_failure (r);
 
     return HTTP_UNAUTHORIZED;
 }
+
+#ifndef AUTHZ_PROVIDER_GROUP
+static int ldap_check_authz(request_rec *r)
+{
+    psldap_config_rec *sec =
+        (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+                                                   &psldap_module);
+    long methodMask = 1 << r->method_number;
+    
+    const array_header *reqs_arr = ap_requires (r);
+    require_line *reqs = reqs_arr ? (require_line *)reqs_arr->elts : NULL;
+
+    return ldap_check_authz_int(r, sec, methodMask, reqs, reqs_arr);
+}
+#endif
 
 #ifdef APACHE_V2
 
@@ -3972,19 +4112,6 @@ static LDAPMod* get_transactions(request_rec *r, const char* attr,
     return mresult;
 }
 
-/** Strips the leading and trailing white space in a given character string.
- *  @param str the character string to be altered
- **/
-static char* strip_lt_whitespace(char *str)
-{
-    int i, len = (NULL != str) ? strlen(str) : 0;
-    for (i = 0; ap_isspace(str[i]) && (i < len); i++) ;
-    while (ap_isspace(str[len - 1]) && (i < len)) len--;
-    memmove(str, &str[i], (len - i + 1));
-    str[len] = '\0';
-    return str;
-}
-
 typedef struct {
     int error_code;
     const char *dsml_string;
@@ -4091,9 +4218,31 @@ static int isXMLMimeType(const char *mimeType)
 
 static const char* getAttrMimeType(const char *attrName)
 {
-    const char *result = "image/jpeg";
-    return result;
+    int i = 2;
+    const char *result[] = {"image/jpeg","image/gif","magic"};
+
+    if (strstr(attrName,"jpeg")) i = 0;
+    else if (strstr(attrName,"gif")) i = 1;
+
+    return result[i];
 }
+
+/** Strips the leading and trailing white space in a given character string.
+ *  @param str the character string to be altered
+ **/
+static char* strip_lt_whitespace(char *str)
+{
+    int i, len = (NULL != str) ? strlen(str) : 0;
+    for (i = 0; ap_isspace(str[i]) && (i < len); i++) ;
+    while (ap_isspace(str[len - 1]) && (i < len)) len--;
+    memmove(str, &str[i], (len - i + 1));
+    str[len] = '\0';
+    return str;
+}
+
+/**
+ *  Returns ap allocated string copied / encoded from berval value - else directly stream berval value as binary
+ **/
 
 static char* encodeLdapValue(request_rec *r, const char *dn,
 			     const char *attr, int *bytesWritten,
@@ -4104,10 +4253,21 @@ static char* encodeLdapValue(request_rec *r, const char *dn,
     int useMagic = isCharArrayBinary(r, value->bv_val,
 				     value->bv_len);
     if (!useMagic) {
-        char *encVal = ap_palloc(r->pool,
-				 value->bv_len + 1);
+        size_t encValSz = ( attrIsTimestampType(attr) ?
+			    HTML5_T_STRLEN : value->bv_len ) + 1;
+        char *encVal = ap_palloc(r->pool, encValSz);
 	strncpy(encVal, value->bv_val, value->bv_len);
 	encVal[value->bv_len] = '\0';
+	if (attrIsTimestampType(attr)) {
+	    /* Reformat attr if timestamp from LDAP to HTML5 readable */
+	    struct tm tm;
+	    if ((value->bv_len >= 14) && (NULL != strptime(encVal, ACCESS_T_FORMAT, &tm)) ) {
+	        strftime(encVal, encValSz, HTML5_T_FORMAT, &tm);
+	    } else {
+	        ps_rerror( r, APLOG_NOTICE,
+			   "Failed to parse ACCESS_T time string: %.*s", encValSz, encVal );
+	    }
+	}
 	result = ap_escape_html(r->pool,
 				strip_lt_whitespace(encVal));
     } else if (!isXMLMimeType(mimeType)) {
@@ -4115,6 +4275,10 @@ static char* encodeLdapValue(request_rec *r, const char *dn,
 	    ap_kill_timeout(r);
 	    *bytesWritten = ap_send_mmap(value->bv_val, r,
 					0, value->bv_len);
+	} else {
+	    ps_rerror( r, APLOG_NOTICE,
+		       "Failed to write binary attr (%s): %s ... %d bytes written previously",
+		       mimeType, attr, *bytesWritten );
 	}
     } else if (binaryAsHref) {
         char *dnstr = ap_escape_uri(r->pool, dn);
@@ -4132,7 +4296,11 @@ static char* encodeLdapValue(request_rec *r, const char *dn,
     } else {
         int j = ap_base64encode_len(value->bv_len);
 	char *encVal = ap_palloc(r->pool, j);
-	ap_base64encode_binary(encVal, result, value->bv_len);
+	ap_base64encode_binary(encVal, (const unsigned char *)result,
+			       value->bv_len);
+	ps_rerror( r, APLOG_NOTICE,
+		   "Default base 64 encode on attr (%s): %s ... %d bytes written previously",
+		   mimeType, attr, *bytesWritten );
 	result = encVal;
     }
     return result;
@@ -4357,6 +4525,78 @@ static int transform_dom_sr_to_connection(request_rec *r,
 }
 
 #endif
+
+/** Note that this structure limits format strings to contain no more than 7 attr
+ *  references
+ **/
+typedef struct {
+    const char *label;
+    const char *format;
+    int attrCount;
+    const char *attrs[8];
+} psldap_csvmap_item;
+
+
+/** Note this structure limits CSVs to contain no more than 127 columns
+ **/
+typedef struct {
+    size_t len;
+    psldap_csvmap_item *items[128];
+} psldap_csvmap;
+
+#define psldap_alloc_csvmap(r)  ap_palloc(r->pool, sizeof(psldap_csvmap))
+#define psldap_init_csvmap(m)   m->len = 0; memset(m->items, '\0', sizeof(m->items))
+
+#define psldap_alloc_csvmap_item(r)  ap_palloc(r->pool, sizeof(psldap_csvmap_item))
+#define psldap_init_csvmap_item(i)   memset(i, '\0', sizeof(psldap_csvmap_item))
+
+#define psldap_csvmap_append(m,i)  (m)->items[(m)->len++] = i;
+
+static psldap_csvmap* psldap_initialize_csv_map(request_rec *r, const char *mapType)
+{
+    psldap_csvmap *result = psldap_alloc_csvmap(r);
+    char *mfn = ap_pstrcat(r->pool, ap_document_root(r), mapType, ".map", NULL);
+    char mline[128];
+    apr_file_t *f = NULL;
+    apr_status_t fs = ap_file_open(&f, mfn, APR_READ, APR_OS_DEFAULT,
+				   r->pool);
+    ps_rerror(r, APLOG_DEBUG, "Map file %s opened for read", mfn);
+    psldap_init_csvmap(result);
+
+    while (APR_SUCCESS == (fs = ap_file_gets(mline, sizeof(mline), f)) ) {
+        char *str = mline, *last = str;
+	char search[] = {',', '\0'};
+	str = strip_lt_whitespace(ap_strtok(str, search, &last));
+	if ('#' != str[0]) {
+	    psldap_csvmap_item *item = psldap_alloc_csvmap_item(r);
+	    psldap_init_csvmap_item(item);
+	    item->label = strip_lt_whitespace(ap_pstrdup(r->pool, str));
+	    item->format = ap_strtok(NULL, search, &last);
+	    item->format = strip_lt_whitespace(ap_pstrdup(r->pool, item->format));
+	    if ('"' == item->format[0]) {
+	        item->format = strip_lt_whitespace(ap_pstrdup(r->pool, item->format));
+		item->format = escapeChar(r, item->format, '"', "");
+	    } else {
+	        item->attrs[item->attrCount++] = item->format;
+	        item->format = ap_pstrdup(r->pool, "%s");
+	    }
+	    while ((NULL != (str = ap_strtok(NULL, search, &last))) &&
+		   (item->attrCount < sizeof(item->attrs)) ) {
+	        str = strip_lt_whitespace(ap_pstrdup(r->pool, str));
+		item->attrs[item->attrCount++] = str;
+	    }
+	    if (NULL != str) { 
+	        ps_rerror( r, APLOG_ERR,
+			   "CSV map for %s / %s violates format rules",
+			   mapType, item->label);
+	    }
+	    psldap_csvmap_append(result, item);
+	}
+        mline[0] = '\0';
+    }
+    fs = ap_file_close(f);
+    return result;
+}
 
 /** Iterate through the results returned by the LDAP server and write them out as
  *  a complete DSML searchResult node.
@@ -4699,6 +4939,8 @@ static const char * get_dsml_action_type(const char * action) {
         result = DSML_LOGIN_ACTION;
     } else if (0 == strcmp(SEARCH_ACTION, action)) {
         result = DSML_SEARCH_ACTION;
+    } else if (0 == strcmp(PWCHANGE_ACTION, action)) {
+        result = DSML_PWCHANGE_ACTION;
     } else if ((0 == strcmp(MODIFY_ACTION, action)) ||
 	       (0 == strcmp(ADDATTR_ACTION, action)) ||
 	       (0 == strcmp(DISABLE_ACTION, action)) ) {
@@ -4817,7 +5059,7 @@ static void rput_children_of_element(psldap_status *ps, const char *xmlUri,
         char element[32];
         apr_file_t *f = NULL;
         apr_status_t fs = ap_file_open(&f, xmlUri, APR_READ, APR_OS_DEFAULT,
-				   r->pool);
+				       r->pool);
 	ps_rerror(r, APLOG_DEBUG, "XML file %s opened for read", xmlUri);
 	while (APR_SUCCESS == (fs = ap_file_getc(&element[i], f)) ) {
 	    if (1 <= nodeFound) {
@@ -4890,6 +5132,7 @@ static int get_xml_object_template(void *data, const char *key, const char *val)
 	if (0 >= xmlInfo.size) {
 	    ps_rerror(r, APLOG_INFO, "URI %s for xml doc not available",
 		      xmlUri);
+	    ap_rvputs(r, "&batchresp;\n", NULL);
 	} else if (NULL != ps->pNode) {
 	    /* Write the response here... replace the content of pNode's
 	       doc */
@@ -5073,6 +5316,13 @@ static int ps_ldap_delete_subtree_s(psldap_status *ps, const char *dn)
 }
 #endif
 
+/** Copies an ldap node recursively from dn to the newrdn, leaving the original
+ *  nodes in place in the LDAP tree
+ *  
+ *  SADLY - LDAP_RENAME_S DOES NOT ALLOW A RENAME WITH LEAF NODES EVEN IF IT'S
+ *  FLAGGED AS A COPY!!!
+ *  TODO:  NEED TO WRITE A COPY FUNCTION TO DO THIS CLIENT SIDE IN APACHE
+ **/
 static int ps_ldap_copy_s(LDAP *l, const char * dn, const char *newrdn,
 			  const char *newSuperior)
 {
@@ -5089,9 +5339,6 @@ static int ps_ldap_copy_s(LDAP *l, const char * dn, const char *newrdn,
  *  to the original node - failure of this compensating transaction will leave 
  *  the records under their new location.
  *
- *  SADLY - LDAP_RENAME_S DOES NOT ALLOW A RENAME WITH LEAF NODES EVEN IF IT'S
- *  FLAGGED AS A COPY!!!
- *  TODO:  NEED TO WRITE A COPY FUNCTION TO DO THIS CLIENT SIDE
  **/
 static int ps_ldap_rename_subtree_s(psldap_status *ps, const char *dn,
 				    const char *newrdn, const char *newSuperior,
@@ -5244,6 +5491,105 @@ static int add_attrs_to_record_in_ldap(void *data, const char *key,
     return TRUE;
 }
 
+static char *get_value_from_mod(request_rec *r, LDAPMod **mods_coll,
+				const char *key, int optype)
+{
+  char *result = NULL;
+  LDAPMod *mod = NULL;
+  int i = 0;
+
+  for (mod = mods_coll[i]; mod != NULL; mod = mods_coll[++i]) {
+      /*
+      if ( ( mresult->mod_op & optype != 0 ) &&
+           (0 == strcmp(mod->mod_type, key)) ) {
+	  int j = 0;
+	  while ( NULL != (result = mod->mod_values[j++]) ) {
+	      / * break if all are same - if not same set NULL and break * /
+	      if(NULL == mod->mod_values[j]) break;
+	      else if (0 != strcmp(result, mod->mod_values[j]) ) {
+		  result = NULL;
+		  break;
+	      }
+	  }
+      }
+      */
+  }
+  
+  return result;
+}
+
+static int passwd_change_in_ldap(void *data, const char *key,
+                                 const char *val)
+{
+    psldap_status *ps = (psldap_status*)data;
+    request_rec *r = ps->rr;
+    LDAP *ldap = ps->ldap;
+    psldap_config_rec *conf = ps->conf;
+    const char *oldValue = NULL;
+    char *user;
+
+    if (NULL == key) {
+        if (NULL != val) strncpy((char*)val, "modifyResponse", 15);
+        if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
+	    char *oldPasswd = NULL, *newPasswd = NULL;
+	    /* LDAP version must be 3 or greater for extended ops */
+	    if ( (conf->psldap_ldap_version > 2) &&
+		 (OK == get_provided_password(r, &oldPasswd)) &&
+		 (NULL != (newPasswd = get_value_from_mod(r, ps->mods,"userPasword",
+						(LDAP_MOD_REPLACE | LDAP_MOD_ADD) )
+			   ) ) ) {
+	        BerElement *pBerElement = ber_alloc_t( LBER_USE_DER );
+		struct berval *pBv = NULL;
+		int id = LDAP_OTHER;
+
+		ber_printf( pBerElement, "{" );
+		ber_printf( pBerElement, "ts", LDAP_TAG_EXOP_MODIFY_PASSWD_ID, ps->mod_dn );
+		ber_printf( pBerElement, "ts", LDAP_TAG_EXOP_MODIFY_PASSWD_OLD, oldPasswd );
+		ber_printf( pBerElement, "ts", LDAP_TAG_EXOP_MODIFY_PASSWD_NEW, newPasswd );
+		ber_printf( pBerElement, "N}" );
+	    
+		ps->mod_err = ber_flatten( pBerElement, &pBv );
+		if ( ps->mod_err >= 0 && pBv->bv_val != NULL ) {
+		    ps->mod_err = ldap_extended_operation( ps->ldap, LDAP_EXOP_MODIFY_PASSWD,
+							   pBv, NULL, NULL, &id );
+		}
+		ber_free( pBerElement, 1 );
+		ber_bvfree( pBv );
+	    } else {
+	        ps->mod_err = ldap_modify_s(ps->ldap, ps->mod_dn, ps->mods);
+	    }
+        }
+    } else if (0 == strncmp(LDAP_KEY_PREFIX, key, LDAP_KEY_PREFIX_LEN)) {
+        get_provided_username(r, &user);
+	if (0 == strcmp("dn", key + LDAP_KEY_PREFIX_LEN)) {
+	    /* The dn cannot be modified */
+	    ps->mod_dn = ap_pstrdup(r->pool, val);
+	    ps->mod_record = get_ldrecords(r, conf, ldap, ps->mod_dn,
+					   user, LDAP_SCOPE_BASE);
+	    ps->mod_err = get_lderrno(ldap) ;
+	    oldValue = ps->mod_dn;
+	} else {
+	    oldValue = get_ldvalues_from_record(r, conf, ldap, ps->mod_record,
+						key + LDAP_KEY_PREFIX_LEN, ";");
+	}
+
+	ps_rerror( r, APLOG_DEBUG, "Finding transactions for key %s", key);
+	{
+	    const char *value = duplicate_value_data(r, val);
+	    array_header *new_v = parse_arg_string(r, &value, ';');
+	    array_header *old_v = parse_arg_string(r, &oldValue, ';');
+	    LDAPMod *tmp_mod = get_transactions(r, key + LDAP_KEY_PREFIX_LEN,
+						old_v, new_v);
+	    if (NULL != tmp_mod) {
+	        psldap_status_append_mod(ps, r, tmp_mod);
+	    }
+	}
+    } else {
+        set_processing_parameter(ps, r, key, val);
+    }
+    return TRUE;
+}
+
 static int update_record_in_ldap(void *data, const char *key,
                                  const char *val)
 {
@@ -5349,6 +5695,10 @@ static int (*get_action_handler(request_rec *r, const char **action))(void*, con
     if (0 == strcmp(SEARCH_ACTION, *action))
     {
         return get_dn_attributes_from_ldap;
+    }
+    if (0 == strcmp(PWCHANGE_ACTION, *action))
+    {
+        return passwd_change_in_ldap;
     }
     if (0 == strcmp(MODIFY_ACTION, *action))
     {
@@ -5485,7 +5835,9 @@ static int ldap_update_handler(request_rec *r)
 			   ps.dlFilename, cdStr);
 	    }
 	    sendXml = 0;
-	    r->content_type = (sendXml) ? "text/xml" : "text/html";
+	    /* If response type is a mime type - has a / - use it as the content type */
+	    if (strstr(ps.responseType,"/")) r->content_type = ps.responseType;
+	    else r->content_type = (sendXml) ? "text/xml" : "text/html";
 	}
 	ap_soft_timeout("update ldap data", r);
 	ap_send_http_header(r);
@@ -5507,7 +5859,12 @@ static int ldap_update_handler(request_rec *r)
 		    ap_rputs("<body>\n<xml id='errResponse'>\n", r);
 		} else {
 		    ps_rerror( r, APLOG_INFO, "Full response is XML");
+		    /* TODO: Use configured HTML base, not "/psldap/..." */
 		    ap_rvputs(r,
+			      "<?xml version=\"1.0\"?>\n<!DOCTYPE dsml SYSTEM \"/psldap/dsml.dtd\"",
+			      (NULL != ps.xmlTemplateUri) ? " [\n<!ENTITY batchresp SYSTEM \"" : "",
+			      (NULL != ps.xmlTemplateUri) ? ps.xmlTemplateUri : "",
+			      (NULL != ps.xmlTemplateUri) ? "\">\n]>\n" : ">",
 			      (NULL != ps.xslPrimaryUri) ? "<?xml-stylesheet type=\"text/xsl\" title=\"Primary View\" href=\"" : "",
 			      (NULL != ps.xslPrimaryUri) ? ps.xslPrimaryUri : "",
 			      (NULL != ps.xslPrimaryUri) ? "\"?>\n" : "",
@@ -5531,7 +5888,6 @@ static int ldap_update_handler(request_rec *r)
 			  escapeChar(r, ps.mod_dn, '&', "&amp;"),
 			  "\">\n",
 			  NULL);
-		
 		ps_rerror( r, APLOG_DEBUG, "Action handler response gen...");
 		actionHandler(&ps, NULL, opName);
 		/* Write the status of the request to the response element */
@@ -5564,13 +5920,12 @@ static int ldap_update_handler(request_rec *r)
 		    transform_dom_sr_to_connection(r, conf, doc, xslUri, ps.responseType);
 		    xmlFreeDoc(doc);
 		    ps.pNode = NULL;
-		}
-#else
-		/* This doesn't work at all without the server XSL
-		   transformation except when actionHandler sends a binary
-		   response as in the case of jpegPhoto*/
-		actionHandler(&ps, NULL, opName);
+		} else
 #endif
+		  /* This doesn't work at all without the server XSL
+		     transformation except when actionHandler sends a binary
+		     response as in the case of jpegPhoto*/
+		  actionHandler(&ps, NULL, opName);
 	    }
 
             ap_kill_timeout(r);
@@ -5648,6 +6003,52 @@ static authn_status get_realm_hash(request_rec *r, const char *user,
 static authn_provider psldap_provider = {check_password, get_realm_hash};
 #endif
 
+#ifdef AUTHZ_PROVIDER_GROUP
+/* See mod_auth.h for function prototypes */
+static authz_status psldap_check_authz(request_rec *r,
+				       const char *req_line,
+				       const void *parsed_require_line)
+{
+    authz_status result = AUTHZ_NEUTRAL;
+    psldap_config_rec *sec =
+      (psldap_config_rec *)ap_get_module_config (r->per_dir_config,
+						 &psldap_module);
+    long methodMask = 1 << r->method_number;
+    require_line reqs[] = {{ methodMask, (char*)req_line }};
+    const array_header reqs_arr = {NULL,0,1,0,NULL};
+    int authz_result = ldap_check_authz_int(r, sec, methodMask, reqs, &reqs_arr);
+
+    switch(authz_result)
+    {
+        case OK:
+	    result = AUTHZ_GRANTED;
+	    break;
+        case HTTP_UNAUTHORIZED:
+	    result = AUTHZ_DENIED;
+	    break;
+        case DECLINED:
+	    result = AUTHZ_NEUTRAL;
+	    break;
+        default:
+	    result = AUTHZ_DENIED;
+    }
+    return result;
+}
+
+static const char * psldap_parse_require_line(cmd_parms *cmd,
+					      const char *require_line,
+					      const void **parsed_require_line)
+{
+    static const char parse_err[] = "Failed to parse requirement line";
+    *parsed_require_line = require_line;
+    return NULL;
+    return parse_err;
+}
+
+static authz_provider psldap_authz_provider = {psldap_check_authz, 
+					       psldap_parse_require_line};
+#endif
+
 static void register_hooks(pool *p)
 {
     /* Hook in the module initialization */
@@ -5657,20 +6058,34 @@ static void register_hooks(pool *p)
     /* [5]  check/validate user_id        */
     ap_hook_check_user_id(ldap_authenticate_user, NULL, NULL, APR_HOOK_MIDDLE);
     /* [6]  check user_id is valid *here* */
+#ifndef AUTHZ_PROVIDER_GROUP
     ap_hook_auth_checker(ldap_check_authz, NULL, NULL, APR_HOOK_MIDDLE);
+#endif
+
 #ifdef AUTHN_PROVIDER_GROUP
-    ap_register_provider(p, AUTHN_PROVIDER_GROUP, "psldap", PSLDAP_VERSION_LABEL, &psldap_provider);
+#ifndef AUTHN_PROVIDER_VERSION
+#define AUTHN_PROVIDER_VERSION "0"
+#endif
+    ap_register_provider(p, AUTHN_PROVIDER_GROUP, "psldap",
+			 AUTHN_PROVIDER_VERSION, &psldap_provider);
+#endif
+
+#ifdef AUTHZ_PROVIDER_GROUP
+    ap_register_auth_provider (p, AUTHZ_PROVIDER_GROUP,
+                               "psldap", AUTHZ_PROVIDER_VERSION,
+			       &psldap_authz_provider,
+			       AP_AUTH_INTERNAL_PER_CONF);
 #endif
 }
 
 module MODULE_VAR_EXPORT psldap_module =
 {
     STANDARD20_MODULE_STUFF,
-    create_ldap_auth_dir_config,	/* per-directory config creator       */
-    merge_ldap_auth_dir_config,		/* dir config merger                  */
-    create_ldap_auth_srv_config,	/* server config creator              */
-    merge_ldap_auth_srv_config,		/* server config merger               */
-    ldap_auth_cmds,					/* config directive table             */
+    create_ldap_auth_dir_config,	/* per-directory config creator     */
+    merge_ldap_auth_dir_config,		/* dir config merger                */
+    create_ldap_auth_srv_config,	/* server config creator            */
+    merge_ldap_auth_srv_config,		/* server config merger             */
+    ldap_auth_cmds,			/* config directive table           */
     register_hooks
 };
 
@@ -5701,7 +6116,11 @@ module MODULE_VAR_EXPORT psldap_module =
     ldap_handlers,		/* [9]  content handlers              */
     translate_handler,		/* [2]  URI-to-filename translation   */
     ldap_authenticate_user,	/* [5]  check/validate user_id        */
+#ifdef AUTHZ_PROVIDER_GROUP
     ldap_check_authz,		/* [6]  check user_id is valid *here* */
+#else
+    NULL,
+#endif
     NULL,			/* [4]  check access by host address  */
     NULL,			/* [7]  MIME type checker/setter      */
     NULL,			/* [8]  fixups                        */

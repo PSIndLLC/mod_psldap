@@ -16,7 +16,10 @@ Enable integration to blackberry contact database
 
 Finish integration of browser support for HttpOnly on secure cookies
 
-
+Revision 0.95 
+===================
+Introduced edit capability in custom person edit for mozilla attributes defined in objectClass mozillaAbPersonAlpha available at mozilla.org
+	
 Revision 0.94 
 ===================
 Introduced skinning capability with two skins available and shipping with the module: green and blue

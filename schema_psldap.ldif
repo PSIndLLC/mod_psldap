@@ -1,0 +1,33 @@
+dn: cn={15}psldap,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: {15}psldap
+olcObjectIdentifier: {0}PSIndHttpSession PSIndRoot:10
+olcObjectIdentifier: {1}PSIndHttpSessionAttributeType PSIndHttpSession:1
+olcObjectIdentifier: {2}PSIndHttpSessionObjectClass PSIndHttpSession:2
+olcAttributeTypes: {0}( PSIndHttpSessionAttributeType:10 NAME ( 'sessionID' 'p
+ sSessionId' ) DESC 'Session Identifier' EQUALITY caseIgnoreIA5Match SUBSTR ca
+ seIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {1}( PSIndHttpSessionAttributeType:11 NAME ( 'clientIP' 'ps
+ ClientIP' ) DESC 'IP Address of client initiating session' EQUALITY caseIgnor
+ eIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121
+ .1.26{256} )
+olcAttributeTypes: {2}( PSIndHttpSessionAttributeType:12 NAME ( 'lastAccessTim
+ e' 'psLastAccessTime' ) DESC 'Last time client accessed the server' EQUALITY 
+ caseIgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.146
+ 6.115.121.1.26{256} )
+olcAttributeTypes: {3}( PSIndHttpSessionAttributeType:13 NAME ( 'authNames' 'p
+ sAuthNames' ) DESC 'Comma delimited lists of authNames' EQUALITY caseIgnoreIA
+ 5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.
+ 26{256} )
+olcAttributeTypes: {4}( PSIndHttpSessionAttributeType:14 NAME ( 'user' 'psUser
+ name' ) DESC 'Login credentials for vendor website' EQUALITY caseIgnoreIA5Mat
+ ch SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{2
+ 56} )
+olcAttributeTypes: {5}( PSIndHttpSessionAttributeType:15 NAME ( 'credential' '
+ psCredential' ) DESC 'Password or other authentication key' EQUALITY caseIgno
+ reIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.12
+ 1.1.26{256} )
+olcObjectClasses: {0}( PSIndHttpSessionObjectClass:1 NAME 'psHttpSession' DESC
+  'Http Session Identifier object' SUP top AUXILIARY MUST ( sessionID $ client
+ IP $ authNames $ lastAccessTime ) MAY ( user $ credential ) )
+

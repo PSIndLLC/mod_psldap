@@ -1,0 +1,61 @@
+dn: cn={19}psasset,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: {19}psasset
+olcObjectIdentifier: {0}PSAsset PSIndRoot:20
+olcObjectIdentifier: {1}PSAssetAttributeType PSAsset:1
+olcObjectIdentifier: {2}PSAssetObjectClass PSAsset:2
+olcObjectIdentifier: {3}PSBid PSIndRoot:21
+olcObjectIdentifier: {4}PSBidAttributeType PSBid:1
+olcObjectIdentifier: {5}PSBidObjectClass PSBid:2
+olcAttributeTypes: {0}( PSAssetAttributeType:10 NAME ( 'assetName' 'psAssetNam
+ e' ) DESC 'Asset Identifier' EQUALITY caseIgnoreIA5Match SUBSTR caseIgnoreIA5
+ SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {1}( PSAssetAttributeType:11 NAME ( 'assetOwner' 'psAssetOw
+ ner' ) DESC 'Asset Owner' EQUALITY distinguishedNameMatch SYNTAX 1.3.6.1.4.1.
+ 1466.115.121.1.12 )
+olcAttributeTypes: {2}( PSAssetAttributeType:12 NAME ( 'assetLocation' 'psAsse
+ tLocation' ) DESC 'Asset Location' EQUALITY distinguishedNameMatch SYNTAX 1.3
+ .6.1.4.1.1466.115.121.1.12 )
+olcAttributeTypes: {3}( PSAssetAttributeType:13 NAME ( 'assetDescription' 'psA
+ ssetDescription' ) DESC 'Asset Description' EQUALITY caseIgnoreIA5Match SUBST
+ R caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{32768} )
+olcAttributeTypes: {4}( PSAssetAttributeType:14 NAME ( 'assetValue' 'psAssetVa
+ lue' ) DESC 'Asset Current Value' EQUALITY numericStringMatch SYNTAX 1.3.6.1.
+ 4.1.1466.115.121.1.36 )
+olcAttributeTypes: {5}( PSAssetAttributeType:15 NAME ( 'assetCost' 'psAssetCos
+ t' ) DESC 'Asset Acquisition Cost' EQUALITY numericStringMatch SYNTAX 1.3.6.1
+ .4.1.1466.115.121.1.36 )
+olcAttributeTypes: {6}( PSAssetAttributeType:16 NAME ( 'assetPhoto' 'psAssetPh
+ oto' ) DESC 'Asset Photo' SYNTAX 1.3.6.1.4.1.1466.115.121.1.40 )
+olcAttributeTypes: {7}( PSAssetAttributeType:17 NAME ( 'acquiredDate' 'psAcqui
+ redDate' ) DESC 'Asset Acquisition Date' EQUALITY generalizedTimeMatch SYNTAX
+  1.3.6.1.4.1.1466.115.121.1.24 )
+olcAttributeTypes: {8}( PSBidAttributeType:11 NAME ( 'bidOwner' 'psBidOwner' )
+  DESC 'Bid Owner' EQUALITY distinguishedNameMatch SYNTAX 1.3.6.1.4.1.1466.115
+ .121.1.12 )
+olcAttributeTypes: {9}( PSBidAttributeType:12 NAME ( 'bidTerms' 'psBidTerms' )
+ DESC 'Bid Description' EQUALITY caseIgnoreIA5Match SUBSTR caseIgnoreIA5Substr
+ ingsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{32768} )
+olcAttributeTypes: {10}( PSBidAttributeType:13 NAME ( 'bidAmount' 'psBidAmount
+ ' ) DESC 'Bid Amount' EQUALITY numericStringMatch SYNTAX 1.3.6.1.4.1.1466.115
+ .121.1.36 )
+olcAttributeTypes: {11}( PSBidAttributeType:14 NAME ( 'bidDeposit' 'psBidDepos
+ it' ) DESC 'Bid Deposit Amount' EQUALITY numericStringMatch SYNTAX 1.3.6.1.4.
+ 1.1466.115.121.1.36 )
+olcAttributeTypes: {12}( PSBidAttributeType:15 NAME ( 'bidDate' 'psBidDate' )D
+ ESC 'Bid Acquisition Date' EQUALITY generalizedTimeMatch SYNTAX 1.3.6.1.4.1.1
+ 466.115.121.1.24 )
+olcAttributeTypes: {13}( PSBidAttributeType:16 NAME ( 'bidExpiry' 'psBidExpiry
+ ' ) DESC 'Bid Expiration Date' EQUALITY generalizedTimeMatch SYNTAX 1.3.6.1.4
+ .1.1466.115.121.1.24 )
+olcAttributeTypes: {14}( PSBidAttributeType:17 NAME ( 'bidAcceptedDate' 'psBid
+ AcceptedDate' ) DESC 'Bid Accepted Date' EQUALITY generalizedTimeMatch SYNTAX
+  1.3.6.1.4.1.1466.115.121.1.24 )
+olcObjectClasses: {0}( PSAssetObjectClass:1 NAME 'psAsset' DESC 'Asset Invento
+ ry object' SUP top AUXILIARY MUST ( assetName $ assetOwner ) MAY ( assetLocat
+ ion $ assetDescription $ assetValue $ assetCost $ acquiredDate $ assetPhoto $
+  jpegPhoto ) )
+olcObjectClasses: {1}( PSBidObjectClass:1 NAME 'psBid' DESC 'Bid Object' SUP t
+ op AUXILIARY MUST ( bidOwner $ bidAmount ) MAY ( bidTerms $ bidDeposit $ bidD
+ ate $ bidExpiry ) )
+

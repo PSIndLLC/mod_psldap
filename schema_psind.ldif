@@ -1,0 +1,134 @@
+dn: cn={14}psind,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: {14}psind
+olcObjectIdentifier: {0}PSIndRoot 1.3.6.1.4.1.22788
+olcObjectIdentifier: {1}PSIndCore PSIndRoot:1
+olcObjectIdentifier: {2}PSIndCoreAttributeType PSIndCore:1
+olcObjectIdentifier: {3}PSIndCoreObjectClass PSIndCore:2
+olcObjectIdentifier: {4}PSIndIM PSIndRoot:2
+olcObjectIdentifier: {5}PSIndIMattributeType PSIndIM:1
+olcObjectIdentifier: {6}PSIndIMobjectClass PSIndIM:2
+olcObjectIdentifier: {7}PSIndBotanix PSIndRoot:3
+olcObjectIdentifier: {8}PSIndBotanixAttributeType PSIndBotanix:1
+olcObjectIdentifier: {9}PSIndBotanixObjectClass PSIndBotanix:2
+olcObjectIdentifier: {10}PSIndVendorAcct PSIndRoot:4
+olcObjectIdentifier: {11}PSIndVendorAcctAttributeType PSIndVendorAcct:1
+olcObjectIdentifier: {12}PSIndVendorAcctObjectClass PSIndVendorAcct:2
+olcObjectIdentifier: {13}PSIndEmployee PSIndRoot:5
+olcObjectIdentifier: {14}PSIndResumeAttributeType PSIndEmployee:1
+olcObjectIdentifier: {15}PSIndResumeObjectClass PSIndEmployee:2
+olcObjectIdentifier: {16}PSIndAssignment PSIndRoot:6
+olcObjectIdentifier: {17}PSIndAssignmentAttributeType PSIndAssignment:1
+olcObjectIdentifier: {18}PSIndAssignmentObjectClass PSIndAssignment:2
+olcObjectIdentifier: {19}PSIndPublishing PSIndRoot:7
+olcObjectIdentifier: {20}PSIndBookAttributeType PSIndPublishing:1
+olcObjectIdentifier: {21}PSIndBookObjectClass PSIndPublishing:2
+olcAttributeTypes: {0}( PSIndIMattributeType:10 NAME ( 'imId' 'imIdentifier' )
+  DESC 'Instant messenger identifier' EQUALITY caseIgnoreIA5Match SUBSTR caseI
+ gnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {1}( PSIndIMattributeType:11 NAME ( 'yahooId' 'yahooIdentif
+ ier' ) DESC 'Yahoo Instant messenger identifier' EQUALITY caseIgnoreIA5Match 
+ SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256}
+  )
+olcAttributeTypes: {2}( PSIndIMattributeType:12 NAME ( 'aimId' 'aimIdentifier'
+  ) DESC 'AOL Instant messenger identifier' EQUALITY caseIgnoreIA5Match SUBSTR
+  caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {3}( PSIndIMattributeType:13 NAME ( 'skypeId' 'skypeIdentif
+ ier' ) DESC 'Skype Instant messenger identifier' EQUALITY caseIgnoreIA5Match 
+ SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256}
+  )
+olcAttributeTypes: {4}( PSIndBotanixAttributeType:10 NAME ( 'hortName' 'hortic
+ ulturalName' ) DESC 'Horticultural name of plant material' EQUALITY caseIgnor
+ eIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121
+ .1.26{256} )
+olcAttributeTypes: {5}( PSIndBotanixAttributeType:11 NAME ( 'hortFamily' 'hort
+ iculturalFamily' ) DESC 'Horticultural family of plant material' EQUALITY cas
+ eIgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.1
+ 15.121.1.26{256} )
+olcAttributeTypes: {6}( PSIndBotanixAttributeType:12 NAME ( 'hortCommonName' '
+ horticulturalCommonName' ) DESC 'Common name of plant material' EQUALITY case
+ IgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.11
+ 5.121.1.26{256} )
+olcAttributeTypes: {7}( PSIndVendorAcctAttributeType:10 NAME ( 'vendorClass' '
+ psVendorClassification' ) DESC 'Vendor classification' EQUALITY caseIgnoreIA5
+ Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.2
+ 6{256} )
+olcAttributeTypes: {8}( PSIndVendorAcctAttributeType:11 NAME ( 'acctNo' 'psVen
+ dorAccountNumber' ) DESC 'Account number with vendor' EQUALITY caseIgnoreIA5M
+ atch SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26
+ {256} )
+olcAttributeTypes: {9}( PSIndVendorAcctAttributeType:12 NAME ( 'loginCred' 'ps
+ LoginCredentials' ) DESC 'Login credentials for vendor website' EQUALITY case
+ IgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.11
+ 5.121.1.26{256} )
+olcAttributeTypes: {10}( PSIndVendorAcctAttributeType:13 NAME ( 'svcDescriptio
+ n' 'psServiceDescription' ) DESC 'Description of vendor provided services' EQ
+ UALITY caseIgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.
+ 4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {11}( PSIndResumeAttributeType:10 NAME ( 'skill' 'psEmploye
+ eSkill' ) DESC 'Name of employee skill' EQUALITY caseIgnoreIA5Match SUBSTR ca
+ seIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {12}( PSIndResumeAttributeType:11 NAME ( 'resume' 'psResume
+ File' ) DESC 'Employee resume file' SYNTAX  1.3.6.1.4.1.1466.115.121.1.5 )
+olcAttributeTypes: {13}( PSIndResumeAttributeType:12 NAME ( 'mimeType' 'psResu
+ meMimeType' ) DESC 'Employee resume file type' EQUALITY caseIgnoreIA5Match SU
+ BSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {14}( PSIndAssignmentAttributeType:10 NAME ( 'asgnOrg' 'psA
+ ssignmentOrg' ) DESC 'Organization for employee assignment' EQUALITY distingu
+ ishedNameMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.12 )
+olcAttributeTypes: {15}( PSIndAssignmentAttributeType:11 NAME ( 'asgnSummary' 
+ 'psAssignmentSummary' ) DESC 'Description of employee assignment' EQUALITY ca
+ seIgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.
+ 115.121.1.26{256} )
+olcAttributeTypes: {16}( PSIndAssignmentAttributeType:12 NAME ( 'asgnStart' 'p
+ sAssignmentStart' ) DESC 'Start date of employee assignment' EQUALITY general
+ izedTimeMatch ORDERING generalizedTimeOrderingMatch SYNTAX 1.3.6.1.4.1.1466.1
+ 15.121.1.24 )
+olcAttributeTypes: {17}( PSIndAssignmentAttributeType:13 NAME ( 'asgnEnd' 'psA
+ ssignmentEnd' ) DESC 'End date of employee assignment' EQUALITY generalizedTi
+ meMatch ORDERING generalizedTimeOrderingMatch SYNTAX 1.3.6.1.4.1.1466.115.121
+ .1.24 )
+olcAttributeTypes: {18}( PSIndAssignmentAttributeType:14 NAME ( 'asgnSkill' 'p
+ sAssignmentSkill' ) DESC 'Name of employee skill used on assignment' EQUALITY
+  caseIgnoreIA5Match SUBSTR caseIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.14
+ 66.115.121.1.26{256} )
+olcAttributeTypes: {19}( PSIndAssignmentAttributeType:15 NAME ( 'asgnDuration'
+  'psAssignmentDuration' ) DESC 'Duration of employee assignment in seconds' E
+ QUALITY numericStringMatch SUBSTR numericStringSubstringsMatch SYNTAX 1.3.6.1
+ .4.1.1466.115.121.1.36 )
+olcAttributeTypes: {20}( PSIndBookAttributeType:10 NAME ( 'author' 'psBookAuth
+ or' ) DESC 'Name of author of the book' EQUALITY caseIgnoreIA5Match SUBSTR ca
+ seIgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{64} )
+olcAttributeTypes: {21}( PSIndBookAttributeType:11 NAME ( 'booktitle' 'psBookT
+ itle' ) DESC 'Title of the book' EQUALITY caseIgnoreIA5Match SUBSTR caseIgnor
+ eIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+olcAttributeTypes: {22}( PSIndBookAttributeType:12 NAME ( 'isbn' 'psBookISBN' 
+ ) DESC 'ISBN of the book' EQUALITY caseIgnoreIA5Match SUBSTR caseIgnoreIA5Sub
+ stringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{64} )
+olcAttributeTypes: {23}( PSIndBookAttributeType:13 NAME ( 'synopsis' 'psBookSy
+ nopsis' ) DESC 'Synopsis of the book' EQUALITY caseIgnoreIA5Match SUBSTR case
+ IgnoreIA5SubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{1024} )
+olcAttributeTypes: {24}( PSIndBookAttributeType:14 NAME ( 'coverart' 'psBookCo
+ verArt' ) DESC 'Cover art of the book' SYNTAX 1.3.6.1.4.1.1466.115.121.1.6 )
+olcObjectClasses: {0}( PSIndCoreObjectClass:1 NAME 'psldapOrganizationalUnit' 
+ DESC 'Organizational supplement to unit' SUP top AUXILIARY MAY o )
+olcObjectClasses: {1}( PSIndIMobjectClass:1 NAME 'imIdObject' DESC 'IM Identif
+ ier object' SUP top AUXILIARY MAY ( imId $ yahooId $ aimId $ skypeId ) )
+olcObjectClasses: {2}( PSIndBotanixObjectClass:1 NAME 'ahsHortObject' DESC 'IM
+  Identifier object' SUP top AUXILIARY MUST ( hortName $ hortFamily ) MAY ( ho
+ rtName $ hortFamily $ commonName ) )
+olcObjectClasses: {3}( PSIndVendorAcctObjectClass:1 NAME 'psVendorAcctObject' 
+ DESC 'IM Identifier object' SUP top AUXILIARY MUST vendorClass MAY ( acctNo $
+  loginCred $ svcDescription ) )
+olcObjectClasses: {4}( PSIndResumeObjectClass:1 NAME 'psResumeObject' DESC ' R
+ esume object' SUP top AUXILIARY MUST ( resume $ mimeType ) MAY ( skill ) )
+olcObjectClasses: {5}( PSIndAssignmentObjectClass:1 NAME 'psAssignmentObject' 
+ DESC 'Employee or resource assignment object' SUP top AUXILIARY MUST ( asgnOr
+ g $ asgnStart ) MAY ( asgnSummary $ asgnSkill $ asgnEnd ) )
+olcObjectClasses: {6}( PSIndAssignmentObjectClass:2 NAME 'psAssignmentTimeObje
+ ct' DESC 'Employee time accrual on an assignment' SUP top AUXILIARY MUST ( as
+ gnStart $ asgnEnd $ asgnDuration ) MAY ( asgnSummary ) )
+olcObjectClasses: {7}( PSIndBookObjectClass:1 NAME 'psBookObject' DESC ' Book 
+ object' SUP top AUXILIARY MUST ( author $ booktitle $ isbn ) MAY ( coverart $
+  synopsis ) )
+

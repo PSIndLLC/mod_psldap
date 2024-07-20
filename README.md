@@ -198,16 +198,17 @@ port, and a random key form the session identifier - if the IP and port of the r
 Alternatively, the administrator may use the Apache ErrorDocument directive to cause a form to be provided for the user to enter her credentials when she is not successfully authenticated or authorized. The administrator may wish to handle both the 401 & 403 errors in this fashion.
 
 Example:
->    ErrorDocument 401 /cookie_auth_form.html
+
+>    ErrorDocument 401 /cookie_auth_form.html  
 >    ErrorDocument 403 /cookie_auth_form.html
 
 To handle the form post, the following lines should be added to your httpd.conf
 file.
 
->    # The following is for psldap services:
+>    \# The following is for psldap services:
 >    <IfModule mod_psldap.c>
 >      AddHandler ldap-update .ldu
->      # Set server wide defaults
+>      \# Set server wide defaults
 >      <Location />
 >        PsLDAPHosts "ldap.somewhere.com"
 >        PsLDAPUserKey mail
@@ -221,14 +222,14 @@ file.
 >        PsLDAPCredentialForm /psldapAuthForm.html
 >        PsLDAPSecureAuthCookie off
 >      </Location>
->      # Bind an authentication handler
+>      \# Bind an authentication handler
 >      <Location /ldapauth>
 >        SetHandler ldap-update
 >        AuthType Form
 >        AuthName "LDAP Auth"
 >        require valid-user
 >      </Location>
->      # Bind a query handler
+>      \# Bind a query handler
 >      <Location /ldapupdate>
 >        SetHandler ldap-update
 >        AuthType Basic
@@ -280,10 +281,10 @@ Keep in mind that connecting with the configured credentials potentially comprom
 It's also important to note that PsLDAP supports connectivity to an LDAP server (PsLDAPBindMethod) using either a simple unencrypted connection (simple), or one encrypted with either kerberos 4.1 (krbv41) or kerberos 4.2 (krbv42).
       
 >    ...
->    # One of the following must be set to 'on'
+>    \# One of the following must be set to 'on'
 >    PsLDAPAuthSimple off
 >    PsLDAPAuthExternal on
->    # Set to 'simple', 'krbv41', or 'krbv42' to determine binding to server
+>    \# Set to 'simple', 'krbv41', or 'krbv42' to determine binding to server
 >    PsLDAPBindMethod simple
 >    ...
 
@@ -478,12 +479,12 @@ In order to enable form processing, the following segment must be added to your 
 >  <Location /ldapupdate>
 >    SetHandler application/x-ldap-update
 >    AuthType Basic
->    # AuthName really can be anything
+>    \# AuthName really can be anything
 >    AuthName "LDAP Update"
 >    <Limit GET POST>
 >      Order Deny,Allow
 >      Deny from all
->      # Allow from local network only - no internet access
+>      \# Allow from local network only - no internet access
 >      Allow from 192 10
 >    </Limit>
 >  </Location>
@@ -494,9 +495,9 @@ Note that we set the AuthType to "Basic". It could also be set to "cookie", but 
 ## Some Examples
 
 Let's say you're maintaining the contact information for everyone you know in your LDAP server. If you want to provide access to your web server to only the people you know, based on their email address and some provided credential, add the following segment to your apache configuration file:
->  # First, we configure the "default" to be a very restrictive set of 
->  # permissions.  
->  #
+>  \# First, we configure the "default" to be a very restrictive set of 
+>  \# permissions.  
+>  \#
 >  <Directory />
 >    # Set the default LDAP directory setting for authentication
 >    PsLDAPHosts "ldap.mydomain.com"

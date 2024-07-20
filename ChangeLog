@@ -2,23 +2,31 @@ About mod_psldap
 ===================
 mod_psldap was created to provide a very lightweight means of managing directory information by leveraging client processing power to render the edit and reporting pages on any web browser without requiring an ActiveX or other binary executable download. It reduces the incremental network traffic for subsequent edits by 95% or more while still providing a very rich AJAX / Web 2.0 enabled user interface.
 
-Revision X (Upcoming release)
+Revision 0.97 (Upcoming release)
 ===================
+Enable integration to blackberry contact database
 
-
-Revision 0.96 (Upcoming release)
-===================
 SVG based rendering of organizational hierarchies
+
+Import from vCard files uploaded to server
+
+N/A
+
+Revision 0.96
+===================
+Add LDAP schema definitions to support module management features
+
+New web UI to create LDAP records based on XML new record template files
+
+Improve XSL references to path configurations, improve multiple LDAP server support
 
 Enhance mobile / handheld device support to tailor presentation to form factor
 
 Importing / exporting from / to google contact export format
 
-Import from vCard files uploaded to server
-
-Enable integration to blackberry contact database
-
 Finish integration of browser support for HttpOnly on secure cookies
+
+Introduce password change support
 
 Revision 0.95 
 ===================
@@ -341,7 +349,6 @@ parameters: PsLDAPUseLDAPGroups, PsLDAPUserGroupAttr, PsLDAPGroupMemberAttr,
 PsLDAPGroupNameAttr. The default is to not use LDAP based group authorization.
 
 
-
 Revision 0.62
 ===================
 	
@@ -365,3 +372,7 @@ Repaired hole in returning AUTH_REQUIRED for unencrypted password comparisons wh
 
 Changed group validation to allow the user to be authenticated if no group is identified and no group attribute is identified.
 
+
+Startup Version
+=================
+This module was originally based on Alexander Mayrhofer's mod_auth_ldap, version 0.5.

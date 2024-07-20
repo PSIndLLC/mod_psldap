@@ -526,7 +526,7 @@ Breaking this down a bit we can see that the handler is configured as ldapaction
 
 ## Support
 
-If you need help, have a feature request, compliment, or observation or would like to contribute or otherwise contact us, please feel free to do so!
+If you need help, have a feature request, compliment, or observation or would like to contribute, report a bug or otherwise contact us, please feel free to do so!
 - To initiate or participate in high-level discussions, use the Discussions feature on our GitHub project
 - To report bugs, please use the Issue feature on our GitHub project
 - In case you found any bug, have a question, or did enhance the module, please drop me a mail at

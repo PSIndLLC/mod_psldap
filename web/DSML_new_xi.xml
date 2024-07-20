@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" title="Edit View" href="DSML_editform.xsl"?>
+<?xml-stylesheet type="text/xsl" alternate="yes" title="Table View" href="DSML_table.xsl"?>
+
+<dsml >
+  <batchRequest requestID='01' processing='sequential'>
+    <authRequest principle=''>
+    </authRequest>
+    <searchRequest dn='' scope='wholeSubtree'>
+    </searchRequest>
+  </batchRequest>
+  
+  <batchResponse>
+    <authResponse>
+      <resultCode code='0' descr='success'></resultCode>
+    </authResponse>
+
+    <searchResponse xmlns:xi="http://www.w3.org/2003/XInclude"
+		    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <xi:include href="/psldap/DSML_new_responses.xml" parse="xml" xpointer="xpointer(//searchResultEntry[@id='v_o'])" >
+	<xi:fallback>
+	  <searchResponse>
+	    <searchResultEntry dn="">
+              <attr name="objectClass">
+		<value>top</value>
+		<value>organization</value>
+		<value>labeledURIObject</value>
+		<value>psVendorAcctObject</value>
+              </attr>
+	    </searchResultEntry>
+	  </searchResponse>
+	</xi:fallback>
+      </xi:include>
+    </searchResponse>
+  </batchResponse>
+</dsml>

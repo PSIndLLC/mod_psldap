@@ -1,0 +1,11 @@
+    <authResponse>
+        <resultCode code='0' descr='success'></resultCode>
+    </authResponse>
+    <searchResponse>
+      <searchResultEntry dn="">
+        <attr name="objectClass">
+          <value>top</value>
+          <value>nisMailAlias</value>
+        </attr>
+      </searchResultEntry>
+    </searchResponse>

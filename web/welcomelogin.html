@@ -1,0 +1,140 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+   <meta name="Author" content="David J. Picard" />
+   <meta name="keywords" lang="us-en" content="BPM,PRPC,BizFlow,airline,automation,operations,schedule,software,logistics" />
+   <meta name="description" content="Picard Software Industries, provider of custom software solutions since 1998. We also assist our clients in defining, prioritizing, and realizing their objectives to provide more timely positive operational impact." />
+   <meta name="robots" content="NOFOLLOW, INDEX" />
+   <meta name="copyright" content="&copy; 2010 Picard Software Industries" />
+   <meta name="date" content="2001-08-11T20:00:00-05:00" />
+   <meta name="google-site-verification" content="fkfYlRLBFvcTfhZiiYXDXH3lrKuLsQqhyr6x4ypguMw" />
+   <title>Home of PSInd.com</title>
+   <style type="text/css">
+     input[type="submit"] { background-color: #00FF00; }
+     ul.green { color: #00FF00; position: relative; list-style-type: disc; text-indent: -2px; left: -12%; }
+     ul.green li span { color:#000; }
+     tr.services td { width: 21%; border-style: ridge; border-width: 3px; border-color: #00FF00; padding: 0px 0px 8px 8px; border-bottom: none;}
+     tr.services td h3 { margin-top: 16px; padding-right: 12px; }
+     h3 { margin-top: 32px; }
+     hr { color: #00FF00; }
+     div#welcome_div, div#register_div { height: 216px; width: 200px;}
+   </style>
+   <link rel="STYLESHEET" type="text/css" media="screen" href="siteStyle.css" />
+<!-- Background black, text white, links red (unvisited), yellow (visited), blue (active) -->
+   <script language="JavaScript" type="text/javascript" src="psajax_docmgr.js" ></script>
+   <script language="JavaScript" type="text/javascript" src="psldap_config.js" ></script>
+   <script language="JavaScript" type="text/javascript" src="DSML_psldap.js" ></script>
+   <script type="text/javascript" >
+     var psUserDN;
+     var psUserCN;
+     
+     function toggleRegisterWelcome() {
+       if (document.getElementById('welcome_div').style.display=='') {
+         document.getElementById('register_div').style.display='';
+         document.getElementById('welcome_div').style.display='none';
+       } else {
+         document.getElementById('register_div').style.display='none';
+         document.getElementById('welcome_div').style.display='';
+       }
+     }
+     function acknowledgeUser() {
+       if (null != psUserCN) {
+         document.getElementById('register_div').style.display='none';
+         document.getElementById('welcome_div').style.display='';
+       } else {
+         document.getElementById('register_div').style.display='';
+         document.getElementById('welcome_div').style.display='none';
+       }
+     }
+     try {
+       psUserDN = getLoginUserDN();
+       psUserCN = getLoginUserCN();
+       window.setTimeout(acknowledgeUser, 40);
+     } catch (ei) {
+       window.status = "Page load error: " + ei;
+       alert(ei);
+     }
+   </script>
+</head>
+
+<body>
+  <div id="register_div" >
+    <script type="text/javascript">
+      if (null == psUserCN) {
+      document.write("<h3>Register Now</h3>\n<p>Register with us to receive news and announcements!</p>");
+      } else {
+      document.write("<h3>Login As Another</h3><p>Login below or <a href='javascript:void(0);toggleRegisterWelcome();'>view news and manage your account!</a></p>");
+      }
+    </script>
+    <script type="text/javascript">
+      function submitRegAuth() {
+      var theForm = document.getElementById("login");
+      if (theForm.FormAction.value == "Login") {
+      theForm.action = ps_siteConfig.secureBase+ps_siteConfig.authURI;
+      theForm.target = "_self";
+      return true;
+      } else {
+	  var base_arg = "dc%3Dpsind%2Cdc%3Dcom";
+	  theForm.action = ps_siteConfig.secureBase+ps_siteConfig.homeURI+"/DSML_new_registration.xml?dn=dc%3Dregistered%2C"+base_arg;
+	  window.open(ps_siteConfig.homeURI+"/DSML_new_registration.xml?dn=dc%3Dregistered%2C"+base_arg, "resultSet","toolbar=0,menubar=0,resizable=0,height=512,width=480,scrollbars=0,directories=0,location=0");
+	  return false;
+      }
+      }
+    </script>
+    <form id="login" name="loginRegister" onsubmit="return submitRegAuth();" method="post" action="" >
+      <fieldset style="width: 100%; " >
+	<input type="hidden" name="PS_Redirect_URI" value=ps_siteConfig.unsecureBase+"/index.html" />
+	<input type="hidden" name="FormAction" value="Login" />
+	<input type="hidden" name="dn" value="dc=psind,dc=com" />
+	<label>e-Mail <br /><input type="text" name="mail" size="20" required/></label><br />
+	<label>Password  <br /><input type="password" name="userPassword" size="20" required/></label><br />
+	<div style='width: 90%; margin-left:auto; margin-right: auto; margin-top: 3px; margin-bottom: 3px;'><input type="submit" value="Login" onClick="var ff = document.getElementById('login'); authenticateViaBasic(ff.elements['mail'].value, ff.elements['userPassword'].value); ff.FormAction.value=this.value" /> &nbsp; <input type="submit" value="Register" onClick="document.getElementById('login').FormAction.value=this.value" /></div>
+      </fieldset>
+    </form>
+    <script type="text/javascript">
+      document.getElementById('login').setAttribute("action",ps_siteConfig.secureBase+ps_siteConfig.authURI);
+      if (!document.cookie) {
+        document.write("<em>Site personalization only available with valid login...</em>");
+      }
+    </script>
+  </div>
+  <div id="welcome_div" style='display:none; width: 100%; ' >
+    <h3>Welcome Back!</h3>
+    <p>
+      <script language="JavaScript" type="text/javascript">
+	if (null != psUserCN) {
+	document.write("We value our clients and partners - if you are not <b><u>" +
+	    psUserCN + "</u></b> please login with your eMail and password " +
+	"so we may serve you more effectively");
+	}
+	function editMyAccount() {
+	window.open(ps_siteConfig.secureBase+ps_siteConfig.updateURI+"?FormAction=Search" +
+	"&search=%28objectClass=*%29&scope=base" +
+	"&dn="+psUserDN+"&BinaryHRef=off" +
+	"&xsl1="+ps_siteConfig.homeURI+"/DSML_editform.xsl",
+        "resultSet","toolbar=0,menubar=0,resizable=0," +
+        "height=512,width=480,scrollbars=0," +
+	"directories=0,location=0");
+	}
+	function changeMyPassword() {
+	window.open(ps_siteConfig.secureBase+ps_siteConfig.updateURI+"?FormAction=Search" +
+	"&search=%28objectClass=*%29&scope=base" +
+	"&dn="+psUserDN+"&BinaryHRef=off" +
+	"&xsl1="+ps_siteConfig.homeURI+"/DSML_passwdchange.xsl",
+        "resultSet","toolbar=0,menubar=0,resizable=0," +
+        "height=512,width=480,scrollbars=0," +
+	"directories=0,location=0");
+	}
+      </script>
+    </p>
+    <form id="maintain" name="maintainAccount" onsubmit="return false;">
+      <fieldset>
+	<div style='margin-left: auto; margin-right: auto; width: 100%;'>
+	  <input type="submit" value="Re-Login" onClick="toggleRegisterWelcome(); " />&nbsp;<input type="submit" value="Manage Profile" onClick="editMyAccount()">&nbsp;<input type="submit" value="Change Password" onClick="changeMyPassword()"/></div>
+      </fieldset>
+    </form>
+  </div>
+</body>
+</html>

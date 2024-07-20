@@ -3,7 +3,7 @@
  *
  * User Authentication against and maintenance of an LDAP database
  *
- * Copyright (C) 2004 David Picard dpicard@psind.com
+ * Copyright (C) 2024 PSInd, LLC
  *
  * http://www.psind.com/projects/mod_psldap/
  *
@@ -220,13 +220,26 @@ function ps_dndModifyDN(invert, mode) {
     }
 }
 
+function getFrameDocument(curDoc, frameName) {
+    var result = null;
+    try {
+	result = curDoc.getElementById("dndChangeFrame").contentWindow.document;
+    } catch (er) {
+	;
+    }
+    return result;
+}
+
 function ps_dndSetSource(ev) {
     var myEvent = (arguments.length < 1) ? window.event : ev;
     var elmt = (myEvent.target) ? myEvent.target : myEvent.srcElement;
+    var dndFrmDoc = getFrameDocument(document, "dndChangeFrame");
     ps_dndState.srcDn = elmt.getAttribute('dn');
     ps_dndState.srcOc = elmt.getAttribute('oc');
     ps_dndState.srcCtxt = elmt.getAttribute('dndCtxt');
-    ps_dndState.dndForm = document.getElementById("dndChangeFrame").contentWindow.document.getElementById("dndChangeForm");
+    if (null == dndFrmDoc) ps_dndState.dndForm = null; 
+    else ps_dndState.dndForm = dndFrmDoc.getElementById("dndChangeForm");
+
     if(null == ps_dndState.dndForm) document.getElementById("dndChangeDiv").style.display="block";
     /*
     try {
@@ -325,9 +338,8 @@ function ps_dndHandleDragDrop(ds)
 
 function ps_showResultsAndReinit()
 {
-    var myFrame = document.getElementById("dndChangeFrame");
-    if (myFrame) {
-	var respDocument = myFrame.contentWindow.document;
+    var respDocument = getFrameDocument(document, "dndChangeFrame");
+    if (null != respDocument) {
 	var myResult = respDocument.getElementsByTagName("resultCode");
 	if (myResult.length > 0) {
 	    if ("0" == myResult[0].getAttribute("code")) {
@@ -356,8 +368,7 @@ function ps_showResultsAndReinit()
 		    errMsg[0].textContent;
 		top.alert("Update failed: " + msg );
 	    }
-	    myFrame.contentWindow.document.location.href =
-		psldapRootUri + "/dndForm.html";
+	    respDocument.location.href = psldapRootUri + "/dndForm.html";
 	}
     }
 }
@@ -371,7 +382,11 @@ function initDndProcessingForm()
     e.appendChild(f = document.createElement('iframe'));
     f.setAttribute("id", "dndChangeFrame");
     f.onload = ps_showResultsAndReinit;
-    f.src = psldapRootUri + "/dndForm.html";
+    try {
+	f.src = psldapRootUri + "/dndForm.html";
+    } catch(e1) {
+	f.document.location.href = psldapRootUri + "/dndForm.html";
+    }	
 }
 
 function attachDnDEventsForElementTypeWithDNAttr( theDoc, elmtType, myXslMgr)
@@ -660,8 +675,10 @@ function changeDisplayStyle(ss, j, rule, dispStyle)
  *  @param work - use 'none' to hide or 'block' to show
  *  @param other - use 'none' to hide or 'block' to show
  *  @param im - use 'none' to hide or 'block' to show
+ *  @param acct - use 'none' to hide or 'block' to show
+ *  @param vendor - use 'none' to hide or 'block' to show
  **/
-function showInfo(personal, work, other, im, vendor )
+function showInfo(personal, work, other, im, acct, vendor )
 {
     var i = document.styleSheets.length;
     while (i-- > 0) {
@@ -692,6 +709,10 @@ function showInfo(personal, work, other, im, vendor )
 	    case "DIV.im_info":
 	    case "div.im_info":
 		changeDisplayStyle(ss, j, rule, im);
+		break;
+	    case "DIV.acct_info":
+	    case "div.acct_info":
+		changeDisplayStyle(ss, j, rule, acct);
 		break;
 	    case "DIV.vendor_info":
 	    case "div.vendor_info":
@@ -838,7 +859,7 @@ function authenticateViaBasic(userkey, password)
     try {
 	var reqW = new RequestWrapper();
 	reqW.init();
-	reqW.open(psldapBaseUri + ldapupdateUri + "?FormAction=Search&search=(mail=zzz)&scope=base&xsl1=DSML_response.xsl", false, refreshOpenerAndClose, userkey, password);
+	reqW.open(psldapBaseUri + ldapupdateUri + "?FormAction=Search&search=("+ps_siteConfig.userKey+"="+userkey+")&scope=base&xsl1=DSML_response.xsl", false, refreshOpenerAndClose, userkey, password);
     } catch(e1) {
 	window.status("Page does not support (re)authentication via Basic");
     }
@@ -886,12 +907,11 @@ function setProcessWindowMsg(htmlStr) {
 function resetProcessWindow() {
     var wt = document.getElementById("processWindow");
     if (null != wt) {
-	wt.src = wt.src;
-	/*
-	wt.contentWindow.document.open();
-	wt.contentWindow.document.write("<p><em>Processing request...</em></p>");
-	wt.contentWindow.document.close();
-	*/
+	try {
+	    wt.src = wt.src;
+	} catch(e1) {
+ 	    wt.document.location.href = wt.document.location.href;
+	}
     }
 }
 
@@ -1255,11 +1275,15 @@ function loadRecordUrl(sel, target, olcb) {
     if (sel != "") {
 	var objFrame = null;
         if ((arguments.length < 2) || (null == target)) {
-            objWindow = window.open(sel, "", "resizable=yes, menubar=no, toolbar=no, location=no, height=400, width=400");
+            objWindow = window.open(sel, "", "menubar=no,toolbar=no,directories=no,height=501,width=506,top=100,resizable=yes");
 	    objFrame = objWindow;
         } else {
             objFrame = document.getElementById(target);
-            objFrame.src = sel;
+            try {
+		objFrame.src = sel;
+	    } catch(e1) {
+		objFrame.document.location.href = sel;
+	    }
         }
 	if ((null != objFrame) && (arguments.length > 2)) objFrame.onload=olcb;
     }
@@ -1441,6 +1465,23 @@ function getVCard(dn, target) {
     loadRecordUrl(getUrl, target);
 }
 
+function getDocumentHeight(doc) {
+    var body = doc.body,
+	html = doc.documentElement;
+
+    var height = Math.max( body.scrollHeight, body.offsetHeight, 
+			   html.clientHeight, html.scrollHeight, html.offsetHeight );
+}
+
+function getDocumentWidth(doc) {
+    var body = doc.body,
+	html = doc.documentElement;
+
+    var width = Math.max( body.scrollWidth, body.offsetWidth, 
+			   html.clientWidth, html.scrollWidth, html.offsetWidth );
+    return width;
+}
+
 function getWindowWidth(objWindow) {
     var myWidth = 0;
 
@@ -1493,11 +1534,14 @@ function getWindowHeight(objWindow) {
 function getClientHeight(cellElmt)
 {
     var ht = 0;
+    /*
     for (var j = 0; j < cellElmt.childNodes.length; j++) {
 	if (undefined != cellElmt.childNodes[j].clientHeight) {
 	    ht = ht + cellElmt.childNodes[j].clientHeight;
 	}
     }
+    */
+    ht = cellElmt.lastChild.offsetTop + cellElmt.lastChild.clientHeight /*- cellElmt.firstChild.offsetTop*/;
     return ht;
 }
 
@@ -1517,14 +1561,17 @@ function sizeWindowToFitDocument(wo) {
     /* If the window is not embedded, resize to fit the form */
     if (wo.top == wo) {
 	var de = wo.document.documentElement;
-	/*
-	var width = de.scrollWidth - de.clientWidth;
-	var height = de.scrollHeight - de.clientHeight;
-	*/
-	var width = de.scrollWidth - getWindowWidth(wo);
-	var height = de.scrollHeight - getWindowHeight(wo);
+	var sh = screen.height;
+	var sw = screen.width;
+	var w = de.scrollWidth - getWindowWidth(wo);
+	var h = de.scrollHeight - getWindowHeight(wo);
  
-	wo.resizeBy(width, height);
+	wo.resizeBy(w, h);
+
+	w = Math.min(getDocumentWidth()+16, sw);
+	h = Math.min(getDocumentHeight()+16, sh);
+	wo.resizeTo(w, h);
+
 	if (!windowIsAllOnScreen(wo)) {
 	    wo.moveTo((wo.screen.width - de.clientWidth) / 2,
 		      (wo.screen.height - de.clientHeight) / 2);
@@ -1535,7 +1582,7 @@ function sizeWindowToFitDocument(wo) {
 function verticalWrapNColumns(objCellElmt, ncol)
 {
     var resSz = 0;
-    var wrapHeight = (objCellElmt.lastChild.offsetTop)/ncol;
+    var wrapHeight = (objCellElmt.lastChild.offsetTop + objCellElmt.lastChild.clientHeight)/ncol + objCellElmt.lastChild.clientHeight;
     var winH = getWindowHeight(window);
     var currentElmt = objCellElmt;
 
@@ -1543,7 +1590,7 @@ function verticalWrapNColumns(objCellElmt, ncol)
 	resSz += currentElmt.offsetTop;
 	currentElmt = currentElmt.offsetParent;
     }
-    winH += resSz;
+    wrapHeight += resSz;
     
     if (wrapHeight > winH) {
 	wrapHeight = winH - wrapHeight;
@@ -1560,6 +1607,10 @@ function verticalWrapChildren(objCellElmt, reservedSize)
     var scrollThickness = 25;
     var wrapHeight = 0;
     var currentElmt = objCellElmt;
+
+    /* Abort if screen width <= 640 */
+    if (window.innerWidth <= 640) return;
+
     while (currentElmt.offsetParent) {
 	reservedSize += currentElmt.offsetTop;
 	currentElmt = currentElmt.offsetParent;
@@ -1748,11 +1799,20 @@ function buildOrgTree(tableIdStr, recordNameStr, rowIdStr, parentDelimStr)
                     objTableElmt.style.width = "100%";
     
                     while ((null != objParentCell) &&
-                           (0 != objParentCell.tagName.indexOf("TD"))) {
-                        objParentCell = objParentCell.firstChild;
+			   (null != objParentCell.firstChild) &&
+			   (0 != objParentCell.tagName.indexOf("TD")) ) {
+			if (undefined != objParentCell.firstElementChild) {
+			    objParentCell = objParentCell.firstElementChild;
+			} else {
+			    objParentCell = objParentCell.firstChild;
+			}
                     }
     
-                    objParentCell = objParentCell.nextSibling;
+                    if (undefined != objParentCell.nextElementSibling) {
+			objParentCell = objParentCell.nextElementSibling;
+		    } else  {
+			objParentCell = objParentCell.nextSibling;
+		    }
                     objParentCell.appendChild(document.createElement("BR"));
                     objParentCell.appendChild(objTableElmt);
                     while (0 < childGroup.length) {

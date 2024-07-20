@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" title="Edit View" href="DSML_editform.xsl"?>
+<?xml-stylesheet type="text/xsl" alternate="yes" title="Table View" href="DSML_table.xsl"?>
+
+<dsml>
+<batchRequest requestID='01' processing='sequential'>
+    <authRequest principle=''>
+    </authRequest>
+    <searchRequest dn='' scope='wholeSubtree'>
+        <and>
+            <equalityMatch name='sn'>
+                <value></value>
+            </equalityMatch>
+            <substrings name='mail'>
+                <any>@</any>
+            </substrings>
+        </and>
+        <attributes>
+            <attribute name='dn' />
+            <attribute name='mail' />
+        </attributes>
+    </searchRequest>
+</batchRequest>
+
+<batchResponse requestID='01'>
+    <authResponse>
+        <resultCode code='0' descr='success'></resultCode>
+    </authResponse>
+    <searchResponse>
+      <searchResultEntry dn="">
+        <attr name="objectClass">
+          <value>top</value>
+          <value>person</value>
+          <value>organizationalPerson</value>
+          <value>inetOrgPerson</value>
+          <value>labeledURIObject</value>
+          <value>simpleSecurityObject</value>
+          <value>imIdObject</value>
+        </attr>
+        <attr name="userPassword">
+          <value></value>
+        </attr>
+	<attr name="o">
+	  <value>Account Request</value>
+	</attr>
+      </searchResultEntry>
+    </searchResponse>
+</batchResponse>
+</dsml>

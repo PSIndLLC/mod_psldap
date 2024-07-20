@@ -141,7 +141,7 @@
       <xsl:attribute name="style">padding-right: 10px;</xsl:attribute>
       <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>");</xsl:attribute>
       <xsl:element name="img">
-	<xsl:attribute name="src">/psldap/images/editRecord_sm.gif</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/editRecord_sm.gif</xsl:attribute>
 	<xsl:attribute name="style">margin-top: 1px; margin-bottom: 0px;</xsl:attribute>
       </xsl:element>
     </xsl:element>

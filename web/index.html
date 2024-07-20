@@ -5,10 +5,10 @@
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
     <meta name="Author" content="David J. Picard" />
-    <meta name="keywords" lang="us-en" content="" />
-    <meta name="description" content="" />
+    <meta name="keywords" lang="us-en" content="mod_psldap,apache" />
+    <meta name="description" content="Feature access page for mod_psldap" />
     <meta name="robots" content="NOINDEX" />
-    <meta name="copyright" content="&copy; 2010 PSInd, LLC" />
+    <meta name="copyright" content="&copy; 2024 PSInd, LLC" />
     <meta name="date" content="2004-06-11T20:00:00-05:00" />
     <title>PsLDAP Management Page</title>
     <link rel="STYLESHEET" type="text/css" href="/psldap/DSML_psldap.css" />
@@ -25,6 +25,10 @@
             if ("" == strQuery) {
                 // Advanced choice selected
                 searchCompareElement.selectedIndex = 4;
+            } else if ("objectClass=*" == strQuery) {
+                // "Select all" selected
+                searchCompareElement.selectedIndex = 4;
+                searchValueElement.value = "";
             } else if (4 == searchCompareElement.selectedIndex) {
                 searchCompareElement.selectedIndex = 3;
             }
@@ -48,8 +52,9 @@
         function setFormBaseDN() {
             alert("Loaded window - new dn is ");
         }
-        function loadDNInitializationFormUrl(xmlUrl, xslUrl) {
-	    var addArgs = "&dn=" + encodeURIComponent(document.queryForm.dn.value);
+        function loadDNInitializationFormUrl(xmlUrl, xslUrl, opt_subdn) {
+	    var subdn = "";
+	    var addArgs = "&dn=" + subdn + encodeURIComponent(document.queryForm.dn.value);
 	    loadTemplateRecord(xmlUrl, xslUrl, null, addArgs, 'setFormBaseDN');
         }
         function resizeResultIframe() {
@@ -72,8 +77,6 @@
 </head>
 
 <body onload="resizeResultIframe()" onresize="resizeResultIframe()">
-<!--#include virtual="/header.html" -->
-
 <!-- Add body of page here -->
 <table width="100%">
   <tr width="100%">
@@ -91,14 +94,16 @@
     <td align="right" width="5px">
       <fieldset>
         <legend>Create a New ...</legend>
-        <select size="1" name="newRecordSelect" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(psldapRootUri + '/' + this.value, psldapRootUri + '/DSML_editform.xsl'); this.value='';">
-          <option selected value="">Select One ...</option>
-          <option value="DSML_new_v_o.xml">Vendor Organization</option>
-          <option value="DSML_new_o.xml">Organization</option>
-          <option value="DSML_new_ou.xml">Organizational Unit</option>
-          <option value="DSML_new_group.xml">Group</option>
-          <option value="DSML_new_person.xml">Person</option>
-          <option value="DSML_new_user.xml">User</option>
+        <select size="1" name="newRecordSelect" subdn="" style="font-size: 12px; font-weight: bold; " onchange="loadDNInitializationFormUrl(psldapRootUri + '/' + this.value, psldapRootUri + '/DSML_editform.xsl'); this.value='';">
+          <option selected value="" subdn="">Select One ...</option>
+          <option value="DSML_new_v_o.xml" subdn="">Vendor Organization</option>
+          <option value="DSML_new_o.xml" subdn="">Organization</option>
+          <option value="DSML_new_ou.xml" subdn="">Organizational Unit</option>
+          <option value="DSML_new_group.xml" subdn="">Group</option>
+          <option value="DSML_new_person.xml" subdn="">Person</option>
+          <option value="DSML_new_user.xml" subdn="">User</option>
+          <option value="DSML_new_user_acct.xml" subdn="ou=People,">User Account</option>
+          <option value="DSML_new_mail_alias.xml" subdn="ou=Aliases,">Mail Alias</option>
         </select>
       </fieldset>
     </td>
@@ -108,7 +113,7 @@
 <fieldset style="margin-bottom: 6px; ">
   <legend>Search for a Record</legend>
   <div style="margin-top: 6px;" >
-  <form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/ldapupdate" target="resultSet">
+  <form id="queryForm" name="queryForm" onsubmit="generateQueryString();" method="POST" action="/psldap/ldapupdate" target="resultSet">
     <script type="text/javascript" language="JavaScript" >
       var defaultDomain = 0;
       for (var i=0; i<ldapDomains.length; i++) {
@@ -131,6 +136,7 @@
 	    <option value="sn">Last Name</option>
 	    <option value="o">Organization</option>
 	    <option value="ou">Org Unit</option>
+	    <option value="objectClass=*">Show all...</option>
 	    <option value="">Advanced...</option>
 	  </select>
 	  <select onchange="synchCompareSelect();" size="1" name="searchcompare" style="margin-right: 3px;">
@@ -148,6 +154,8 @@
 	    <option selected value="/psldap/DSML_cards.xsl">Card View</option>
 	    <option value="/psldap/DSML_table.xsl">Table View</option>
 	    <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+	    <option value="/psldap/DSML_SugarAccountCSV.xsl">Sugar Account CSV</option>
+	    <option value="/psldap/DSML_SugarContactCSV.xsl">Sugar Contact CSV</option>
 	  </select>
 	  </label>
 	  <label><span  style="margin-right: 6px; margin-left: 6px;">/</span>
@@ -158,6 +166,8 @@
 	    <option value="/psldap/DSML_cards.xsl">Card View</option>
 	    <option value="/psldap/DSML_table.xsl">Table View</option>
 	    <option value="/psldap/DSML_editform.xsl">Editable Cards</option>
+	    <option value="/psldap/DSML_SugarAccountCSV.xsl">Sugar Account CSV</option>
+	    <option value="/psldap/DSML_SugarContactCSV.xsl">Sugar Contact CSV</option>
 	  </select>
 	  </label>
 	  </td><td>
@@ -174,6 +184,5 @@
 
 <iframe id="resultSet" name="resultSet" src="" frameborder="0" style="height: 0px; width: 100%; margin-top: 0px; margin-bottom: 0px; border: none; " ></iframe>
 
-<!--#include virtual="/footer.html" -->
 </body>
 </html>

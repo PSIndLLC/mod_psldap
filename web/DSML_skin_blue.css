@@ -50,3 +50,6 @@ div#editNavControls span a:active {
       background-repeat: no-repeat;
 }
 
+hr { background-color: #0000FF; }
+
+fieldset { border-color: #0000FF; }

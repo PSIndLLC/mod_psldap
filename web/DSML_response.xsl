@@ -8,8 +8,6 @@
 
 <xsl:output method="html" doctype-public="-//W3C//DTD XHTML 1.0 Transitional//EN" doctype-system="http://www.w3.org/TR/xhtml1l/DTD/transitional.dtd" omit-xml-declaration="no" media-type="text/html" />
 
-<xsl:variable name="psldapRoot" select="'/psldap'" />
-
 <xsl:template name="pageSpecificHeader">
   <xsl:element name="style">
     <xsl:attribute name="type">text/css</xsl:attribute>
@@ -17,7 +15,7 @@
   </xsl:element>
   <xsl:element name="script">
     <xsl:attribute name="type">text/javascript</xsl:attribute>
-    <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/DSML_psldap.js</xsl:attribute>
+    <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/DSML_psldap.js</xsl:attribute>
   </xsl:element>
 </xsl:template>
 

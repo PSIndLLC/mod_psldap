@@ -3,7 +3,7 @@
  *
  * User Authentication against and maintenance of an LDAP database
  *
- * Copyright (C) 2004 David Picard dpicard@psind.com
+ * Copyright (C) 2024 PSInd, LLC
  *
  * http://www.psind.com/projects/mod_psldap/
  *
@@ -34,11 +34,6 @@
  * MODULE-DEFINITION-END
  */
 
-#define PSLDAP_VERSION_LABEL "0.96"
-
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
 /*
 #define USE_LIBXML2_LIBXSL
 #define USE_PSLDAP_CACHING
@@ -52,6 +47,13 @@
 #include "http_request.h"
 #include "ap_compat.h"
 #include "ap_config.h"
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#define PSLDAP_VERSION_LABEL PACKAGE_VERSION
+#else
+#define PSLDAP_VERSION_LABEL "0.96"
+#endif
 
 #if 0
 /* Semaphores will not work on Linux, process sharing semaphores are not
@@ -2510,7 +2512,8 @@ static char * get_groups_containing_grouped_attr(request_rec *r, LDAP *aldap,
         {
             ps_rerror( r, APLOG_INFO,
 		       "Could not identify user LDAP User = <%s = %s> with group key %s",
-		       conf->psldap_userkey, user, groupkey);
+		       conf->psldap_userkey, user,
+		       (NULL == groupkey) ? "BLANK" : groupkey);
         }
         if (NULL == aldap) { ldap_unbind_s(ldap); }
     }
@@ -2785,9 +2788,8 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
        Recommend the use of memcmp / memchr and construction of an algorithm
        to more efficiently identify the termination of the MIME section.
        Refer to RFCs 1341, 1521, & 1806 for MIME background */
-    const char *tmp, *key;
+    const char *tmp, *key, *data = *theData;
     char *val, *filename;
-    const char *data = *theData;
     int rc = OK;
     int boundary_len = strlen(boundary);
 
@@ -2850,7 +2852,7 @@ static int parse_multipart_data(request_rec *r, const char *boundary,
 		       key, errBuffer);
         }
 
-	key = get_qualified_field_name(r, ap_getword_nc(r->pool, &key, '-'));
+	key = get_qualified_field_name(r, ap_getword(r->pool, &key, '-'));
 
         if (NULL != filename) {
             val = build_psldap_magic_string(r, val, val_len + 1);
@@ -3582,12 +3584,13 @@ static int ldap_redirect_handler(request_rec *r)
 
 static char* escapeChar(request_rec *r, const char *str, char c, const char* frag)
 {
-    char *result = str, *tmp = result, *last = result;
+    char *result = (char*)str, *tmp, *last;
     char search[] = {'\0', '\0'};
     const char *replaceWith = (NULL == frag) ? "&amp;" : frag;
     search[0] = c;
     if (NULL != strstr(str, search)) {
-        result = ap_strtok(ap_pstrdup(r->pool, result), search, &last);
+        last = result = ap_pstrdup(r->pool, result);
+        result = ap_strtok(result, search, &last);
 	while (NULL != (tmp = ap_strtok(NULL, search, &last))) {
 	    result = ap_pstrcat(r->pool, result, replaceWith, tmp, NULL);
 	}
@@ -4255,6 +4258,7 @@ static char* encodeLdapValue(request_rec *r, const char *dn,
     if (!useMagic) {
         size_t encValSz = ( attrIsTimestampType(attr) ?
 			    HTML5_T_STRLEN : value->bv_len ) + 1;
+	int encValLen = (encValSz <= INT_MAX) ? encValSz : INT_MAX;
         char *encVal = ap_palloc(r->pool, encValSz);
 	strncpy(encVal, value->bv_val, value->bv_len);
 	encVal[value->bv_len] = '\0';
@@ -4265,7 +4269,7 @@ static char* encodeLdapValue(request_rec *r, const char *dn,
 	        strftime(encVal, encValSz, HTML5_T_FORMAT, &tm);
 	    } else {
 	        ps_rerror( r, APLOG_NOTICE,
-			   "Failed to parse ACCESS_T time string: %.*s", encValSz, encVal );
+			   "Failed to parse ACCESS_T time string: %.*s", encValLen, encVal );
 	    }
 	}
 	result = ap_escape_html(r->pool,

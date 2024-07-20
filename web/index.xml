@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<!DOCTYPE psldap >
+<?xml-stylesheet type="text/xsl" title="PSLDAP Index View" href="DSML_index.xsl"?>
+<?xml-stylesheet type="text/xsl" alternate="yes" title="Secondary View" href=""?>
+<psldap>
+  <searchby default='eMail'>
+    <option value='mail' default='@'>eMail</option>
+    <option value='givenName'>First Name</option>
+    <option value='sn'>Last Name</option>
+    <option value='o'>Organization</option>
+    <option value='ou'>Org Unit</option>
+    <option value='objectClass=*'>Show all...</option>
+    <option value=''>Advanced...</option>
+  </searchby>
+  <searchcompare default='contains'>
+    <option value='=?*'>begins with</option>
+    <option value='=*?*'>contains</option>
+    <option value='=*?'>ends with</option>
+    <option value='=?'>equals</option>
+    <option value='?'>...</option>
+  </searchcompare>
+  <styleas default='Card View'>
+    <option value=''>&lt;None&gt;</option>
+    <option value='/psldap/DSML_mgmt_tree.xsl'>Mgmt Tree</option>
+    <option value='/psldap/DSML_org_tree.xsl'>Org Tree</option>
+    <option value='/psldap/DSML_cards.xsl'>Card View</option>
+    <option value='/psldap/DSML_table.xsl'>Table View</option>
+    <option value='/psldap/DSML_editform.xsl'>Editable Cards</option>
+    <option value='/psldap/DSML_SugarAccountCSV.xsl'>Sugar Account CSV</option>
+    <option value='/psldap/DSML_SugarContactCSV.xsl'>Sugar Contact CSV</option>
+  </styleas>
+  <createas default='Select One...'>
+    <option value='' subdn=''>Select One ...</option>
+    <option value='DSML_new_v_o.xml' subdn=''>Vendor Organization</option>
+    <option value='DSML_new_o.xml' subdn=''>Organization</option>
+    <option value='DSML_new_ou.xml' subdn=''>Organizational Unit</option>
+    <option value='DSML_new_group.xml' subdn='ou=Group'>Group</option>
+    <option value='DSML_new_person.xml' subdn=''>Person</option>
+    <option value='DSML_new_user.xml' subdn=''>User</option>
+    <option value='DSML_new_user_acct.xml' subdn='ou=People,'>User Account</option>
+    <option value='DSML_new_mail_alias.xml' subdn='ou=Aliases,'>Mail Alias</option>
+  </createas>
+</psldap>

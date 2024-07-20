@@ -4,8 +4,8 @@
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/html4/loose.dtd'>
 
 <xsl:include href="DSML_commonscript.xsl" />
-<xsl:include href="DSML_sitefrags.xsl" />
 <xsl:include href="DSML_edittools.xsl" />
+<xsl:include href="DSML_sitefrags.xsl" />
 
 <xsl:output method="html" doctype-public="-//W3C//DTD HTML 4.01 Transitional//EN" doctype-system="http://www.w3.org/TR/html4/loose.dtd" omit-xml-declaration="no" media-type="text/html" />
 
@@ -24,6 +24,7 @@
 
         showRecord(1);
         window.status = getAllFormElements().length + " records loaded";
+        sizeWindowToFitDocument(window);
     }
     ]]>
   </xsl:element>
@@ -44,7 +45,7 @@
     <xsl:element name="br" />
     <xsl:apply-templates select="//searchResponse/searchResultEntry[@dn='dc=registered']" mode="registration" >
       <xsl:with-param name='hidden'>off</xsl:with-param>
-      <xsl:with-param name='updateURI'>/register</xsl:with-param>
+      <xsl:with-param name='updateURI'><xsl:value-of select="$v_registerURI" /></xsl:with-param>
     </xsl:apply-templates>
     <xsl:element name="br" />
     <xsl:element name="div" >
@@ -112,39 +113,60 @@
 <xsl:template name="searchResults" match="searchResponse">
   <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organization')]/ancestor::searchResultEntry" mode="organization" >
     <xsl:with-param name='hidden'>on</xsl:with-param>
-    <xsl:with-param name='updateURI'>/ldapupdate</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
     <xsl:with-param name='heading'>Organization</xsl:with-param>
     <xsl:sort select="attr[@name='o']/value" />
   </xsl:apply-templates>
   
   <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalUnit')]/ancestor::searchResultEntry" mode="orgUnit">
     <xsl:with-param name='hidden'>on</xsl:with-param>
-    <xsl:with-param name='updateURI'>/ldapupdate</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
     <xsl:with-param name='heading'>Unit</xsl:with-param>
     <xsl:sort select="attr[@name='ou']/value" />
   </xsl:apply-templates>
   
   <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')]/ancestor::searchResultEntry" mode="person">
     <xsl:with-param name='hidden'>on</xsl:with-param>
-    <xsl:with-param name='updateURI'>/ldapupdate</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
     <xsl:with-param name='heading'>People</xsl:with-param>
     <xsl:sort select="attr[@name='sn']/value" />
     <xsl:sort select="attr[@name='givenName']/value" />
     <xsl:sort select="attr[@name='cn']/value" />
   </xsl:apply-templates>
   
+  <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='nisMailAlias')]/ancestor::searchResultEntry" mode="nisMailAlias">
+    <xsl:with-param name='hidden'>on</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
+    <xsl:with-param name='heading'>Mail Aliases</xsl:with-param>
+    <xsl:sort select="attr[@name='cn']/value" />
+  </xsl:apply-templates>
+
+  <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='psBid')]/ancestor::searchResultEntry" mode="psBid">
+    <xsl:with-param name='hidden'>on</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
+    <xsl:with-param name='heading'>Asset Bids</xsl:with-param>
+    <xsl:sort select="attr[@name='cn']/value" />
+  </xsl:apply-templates>
+
+  <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='psAsset')]/ancestor::searchResultEntry" mode="psAsset">
+    <xsl:with-param name='hidden'>on</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
+    <xsl:with-param name='heading'>Assets</xsl:with-param>
+    <xsl:sort select="attr[@name='cn']/value" />
+  </xsl:apply-templates>
+
   <xsl:apply-templates select="searchResultEntry/attr[@name='objectClass']/value[(text()='groupOfUniqueNames')]/ancestor::searchResultEntry" mode="groupOfUniqueNames">
     <xsl:with-param name='hidden'>on</xsl:with-param>
-    <xsl:with-param name='updateURI'>/ldapupdate</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
     <xsl:with-param name='heading'>Groups</xsl:with-param>
     <xsl:sort select="attr[@name='sn']/value" />
     <xsl:sort select="attr[@name='givenName']/value" />
     <xsl:sort select="attr[@name='cn']/value" />
   </xsl:apply-templates>
 
-  <xsl:apply-templates select="searchResultEntry/attr[@name='structuralObjectClass']/value[not((text()='groupOfUniqueNames') or (text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson') or (text()='organizationalUnit') or (text()='organization') or (text()='OpenLDAPou'))]/ancestor::searchResultEntry" mode="generic">
+  <xsl:apply-templates select="searchResultEntry/attr[@name='structuralObjectClass']/value[not((text()='groupOfUniqueNames') or (text()='nisMailAlias') or (text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson') or (text()='organizationalUnit') or (text()='organization') or (text()='OpenLDAPou'))]/ancestor::searchResultEntry" mode="generic">
     <xsl:with-param name='hidden'>on</xsl:with-param>
-    <xsl:with-param name='updateURI'>/ldapupdate</xsl:with-param>
+    <xsl:with-param name='updateURI'><xsl:value-of select="$v_updateURI" /></xsl:with-param>
     <xsl:with-param name='heading'>Miscellaneous</xsl:with-param>
     <xsl:sort select="attr[@name='structuralObjectClass']/value" />
     <xsl:sort select="attr[@name='cn']/value" />
@@ -163,7 +185,7 @@
 	    <xsl:attribute name="href">javascript: void submitVisibleRecord('Create')</xsl:attribute>
 	    <xsl:attribute name="title">Create a new record</xsl:attribute>
 	    <xsl:element name="img">
-	      <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/newRecord.gif</xsl:attribute>
+	      <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/newRecord.gif</xsl:attribute>
 	    </xsl:element>
 	  </xsl:element>
 	</xsl:element>
@@ -174,7 +196,7 @@
 	    <xsl:attribute name="href">javascript: void submitVisibleRecord('Modify')</xsl:attribute>
 	    <xsl:attribute name="title">Modify this record</xsl:attribute>
 	    <xsl:element name="img">
-	      <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/editRecord.gif</xsl:attribute>
+	      <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/editRecord.gif</xsl:attribute>
 	    </xsl:element>
 	  </xsl:element>
 	</xsl:element>
@@ -183,7 +205,7 @@
 	    <xsl:attribute name="href">javascript: void moveVisibleRecord('modDNRequest')</xsl:attribute>
 	    <xsl:attribute name="title">Move this record</xsl:attribute>
 	    <xsl:element name="img">
-	      <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/moveRecord.gif</xsl:attribute>
+	      <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/moveRecord.gif</xsl:attribute>
 	    </xsl:element>
 	  </xsl:element>
 	</xsl:element>
@@ -192,7 +214,7 @@
 	    <xsl:attribute name="href">javascript: void submitVisibleRecord('Delete')</xsl:attribute>
 	    <xsl:attribute name="title">Delete this record</xsl:attribute>
 	    <xsl:element name="img">
-	      <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/delRecord.gif</xsl:attribute>
+	      <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/delRecord.gif</xsl:attribute>
 	    </xsl:element>
 	  </xsl:element>
 	</xsl:element>
@@ -204,7 +226,7 @@
 	<xsl:attribute name="href">javascript: void resetVisibleRecord()</xsl:attribute>
 	<xsl:attribute name="title">Reset changes on current form</xsl:attribute>
 	<xsl:element name="img">
-	  <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/resetRec.gif</xsl:attribute>
+	  <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/resetRec.gif</xsl:attribute>
 	</xsl:element>
       </xsl:element>
     </xsl:element>
@@ -214,7 +236,7 @@
 	<xsl:attribute name="href">javascript: void toggleClassInfo()</xsl:attribute>
 	<xsl:attribute name="title">Change record classification</xsl:attribute>
 	<xsl:element name="img">
-	  <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/showClass.gif</xsl:attribute>
+	  <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/showClass.gif</xsl:attribute>
 	</xsl:element>
       </xsl:element>
     </xsl:element>
@@ -225,7 +247,7 @@
 	  <xsl:attribute name="onmouseup">javascript: void showPrevRecord()</xsl:attribute>
 	  <xsl:attribute name="title">Go to previous form</xsl:attribute>
 	  <xsl:element name="img">
-	    <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/prevRecord.gif</xsl:attribute>
+	    <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/prevRecord.gif</xsl:attribute>
 	  </xsl:element>
 	</xsl:element>
       </xsl:element>
@@ -257,7 +279,7 @@
 	  <xsl:attribute name="href">javascript: void showNextRecord()</xsl:attribute>
 	  <xsl:attribute name="title">Go to next form</xsl:attribute>
 	  <xsl:element name="img">
-	    <xsl:attribute name="src"><xsl:value-of select="$psldapRoot" />/images/nextRecord.gif</xsl:attribute>
+	    <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/nextRecord.gif</xsl:attribute>
 	  </xsl:element>
 	</xsl:element>
       </xsl:element>
@@ -299,12 +321,17 @@
     <xsl:with-param name='heading'>People</xsl:with-param>
   </xsl:apply-templates>
 
+  <xsl:apply-templates select="attr[@name='objectClass']/value[(text()='nisMailAlias')]/ancestor::searchResultEntry" mode="nisMailAlias">
+    <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
+    <xsl:with-param name='heading'>Mail Aliases</xsl:with-param>
+  </xsl:apply-templates>
+
   <xsl:apply-templates select="attr[@name='objectClass']/value[(text()='groupOfUniqueNames')]/ancestor::searchResultEntry" mode="groupOfUniqueNames">
     <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
     <xsl:with-param name='heading'>People</xsl:with-param>
   </xsl:apply-templates>
 
-  <xsl:apply-templates select="attr[@name='objectClass']/value[(not((text()='groupOfUniqueNames') or (text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson') or (text()='organizationalUnit') or (text()='organization')))]/ancestor::searchResultEntry" mode="generic">
+  <xsl:apply-templates select="attr[@name='objectClass']/value[(not((text()='groupOfUniqueNames') or (text()='nisMailAlias') or (text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson') or (text()='organizationalUnit') or (text()='organization')))]/ancestor::searchResultEntry" mode="generic">
     <xsl:with-param name='hidden'><xsl:value-of select="$hidden" /></xsl:with-param>
     <xsl:with-param name='heading'>Miscellaneous</xsl:with-param>
     <xsl:sort select="attr[@name='structuralObjectClass']/value" />
@@ -314,6 +341,7 @@
 </xsl:template>
 
 <xsl:template match="attr" mode="genericForm" >
+  <xsl:if test="(not(contains(@name,'Timestamp')))" >
   <xsl:element name="tr">
     <xsl:call-template name="genericAttribute" >
       <xsl:with-param name="attrType"><xsl:value-of select="@name" /></xsl:with-param>
@@ -322,11 +350,12 @@
       <xsl:with-param name="maxwidth">64</xsl:with-param>
     </xsl:call-template>
   </xsl:element>
+  </xsl:if>
 </xsl:template>
 
 <xsl:template match="searchResultEntry" mode="generic" >
   <xsl:param name="hidden" select="off" />
-  <xsl:param name="updateURI" select="/ldapupdate" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
   <xsl:param name="heading" select="attr[((@name='structuralObjectClass') and (position() = 1))]" />
   <xsl:element name="div">
     <xsl:attribute name="class">resultDiv</xsl:attribute>
@@ -360,7 +389,7 @@
 
 <xsl:template match="searchResultEntry" mode="organization" >
   <xsl:param name="hidden" select="off" />
-  <xsl:param name="updateURI" select="/ldapupdate" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
   <xsl:param name="heading" select="attr[((@name='structuralObjectClass') and (position() = 1))]" />
   <xsl:element name="div">
     <xsl:attribute name="class">resultDiv</xsl:attribute>
@@ -502,7 +531,7 @@
 
 <xsl:template match="searchResultEntry" mode="orgUnit" >
   <xsl:param name="hidden" select="off" />
-  <xsl:param name="updateURI" select="/ldapupdate" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
   <xsl:param name="heading" select="attr[@name='structuralObjectClass' and position() = 1]" />
 
   <xsl:element name="div">
@@ -713,7 +742,7 @@
 
 <xsl:template match="searchResultEntry" mode="person" >
   <xsl:param name="hidden" select="off" />
-  <xsl:param name="updateURI" select="/ldapupdate" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
   <xsl:param name="heading" select="attr[@name='structuralObjectClass' and position() = 1]" />
   <xsl:element name="div">
     <xsl:attribute name="class">resultDiv</xsl:attribute>
@@ -729,11 +758,13 @@
       <xsl:attribute name="enctype">multipart/form-data</xsl:attribute>
 
       <xsl:apply-templates select="." mode="hiddenAttributes" />
-      <xsl:element name="input">
-	<xsl:attribute name="type">hidden</xsl:attribute>
-	<xsl:attribute name="name">uid</xsl:attribute>
-	<xsl:attribute name="value"><xsl:value-of select="attr[@name='uid']"/></xsl:attribute>
-      </xsl:element>
+      <xsl:if test="(0 = count(attr[@name='objectClass']/value[text()='posixAccount']))">
+	<xsl:element name="input">
+	  <xsl:attribute name="type">hidden</xsl:attribute>
+	  <xsl:attribute name="name">uid</xsl:attribute>
+	  <xsl:attribute name="value"><xsl:value-of select="attr[@name='uid']"/></xsl:attribute>
+	</xsl:element>
+      </xsl:if>
       <xsl:element name="input">
 	<xsl:attribute name="type">hidden</xsl:attribute>
 	<xsl:attribute name="name">gid</xsl:attribute>
@@ -794,27 +825,76 @@
 		    <xsl:comment>Home information</xsl:comment>
 		    <div class="personal_info">
 		      <table>
+			<xsl:if test="(not (0 = count(attr[@name='objectClass']/value[text()='mozillaAbPersonAlpha'])))">
+			  <tr personalInfo="mozillaHomeStreet">
+			    <xsl:call-template name="editableAttr">
+			      <xsl:with-param name="attrType">mozillaHomeStreet</xsl:with-param>
+			      <xsl:with-param name="label">Street</xsl:with-param>
+			      <xsl:with-param name="colspan">5</xsl:with-param>
+			      <xsl:with-param name="width">34</xsl:with-param>
+			      <xsl:with-param name="maxwidth">64</xsl:with-param>
+			      <xsl:with-param name="multirow">no</xsl:with-param>
+			    </xsl:call-template>
+			  </tr>
+			  <tr personalInfo="mozillaHomeLocalityName">
+			    <xsl:call-template name="editableAttr">
+			      <xsl:with-param name="attrType">mozillaHomeLocalityName</xsl:with-param>
+			      <xsl:with-param name="label">City</xsl:with-param>
+			      <xsl:with-param name="width">20</xsl:with-param>
+			      <xsl:with-param name="maxwidth">48</xsl:with-param>
+			      <xsl:with-param name="multirow">no</xsl:with-param>
+			    </xsl:call-template>
+			    <xsl:call-template name="editableAttr">
+			      <xsl:with-param name="attrType">mozillaHomeState</xsl:with-param>
+			      <xsl:with-param name="label">State</xsl:with-param>
+			      <xsl:with-param name="width">4</xsl:with-param>
+			      <xsl:with-param name="maxwidth">16</xsl:with-param>
+			      <xsl:with-param name="multirow">no</xsl:with-param>
+			    </xsl:call-template>
+			    <xsl:call-template name="editableAttr">
+			      <xsl:with-param name="attrType">mozillaHomePostalCode</xsl:with-param>
+			      <xsl:with-param name="label">Postal</xsl:with-param>
+			      <xsl:with-param name="width">10</xsl:with-param>
+			      <xsl:with-param name="maxwidth">16</xsl:with-param>
+			      <xsl:with-param name="multirow">no</xsl:with-param>
+			    </xsl:call-template>
+			  </tr>
+			  <tr personalInfo="c">
+			    <xsl:call-template name="editableAttr">
+			      <xsl:with-param name="attrType">c</xsl:with-param>
+			      <xsl:with-param name="label">Country</xsl:with-param>
+			      <xsl:with-param name="colspan">5</xsl:with-param>
+			      <xsl:with-param name="width">48</xsl:with-param>
+			      <xsl:with-param name="maxwidth">64</xsl:with-param>
+			      <xsl:with-param name="multirow">no</xsl:with-param>
+			    </xsl:call-template>
+			  </tr>
+			</xsl:if>
 			<tr>
 			  <xsl:call-template name="editableAttrTA">
 			    <xsl:with-param name="attrType">homePostalAddress</xsl:with-param>
 			    <xsl:with-param name="label">Home Address</xsl:with-param>
 			    <xsl:with-param name="rows">2</xsl:with-param>
-			    <xsl:with-param name="colspan">3</xsl:with-param>
+			    <xsl:with-param name="colspan">5</xsl:with-param>
 			    <xsl:with-param name="cols">48</xsl:with-param>
 			  </xsl:call-template>
 			</tr>
+		      </table>
+		      <table>
 			<tr>
 			  <xsl:call-template name="editableAttr">
 			    <xsl:with-param name="attrType">homePhone</xsl:with-param>
 			    <xsl:with-param name="label">Home Phone</xsl:with-param>
-			    <xsl:with-param name="width">16</xsl:with-param>
-			    <xsl:with-param name="maxwidth">24</xsl:with-param>
+			    <xsl:with-param name="colspan">1</xsl:with-param>
+			    <xsl:with-param name="width">12</xsl:with-param>
+			    <xsl:with-param name="maxwidth">20</xsl:with-param>
 			  </xsl:call-template>
 			  <xsl:call-template name="editableAttr">
 			    <xsl:with-param name="attrType">mobile</xsl:with-param>
 			    <xsl:with-param name="label">Mobile Phone</xsl:with-param>
-			    <xsl:with-param name="width">16</xsl:with-param>
-			    <xsl:with-param name="maxwidth">24</xsl:with-param>
+			    <xsl:with-param name="colspan">3</xsl:with-param>
+			    <xsl:with-param name="width">12</xsl:with-param>
+			    <xsl:with-param name="maxwidth">20</xsl:with-param>
 			  </xsl:call-template>
 			</tr>
 		      </table>
@@ -831,6 +911,7 @@
 		    </div>
 		    
 		    <xsl:apply-templates select="." mode="imInfo" />
+		    <xsl:apply-templates select="." mode="accountInfo" />
 
 		  </xsl:element>
 	      </td></tr>
@@ -842,7 +923,7 @@
 </xsl:template>
 
 <xsl:template match="searchResultEntry" mode="registration" >
-  <xsl:param name="updateURI" select="/ldapupdate" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
   <xsl:param name="heading" select="attr[@name='structuralObjectClass' and position() = 1]" />
   <div style="background-color: #F0F0F0; padding: 5px; padding-left: 15px; padding-right: 15px; margin: 10px; border-color: #B0B0B0; border-width: 1px; border-style: solid;" > 
     <ul>
@@ -895,7 +976,7 @@
 	      <xsl:attribute name="type">text/javascript</xsl:attribute>
 	      <xsl:attribute name="language">javascript</xsl:attribute>
 	      function showRegistrationDivsCB() {
-	        showInfo('none', 'block', 'block', 'block', 'none');
+	        showInfo('none', 'block', 'block', 'block', 'none', 'none');
 	      }
 	      window.setTimeout(showRegistrationDivsCB, 20)
 	    </xsl:element>
@@ -928,9 +1009,59 @@
   </xsl:element>
 </xsl:template>
 
+<xsl:template match="searchResultEntry" mode="nisMailAlias" >
+  <xsl:param name="hidden" select="off" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
+  <xsl:param name="heading" select="attr[((@name='structuralObjectClass') and (position() = 1))]" />
+  <xsl:element name="div">
+    <xsl:attribute name="class">resultDiv</xsl:attribute>
+    <xsl:attribute name="id"><xsl:value-of select="generate-id(.)" /></xsl:attribute>
+    <xsl:if test="($hidden = 'on')">
+      <xsl:attribute name="style">display: none;</xsl:attribute>
+    </xsl:if>
+    <xsl:element name="form"> 
+      <xsl:attribute name="name">ChangeInfo</xsl:attribute>
+      <xsl:attribute name="method">post</xsl:attribute>
+      <xsl:attribute name="action"><xsl:value-of select='$updateURI' /></xsl:attribute>
+      <xsl:attribute name="target">processWindow</xsl:attribute>
+
+      <xsl:apply-templates select="." mode="hiddenAttributes" />
+
+      <table >
+	<tr><td  style="padding-bottom: 0px; ">
+	    <xsl:apply-templates select="." mode="recordHead">
+	      <xsl:with-param name='oClass'>Groups</xsl:with-param>
+	    </xsl:apply-templates>
+	</td></tr>
+	<tr><td style="padding-top: 0px; ">
+	    <table class='boxed' width='100%'>
+	      <tr>
+		<xsl:call-template name="editableAttr">
+		  <xsl:with-param name="attrType">cn</xsl:with-param>
+		  <xsl:with-param name="label">Name</xsl:with-param>
+		  <xsl:with-param name="width">32</xsl:with-param>
+		  <xsl:with-param name="maxwidth">64</xsl:with-param>
+		  <xsl:with-param name="multirow">no</xsl:with-param>
+		</xsl:call-template>
+	      </tr>
+	      <tr>
+		<xsl:call-template name="editableAttr">
+		  <xsl:with-param name="attrType">rfc822MailMember</xsl:with-param>
+		  <xsl:with-param name="label">Mail Member</xsl:with-param>
+		  <xsl:with-param name="width">32</xsl:with-param>
+		  <xsl:with-param name="maxwidth">128</xsl:with-param>
+		</xsl:call-template>
+	      </tr>
+	    </table>
+	</td></tr>
+      </table><br />
+    </xsl:element>
+  </xsl:element>
+</xsl:template>
+
 <xsl:template match="searchResultEntry" mode="groupOfUniqueNames" >
   <xsl:param name="hidden" select="off" />
-  <xsl:param name="updateURI" select="/ldapupdate" />
+  <xsl:param name="updateURI" select="$v_updateURI" />
   <xsl:param name="heading" select="attr[((@name='structuralObjectClass') and (position() = 1))]" />
   <xsl:element name="div">
     <xsl:attribute name="class">resultDiv</xsl:attribute>
@@ -1028,16 +1159,19 @@
 
 <xsl:template name="tabLegend">
   <xsl:element name="Legend">
-    <a href="javascript: void showInfo('none', 'block','none','none','none');">Work Info</a> | 
-    <a href="javascript: void showInfo('none', 'none','block','none','none');">Other Info </a>
+    <a href="javascript: void showInfo('none', 'block','none','none','none','none');">Work Info</a> | 
+    <a href="javascript: void showInfo('none', 'none','block','none','none','none');">Other Info </a>
     <xsl:if test="attr[@name='objectClass']/value='person'">
-      <a href="javascript: void showInfo('block', 'none','none','none','none');">| Personal Info </a>
+      <a href="javascript: void showInfo('block', 'none','none','none','none','none');">| Personal Info </a>
     </xsl:if>
     <xsl:if test="attr[@name='objectClass']/value='imIdObject'">
-      <a href="javascript: void showInfo('none', 'none','none','block','none');">| IM Info</a> 
+      <a href="javascript: void showInfo('none', 'none','none','block','none','none');">| IM Info</a> 
+    </xsl:if>
+    <xsl:if test="attr[@name='objectClass']/value='posixAccount'">
+      <a href="javascript: void showInfo('none', 'none','none','none','block','none');">| Account Info</a> 
     </xsl:if>
     <xsl:if test="attr[@name='objectClass']/value='psVendorAcctObject'">
-      <a href="javascript: void showInfo('none', 'none','none','none','block');">| Vendor Info</a> 
+      <a href="javascript: void showInfo('none', 'none','none','none','none','block');">| Vendor Info</a> 
     </xsl:if>
   </xsl:element>
 </xsl:template>

@@ -1,0 +1,33 @@
+    <authResponse>
+        <resultCode code='0' descr='success'></resultCode>
+    </authResponse>
+    <searchResponse>
+      <searchResultEntry dn="">
+        <attr name="objectClass">
+          <value>mozillaAbPersonAlpha</value>
+          <value>person</value>
+          <value>organizationalPerson</value>
+          <value>inetOrgPerson</value>
+	  <value>posixAccount</value>
+          <value>imIdObject</value>
+        </attr>
+        <attr name="userPassword">
+          <value></value>
+        </attr>
+        <attr name="homeDirectory">
+          <value>/dev/null</value>
+        </attr>
+        <attr name="loginShell">
+          <value>/bin/false</value>
+        </attr>
+        <attr name="gidNumber">
+          <value>100</value>
+        </attr>
+        <attr name="uid">
+          <value>... change to user name ...</value>
+        </attr>
+        <attr name="uidNumber">
+          <value>... change to valid available uid number ...</value>
+        </attr>
+      </searchResultEntry>
+    </searchResponse>

@@ -1,0 +1,17 @@
+    <authResponse>
+        <resultCode code='0' descr='success'></resultCode>
+    </authResponse>
+    <searchResponse>
+      <searchResultEntry dn="">
+        <attr name="objectClass">
+          <value>top</value>
+          <value>psBid</value>
+        </attr>
+        <attr name="bidOwner">
+          <value></value>
+        </attr>
+        <attr name="bidAmount">
+          <value></value>
+        </attr>
+      </searchResultEntry>
+    </searchResponse>

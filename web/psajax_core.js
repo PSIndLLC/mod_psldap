@@ -3,7 +3,7 @@
  *
  * User Authentication against and maintenance of an LDAP database
  *
- * Copyright (C) 2004 David Picard dpicard@psind.com
+ * Copyright (C) 2024 PSInd, LLC
  *
  * http://www.psind.com/projects/mod_psldap/
  *

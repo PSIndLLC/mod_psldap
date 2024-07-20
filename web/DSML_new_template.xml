@@ -1,0 +1,19 @@
+<batchRequest requestID='01' processing='sequential'>
+    <authRequest principle=''>
+    </authRequest>
+    <searchRequest dn='' scope='wholeSubtree'>
+    </searchRequest>
+</batchRequest>
+
+<batchResponse requestID='01'>
+    <authResponse>
+        <resultCode code='0' descr='success'></resultCode>
+    </authResponse>
+    <searchResponse>
+      <searchResultEntry dn="">
+        <attr name="objectClass">
+          <value>top</value>
+        </attr>
+      </searchResultEntry>
+    </searchResponse>
+</batchResponse>

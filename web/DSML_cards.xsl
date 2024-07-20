@@ -49,7 +49,7 @@
 
     <xsl:element name="body">
       <xsl:if test="($isHandheld='false')">
-	<xsl:attribute name="onload">initializeCards(8)</xsl:attribute>
+	<xsl:attribute name="onload">initializeCards(48)</xsl:attribute>
       </xsl:if>
       <form action="CreateGroup" method="post">
 	<table id='cardTable'>
@@ -222,7 +222,11 @@
   </xsl:if>
   <table name='cardInstance' width='100%' >
     <tr class="menubar" cellspacing='0'>
-      <td class="menubar_left" ><img src="/psldap/images/left_header.gif" /></td>
+      <td class="menubar_left" >
+	<xsl:element name="img">
+	  <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/left_header.gif</xsl:attribute>
+	</xsl:element>
+      </td>
       <td class="menubar_center" >
 	<table width="100%"><tr>
 	  <td noWrap="true" >
@@ -247,7 +251,7 @@
 	    <xsl:element name="a">
 	      <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>");</xsl:attribute>
 	      <xsl:element name="img">
-		<xsl:attribute name="src">/psldap/images/editRecord_sm.gif</xsl:attribute>
+		<xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/editRecord_sm.gif</xsl:attribute>
 		<xsl:attribute name="style">margin-top: 1px; margin-bottom: 0px;</xsl:attribute>
 	      </xsl:element>
 	    </xsl:element>
@@ -255,7 +259,7 @@
 	    <xsl:element name="a">
 	      <xsl:attribute name="href">javascript: void getVCard("<xsl:value-of select="@dn"/>");</xsl:attribute>
 	      <xsl:element name="img">
-		<xsl:attribute name="src">/psldap/images/vcard.gif</xsl:attribute>
+		<xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/vcard.gif</xsl:attribute>
 		<xsl:attribute name="style">margin-top: 1px; margin-bottom: 0px;</xsl:attribute>
 	      </xsl:element>
 	    </xsl:element>
@@ -269,7 +273,11 @@
 	</tr>
 	</table>
       </td>
-      <td class="menubar_right" ><img src="/psldap/images/right_header.gif" /></td>
+      <td class="menubar_right" >
+	<xsl:element name="img" >
+	  <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/right_header.gif</xsl:attribute>
+	</xsl:element>
+      </td>
     </tr>
     <tr>
       <td colspan="3">

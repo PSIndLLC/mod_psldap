@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<!DOCTYPE dsml SYSTEM "/psldap/dsml.dtd" [
+<!ENTITY batchreq SYSTEM "DSML_new_v_o.xml">
+]>
+<?xml-stylesheet type="text/xsl" title="Edit View" href="DSML_editform.xsl"?>
+<?xml-stylesheet type="text/xsl" alternate="yes" title="Table View" href="DSML_table.xsl"?>
+
+<dsml>
+&batchreq;
+</dsml>

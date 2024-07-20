@@ -1,7 +1,0 @@
-OBJS= mod_psldap.o
-SRC= mod_psldap.c
-
-mod_psldap.so: $(SRC) Makefile
-	$(APXS) -o $@ -c $(DEF) $(INC) $(LIB) $(SRC)
-mod_psldap.o: mod_psldap.c
-

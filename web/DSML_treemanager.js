@@ -3,7 +3,7 @@
  *
  * User Authentication against and maintenance of an LDAP database
  *
- * Copyright (C) 2004-2010 David Picard dpicard@psind.com
+ * Copyright (C) 2004-2024 PSInd, LLC mod_psldap@psind.com
  *
  * http://www.psind.com/projects/mod_psldap/
  *
@@ -88,7 +88,11 @@ function getNavParentForNode(tableRowElement) {
 function getNavElementForNode(tableElement) {
   var result = tableElement.parentNode;
   // We really need to test for a table cell here
-  result = result.parentNode.firstChild;
+  if (undefined != result.parentNode.firstElementChild) {
+      result = result.parentNode.firstElementChild;
+  } else {
+      result = result.parentNode.firstChild;
+  }
   return result;
 }
 
@@ -125,7 +129,11 @@ function expandTreeHierarchy(treeNodeId) {
   if (null != expandnode) {
     for (var expandnode = getNavParentForNode(expandnode); null != expandnode;
          expandnode = getNavParentForNode(expandnode) ) {
-      expandnode.firstChild.firstChild.onclick();
+	if (undefined != expandnode.firstElementChild) {
+	    expandnode.firstElementChild.firstElementChild.onclick();
+	} else {
+	    expandnode.firstChild.firstChild.onclick();
+	}
     }
   }
   return result;
@@ -262,7 +270,7 @@ function pstm_moveRowToNode(nodeId, newNodeId, _attrName, sortFunc)
 	    srcElmt.removeAttribute("lastnode");
 	}
 	srcElmt.parentNode.removeChild(srcElmt);
-	var ns = childTbl.firstChild;
+	var ns = (undefined != childTbl.firstElementChild) ? childTbl.firstElementChild:childTbl.firstChild;
 	if (arguments.length > 3) {
 	    while (ns && (0 > sortFunc(srcElmt,ns))) {
 		ns = ns.nextSibling;
@@ -333,7 +341,7 @@ function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs, nodeName) 
 	for (var j = 0; j < navRows.length; j++) {
 	    navRows[j].setAttribute('tnid', 'tn.'+i+'.'+j);
 	    var nrName = navRows[j].getAttribute('name');
-	    var nrtd = navRows[j].firstChild;
+	    var nrtd = (undefined != navRows[j].firstElementChild) ? navRows[j].firstElementChild:navRows[j].firstChild;
 	    while (nrtd && (nrtd.nodeType != 1)) nrtd = nrtd.nextSibling;
 	    if (!nrName || (0 != nrName.localeCompare("treeNavigationElement") ) ) {
 		if (nrtd) nrtd.innerHTML = generateEmptyNodeString();
@@ -350,7 +358,12 @@ function addNavigationToTree(nodeId, selectedNodeId,checkBrowserArgs, nodeName) 
     }
     collapseAllTreeNodes(rootnode);
     if (arguments.length > 2) {
-	requestArgList = top.document.URL.split("?");
+	try {
+	    requestArgList = top.document.URL.split("?");
+	} catch (ex) {
+	    requestArgList = "";
+	    alert(requestArgList);
+	}
 	if (requestArgList.length > 1) {
 	    var passedNodeId = "";
 	    requestArgList = requestArgList[1].split("&");

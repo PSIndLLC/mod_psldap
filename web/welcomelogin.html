@@ -4,13 +4,13 @@
 <head>
    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
    <meta name="Author" content="David J. Picard" />
-   <meta name="keywords" lang="us-en" content="BPM,PRPC,BizFlow,airline,automation,operations,schedule,software,logistics" />
-   <meta name="description" content="Picard Software Industries, provider of custom software solutions since 1998. We also assist our clients in defining, prioritizing, and realizing their objectives to provide more timely positive operational impact." />
+   <meta name="keywords" lang="us-en" content="mod_psldap,apache,sample" />
+   <meta name="description" content="This is a sample HTML referencing psldap" />
    <meta name="robots" content="NOFOLLOW, INDEX" />
-   <meta name="copyright" content="&copy; 2010 Picard Software Industries" />
-   <meta name="date" content="2001-08-11T20:00:00-05:00" />
+   <meta name="copyright" content="&copy; 2024 PSInd, LLC" />
+   <meta name="date" content="2024-07-11T20:00:00-05:00" />
    <meta name="google-site-verification" content="fkfYlRLBFvcTfhZiiYXDXH3lrKuLsQqhyr6x4ypguMw" />
-   <title>Home of PSInd.com</title>
+   <title>mod_psldap welcome sample</title>
    <style type="text/css">
      input[type="submit"] { background-color: #00FF00; }
      ul.green { color: #00FF00; position: relative; list-style-type: disc; text-indent: -2px; left: -12%; }
@@ -76,7 +76,7 @@
       theForm.target = "_self";
       return true;
       } else {
-	  var base_arg = "dc%3Dpsind%2Cdc%3Dcom";
+	  var base_arg = encodeURI(ldapDomains[0].dn);
 	  theForm.action = ps_siteConfig.secureBase+ps_siteConfig.homeURI+"/DSML_new_registration.xml?dn=dc%3Dregistered%2C"+base_arg;
 	  window.open(ps_siteConfig.homeURI+"/DSML_new_registration.xml?dn=dc%3Dregistered%2C"+base_arg, "resultSet","toolbar=0,menubar=0,resizable=0,height=512,width=480,scrollbars=0,directories=0,location=0");
 	  return false;
@@ -87,7 +87,7 @@
       <fieldset style="width: 100%; " >
 	<input type="hidden" name="PS_Redirect_URI" value=ps_siteConfig.unsecureBase+"/index.html" />
 	<input type="hidden" name="FormAction" value="Login" />
-	<input type="hidden" name="dn" value="dc=psind,dc=com" />
+	<input type="hidden" name="dn" value=ldapDomains[0].dn />
 	<label>e-Mail <br /><input type="text" name="mail" size="20" required/></label><br />
 	<label>Password  <br /><input type="password" name="userPassword" size="20" required/></label><br />
 	<div style='width: 90%; margin-left:auto; margin-right: auto; margin-top: 3px; margin-bottom: 3px;'><input type="submit" value="Login" onClick="var ff = document.getElementById('login'); authenticateViaBasic(ff.elements['mail'].value, ff.elements['userPassword'].value); ff.FormAction.value=this.value" /> &nbsp; <input type="submit" value="Register" onClick="document.getElementById('login').FormAction.value=this.value" /></div>

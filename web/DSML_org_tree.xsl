@@ -15,11 +15,11 @@
 <xsl:template name="pageSpecificHeader">
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
-    var urlBase = "/psldap";
+    var urlBase = "<xsl:value-of select="$v_baseURI" />";
   </xsl:element>
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
-    <xsl:attribute name="src">/psldap/DSML_treemanager.js</xsl:attribute>
+    <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/treemanager.js</xsl:attribute>
   </xsl:element>
   <xsl:element name="script">
     <xsl:attribute name="language">JavaScript</xsl:attribute>
@@ -93,11 +93,10 @@
     <xsl:attribute name="id"><xsl:value-of select="@dn"/></xsl:attribute>
     <xsl:element name="td" >
       <xsl:element name="img">
-	<xsl:attribute name="src">/psldap/images/nconnect.gif</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/nconnect.gif</xsl:attribute>
       </xsl:element>
     </xsl:element>
     <xsl:element name="td">
-      <xsl:attribute name="width">*</xsl:attribute>
       <xsl:attribute name="objectclass"><xsl:choose>
           <xsl:when test="(attr[@name='objectClass']/value[(text()='organizationalPerson') or (text()='person') or (text()='inetOrgPerson')])" >organizationalPerson</xsl:when>
           <xsl:when test="(attr[@name='objectClass']/value[(text()='organization')])" >organization</xsl:when>
@@ -106,7 +105,7 @@
       </xsl:choose></xsl:attribute>
       <xsl:element name="img">
 	<xsl:attribute name="class">dragHandle</xsl:attribute>
-	<xsl:attribute name="src">/psldap/images/transparent.gif</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/transparent.gif</xsl:attribute>
 	<xsl:attribute name="alt"><xsl:value-of select="@dn"/></xsl:attribute>
 	<xsl:attribute name="dn"><xsl:value-of select="@dn"/></xsl:attribute>
 	<xsl:attribute name="oc"><xsl:value-of select="attr[@name='structuralObjectClass']/value"/></xsl:attribute>

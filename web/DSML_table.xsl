@@ -3,36 +3,44 @@
 <!DOCTYPE xsl:stylesheet [ <!ENTITY nbsp "&#160;"> ]>
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dsml="http://www.dsml.org/DSML" xmlns:html='http://www.w3.org/TR/REC-html40'>
 
-<xsl:template match="/dsml/batchResponse">
+  <xsl:include href="DSML_commonscript.xsl" />
+  <xsl:include href="DSML_sitefrags.xsl" />
+
+  <xsl:template match="/dsml/batchResponse">
   <html>
     <xsl:element name="head">
       <xsl:element name="link">
         <xsl:attribute name="rel">STYLESHEET</xsl:attribute>
         <xsl:attribute name="type">text/css</xsl:attribute>
         <xsl:attribute name="media">screen</xsl:attribute>
-        <xsl:attribute name="href">/psldap/DSML_psldap.css</xsl:attribute>
+        <xsl:attribute name="href"><xsl:value-of select="$v_baseURI" />/DSML_psldap.css</xsl:attribute>
       </xsl:element>
       <xsl:element name="link">
         <xsl:attribute name="rel">STYLESHEET</xsl:attribute>
         <xsl:attribute name="type">text/css</xsl:attribute>
         <xsl:attribute name="media">Screen</xsl:attribute>
-        <xsl:attribute name="href">/psldap/DSML_desktop.css</xsl:attribute>
+        <xsl:attribute name="href"><xsl:value-of select="$v_baseURI" />/DSML_desktop.css</xsl:attribute>
       </xsl:element>
       <xsl:element name="link">
         <xsl:attribute name="rel">STYLESHEET</xsl:attribute>
         <xsl:attribute name="type">text/css</xsl:attribute>
         <xsl:attribute name="media">mobile</xsl:attribute>
-        <xsl:attribute name="href">/psldap/DSML_mobile.css</xsl:attribute>
+        <xsl:attribute name="href"><xsl:value-of select="$v_baseURI" />/DSML_mobile.css</xsl:attribute>
       </xsl:element>
       <xsl:element name="link">
         <xsl:attribute name="rel">STYLESHEET</xsl:attribute>
         <xsl:attribute name="type">text/css</xsl:attribute>
         <xsl:attribute name="media">print</xsl:attribute>
-        <xsl:attribute name="href">/psldap/DSML_psldap.css</xsl:attribute>
+        <xsl:attribute name="href"><xsl:value-of select="$v_baseURI" />/DSML_psldap.css</xsl:attribute>
+      </xsl:element>
+      <xsl:element name="script">
+	<xsl:attribute name="type">text/javascript</xsl:attribute>
+	<xsl:attribute name="language">JavaScript</xsl:attribute>
+	<xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/psldap_config.js</xsl:attribute>
       </xsl:element>
       <xsl:element name="script">
         <xsl:attribute name="language">JavaScript</xsl:attribute>
-        <xsl:attribute name="src">/psldap/DSML_psldap.js</xsl:attribute>
+        <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/DSML_psldap.js</xsl:attribute>
       </xsl:element>
       <xsl:element name="title">Search Results</xsl:element>
     </xsl:element>
@@ -95,7 +103,7 @@
       <xsl:element name="a">
         <xsl:attribute name="href">javascript: void getEditableRecord("<xsl:value-of select="@dn"/>");</xsl:attribute>
         <xsl:element name="img">
-          <xsl:attribute name="src">/psldap/images/editRecord_sm.gif</xsl:attribute>
+          <xsl:attribute name="src"><xsl:value-of select="$v_baseURI" />/images/editRecord_sm.gif</xsl:attribute>
           <xsl:attribute name="style">margin-left: 8px; margin-top: 0px; margin-bottom: 0px;</xsl:attribute>
         </xsl:element>
       </xsl:element>

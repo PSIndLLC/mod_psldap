@@ -48,3 +48,6 @@ div#editNavControls span a:active {
       background-repeat: no-repeat;
 }
 
+hr { background-color: #00FF00; }
+
+fieldset { border-color: #00FF00; }

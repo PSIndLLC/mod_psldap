@@ -9,6 +9,7 @@ div.personal_info { display:none; }
 div.work_info { display:block; }
 div.other_info { display:none; }
 div.im_info { display:none; }
+div.acct_info { display:none; }
 div.vendor_info { display:none; }
 div.resultDiv td { vertical-align:top; }
 

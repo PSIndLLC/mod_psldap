@@ -64,8 +64,8 @@
     <xsl:attribute name="language">JavaScript</xsl:attribute>
     <![CDATA[
         var assetOwners = [];
-        assetOwners[0] = {dn:"cn=Alice Picard,o=ExtFamily,dc=picard,dc=us", label:"Alice Picard", defaultOwner:1};
-        assetOwners[1] = {dn:"cn=David Picard,o=Family,dc=picard,dc=us", label:"David Picard", defaultOwner:0};
+        assetOwners[0] = {dn:"cn=Org Owner,"+ldapDomains[0], label:"Org Owner", defaultOwner:1};
+        assetOwners[1] = {dn:"cn=Org Manager,"+ldapDomains[0], label:"Org Manager", defaultOwner:0};
         function setLDAPBase(objBaseDN) {
             var searchBase = document.queryForm.dn;
             searchBase.value = objBaseDN;

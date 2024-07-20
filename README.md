@@ -495,7 +495,7 @@ Let's say you're maintaining the contact information for everyone you know in yo
 >  \# permissions.  
 >  \#  
 >  <Directory />  
->    # Set the default LDAP directory setting for authentication  
+>    \# Set the default LDAP directory setting for authentication  
 >    PsLDAPHosts "ldap.mydomain.com"  
 >    PsLDAPUserKey mail  
 >    PsLDAPPassKey userPassword  
@@ -529,6 +529,6 @@ Breaking this down a bit we can see that the handler is configured as ldapaction
 If you need help, have a feature request, compliment, or observation or would like to contribute, report a bug or otherwise contact us, please feel free to do so!
 - To initiate or participate in high-level discussions, use the Discussions feature on our GitHub project
 - To report bugs, please use the Issue feature on our GitHub project
-- In case you found any bug, have a question, or did enhance the module, please drop me a mail at
+- To review pending or request new features, please use the Issue feature on our GitHub project
 
 We generally try to respond to messages within 2 days. PSInd offers a paid production support service for those with mission critical support needs.

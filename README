@@ -103,12 +103,11 @@ Then, unpack the mod_psldap archive into the modules directory, e.g.
 
 Configuring, Building, Installing
 
-Change into the newly created "mod_psldap" directory, and configure the 
-module itself (some parts of the sha algorithm are endian-dependent, and 
-endianess is not checked by the Apache configure script, so the
-module comes with it's own autoconf script).
+Change into the newly created "mod_psldap" directory, and configure the module
+itself. The autoconf and automake configurations are provided with the release
+and should be leveraged to validate system capabilities supporting the build.
 
-   % cd mod_psldap; ./configure
+   % cd mod_psldap ; autoreconf ; automake --add-missing ; ./configure
 
 After Apache has been configured to your choice, make and install it as usual:
 

@@ -671,7 +671,9 @@ uninstall-am:
 
 
 clean:
-	rm -f mod_psldap.o mod_psldap.lo mod_psldap.la mod_psldap.so
+	rm -f mod_psldap.o mod_psldap.lo mod_psldap.la mod_psldap.so mod_psldap.slo aclocal.m4 config.h.in config.log config.status Makefile.in stamp-h1
+	rm -f config.sub config.guess INSTALL COPYING missing install-sh compile
+	rm -rf autom4te.cache .libs
 
 install: mod_psldap.la
 	$(APXS) -i -A -n psldap mod_psldap.la

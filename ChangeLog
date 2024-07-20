@@ -4,6 +4,10 @@ mod_psldap was created to provide a very lightweight means of managing directory
 
 Revision X (Upcoming release)
 ===================
+
+
+Revision 0.96 (Upcoming release)
+===================
 SVG based rendering of organizational hierarchies
 
 Enhance mobile / handheld device support to tailor presentation to form factor

@@ -73,7 +73,7 @@ Change into the newly created "mod_psldap" directory, and configure the module i
 
 After Apache has been configured to your choice, make and install it as usual:
 
-   > make
+   > make  
    > make install
 
 ### Build Static Apache Module
@@ -183,10 +183,10 @@ First, let's address some basic Apache configuration settings for authentication
 
 To enable Basic authentication, the administrator must specify an authorization name and the authorization type within a location or directory section in the apache configuration or htaccess files. The location or directory within which the AuthName and AuthType are defined will then be protected through Basic authentication.
 
->  <Location "/someLocation">
->    AuthName "Protected information"
->    AuthType Basic
->    ....
+>  <Location "/someLocation">  
+>    AuthName "Protected information"  
+>    AuthType Basic  
+>    ...  
 >  </Location>
 
 In addition to basic authentication, cookie based authentication is also supported. Simply specify the AuthType as "cookie" and authentication will be performed through use of cookies. By default, the cookie containing username and password in plain text form is restricted to a secure connetion and expires with the browser session.
@@ -250,15 +250,17 @@ The content of the form should follow a very specific format. The name for each 
 
 >  <form name="Change Password" method="POST" action="/ldapupdate">  
 >    <table>  
->      <tr><td align="RIGHT"><label>Login (E-Mail)  
->        <input type="TEXT" name="mail" size="20" maxlength="64" value="" required></label>  
+>      <tr><td align="RIGHT">
+>        <label>Login (E-Mail)</label>  
+>        <input type="TEXT" name="mail" size="20" maxlength="64" value="" required />  
 >      </td></tr>  
->      <tr><td align="RIGHT"><label>Password  
->        <input type="PASSWORD" name="userPassword" size="20" maxlength="64" value="" required></label>  
+>      <tr><td align="RIGHT">
+>        <label>Password</label>  
+>        <input type="PASSWORD" name="userPassword" size="20" maxlength="64" value="" required />  
 >      </td></tr>  
 >      <tr>  
->        <td align="CENTER"><input type="SUBMIT" name="FormAction" value="Login"></td>  
->        <td align="CENTER"><input type="SUBMIT" name="FormAction" value="Cancel"></td>  
+>        <td align="CENTER"><input type="SUBMIT" name="FormAction" value="Login" /></td>  
+>        <td align="CENTER"><input type="SUBMIT" name="FormAction" value="Cancel" /></td>  
 >      </tr>  
 >    </table>  
 >  </form>  

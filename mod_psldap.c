@@ -34,12 +34,6 @@
  * MODULE-DEFINITION-END
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#define PSLDAP_VERSION_LABEL PACKAGE_VERSION
-#else
-#define PSLDAP_VERSION_LABEL "0.96"
-#endif
 /*
 #define USE_LIBXML2_LIBXSL
 #define USE_PSLDAP_CACHING
@@ -53,6 +47,13 @@
 #include "http_request.h"
 #include "ap_compat.h"
 #include "ap_config.h"
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#define PSLDAP_VERSION_LABEL PACKAGE_VERSION
+#else
+#define PSLDAP_VERSION_LABEL "0.96"
+#endif
 
 #if 0
 /* Semaphores will not work on Linux, process sharing semaphores are not

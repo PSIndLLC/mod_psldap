@@ -248,15 +248,15 @@ Note that the auth type and auth name must be specified for the handler. Every a
 
 The content of the form should follow a very specific format. The name for each input element must coincide with the name of the LDAP field against which authenticatoin will be performed. The name of each Submit input element must be FormAction, and the value must be either "Login" or "Cancel". The form might generally be implemented as follows:
 
->  <form name="Change Password" action="/ldapupdate" method="post">  
->    <label>Login (E-Mail)</label>  
->    <input type="TEXT" name="mail" size="20" maxlength="64" value="" required />  
->    <br />  
->    <label>Password</label>  
->    <input type="PASSWORD" name="userPassword" size="20" maxlength="64" value="" required />  
->    <br />  
->    <input type="SUBMIT" name="FormAction" value="Login" />  
->  </form>  
+>    <form name="Change Password" action="/ldapupdate" method="post">  
+>      <label>Login (E-Mail)</label>  
+>      <input type="TEXT" name="mail" size="20" maxlength="64" value="me@myhost.com" required />  
+>      <br />  
+>      <label>Password</label>  
+>      <input type="PASSWORD" name="userPassword" size="20" maxlength="64" value="hackme" required />  
+>      <br />  
+>      <input type="SUBMIT" name="FormAction" value="Login" />  
+>    </form>  
 
 Note that in the form above, the login name field coincides with the setting for PsLDAPUserKey, while the password coincides with the field specified in the PsLDAPPassKey. It is important to ensure the PsLDAPUserKey field in the ldap server is searchable by an anonymous user and readable by the owner. If the query mode of authentication is applied, then the same constraints regarding visibility should also be applied to the password attribute.
 

@@ -344,7 +344,8 @@ If we don't specify the Bind parameters (and therefore didn't add the above line
 >  PsLDAPSearchScope base  
 >  PsLDAPUserKey webuser  
 >  PsLDAPPassKey webpassword  
-The last line above tells the module that the user's password is stored in the attribute named "webpassword". The module will search below "type=luser,o=psind,c=us" for an entry with an attribute <webuser>=provided_user_name.
+
+*NOTE: The last line above tells the module that the user's password is stored in the attribute named "webpassword". The module will search below "type=luser,o=psind,c=us" for an entry with an attribute <webuser>=provided_user_name.*
 
 Imagine, all your users are still below the same base DN as above, but some of them have different RDN's. For example, there may be one department storing all their users using the RDN "surname=<name>", maybe another department chose "extension=<number>". If all of those entries have their web credentials stored in the same attributes (e.g. "webuser" and "webpassword" again), you will have to change one line of the config snippet above:
 >  PsLDAPSearchScope onelevel
@@ -355,7 +356,9 @@ If your users are *not* at exactly one level below the base DN, but scattered th
 Again, all those users need to have their credentials in the same attributes, e.g. once again "webuser" and "webpassword". We go now into comparing the password supplied by the browser against the value from the user's node in the LDAP directory.
 
 If we're using PsLDAPAuthExternal the password check is being skipped, because the password has already been checked by the LDAP server. For clear text password strings (generally a very bad idea), you don't have to add anything to the configuration. If your password strings are crypted, you'll have to add:
->  PsLDAPCryptPasswords on  
+
+>  PsLDAPCryptPasswords on
+
 to your config snippet. Please be aware, that if you have crypted passwords in the directory, and don't set this option to "on", users will be able to authenticate successfully using the crypted(!) password string which may not be what you want... ;-)
 
 There is a third alternative: use scheme prefixed passwords as described in RFC 2307. This seems to be the preferred method to store passwords in Netscape's directory server. You can enable scheme prefixed passwords by setting

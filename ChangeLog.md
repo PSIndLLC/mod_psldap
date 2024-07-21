@@ -11,12 +11,21 @@ mod_psldap was created to provide a very lightweight means of managing directory
 
 ## Revision 0.96
 
+This release addresses the introduction of compatibility for Apache 2.4, changing the module initialization binding to use providers for authorization to regain compatibility with Apache's new authorization implementation.
+
+Additional changes include improved management for renaming the base location of the installation to something other than /psldap - however this is not yet fully tested. Requisite changes appear to be mostly manageable through psldap_config.js and DSML_sitefrags.xsl - provided the index file on the installation directory is changed to index.xml from index.html
+
+* Add handling connection to LDAP through port 636 / TLS
 * Add LDAP schema definitions to support module management features
 * New web UI to create LDAP records based on XML new record template files
+* Preparation for consumption and presentation of some HTML5 data types
 * Improve XSL references to path configurations, improve multiple LDAP server support
+* Improved handling of gif and jpeg image presentation from attributes
 * Enhance mobile / handheld device support to tailor presentation to form factor
 * Importing / exporting from / to google contact export format
+* Fixes for group authorization
 * Finish integration of browser support for HttpOnly on secure cookies
+* Add some support for SSHA prefixes to password attributes
 * Introduce password change support
 
 
@@ -26,6 +35,8 @@ mod_psldap was created to provide a very lightweight means of managing directory
 	
 
 ## Revision 0.94 
+
+The latest release of mod_psldap provides a new look and feel with updated images and a skinning capability. Two skins are available with the module: green, and blue. Look and feel are now completely customizable.
 
 * Introduced skinning capability with two skins available and shipping with the module: green and blue
 * Fixed sorting defect in tree view

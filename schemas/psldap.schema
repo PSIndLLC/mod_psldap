@@ -1,0 +1,58 @@
+# The following schema applies to the PSLdap object classes
+
+objectIdentifier PSIndRoot 1.3.6.1.4.1.22788
+
+# The following schema definition applies to the scientific classification
+#   of botanical elements
+objectIdentifier PSIndHttpSession PSIndRoot:10
+objectIdentifier PSIndHttpSessionAttributeType PSIndHttpSession:1
+objectIdentifier PSIndHttpSessionObjectClass PSIndHttpSession:2
+
+attributetype ( PSIndHttpSessionAttributeType:10
+    NAME ('sessionID' 'psSessionId')
+    DESC 'Session Identifier'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndHttpSessionAttributeType:11
+    NAME ('clientIP' 'psClientIP')
+    DESC 'IP Address of client initiating session'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndHttpSessionAttributeType:12
+    NAME ('lastAccessTime' 'psLastAccessTime')
+    DESC 'Last time client accessed the server'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndHttpSessionAttributeType:13
+    NAME ('authNames' 'psAuthNames')
+    DESC 'Semicolon delimited lists of authNames'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndHttpSessionAttributeType:14
+    NAME ('user' 'psUsername')
+    DESC 'Login credentials for vendor website'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+attributetype ( PSIndHttpSessionAttributeType:15
+    NAME ('credential' 'psCredential')
+    DESC 'Password or other authentication key'
+    EQUALITY caseIgnoreIA5Match
+    SUBSTR caseIgnoreIA5SubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.26{256} )
+
+objectclass ( PSIndHttpSessionObjectClass:1
+    NAME 'psHttpSession'
+    DESC 'Http Session Identifier object'
+    SUP top AUXILIARY
+    MUST ( sessionID $ clientIP $ authNames $ lastAccessTime )
+    MAY ( user $ credential ) )

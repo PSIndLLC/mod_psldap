@@ -1,8 +1,5 @@
 # mod_psldap
 
-Version 0.96
-by David Picard
-
 mod_psldap is an Apache web server modules that provides interaction with LDAP directory content via the HTTP protocol in addition to implementing authentication and authorization services for the web server.
 
 Apache service configuration follows standard Apache configuration practices while directory access to view and update data is supported through HTTP post operations containing XML following the DSML schema. This package includes JavaScript capabilities to support transaction submission, dynamic form control, and directory record presentation on the browser.
@@ -11,7 +8,7 @@ The objective of this architecture is to reduce the incremental network traffic 
 
 In addition, the powerful capabilities to transform the content have been further leveraged to download other formats supporting import into other contact management solutions.
 
-For history of this module, review the ChangeLog file. The latest version of this module can be acquired at http://www.psind.com/projects/mod_psldap/
+For a more complete history of changes to this Apache module, review the [ChangeLog file](https://github.com/PSIndLLC/mod_psldap/blob/master/ChangeLog.md).
 
 ## Features
 

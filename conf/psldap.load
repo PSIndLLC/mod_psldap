@@ -1,0 +1,1 @@
+LoadModule psldap_module      /usr/lib/apache2/modules/mod_psldap.so

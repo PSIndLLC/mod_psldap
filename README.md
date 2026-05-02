@@ -1,6 +1,6 @@
 # mod_psldap
 
-mod_psldap is an Apache web server modules that provides interaction with LDAP directory content via the HTTP protocol in addition to implementing authentication and authorization services for the web server.
+mod_psldap is an Apache web server module providing 3 fundamental service: authentication, authorization, and web based LDAP management services.
 
 Apache service configuration follows standard Apache configuration practices while directory access to view and update data is supported through HTTP post operations containing XML following the DSML schema. This package includes JavaScript capabilities to support transaction submission, dynamic form control, and directory record presentation on the browser.
 
@@ -289,13 +289,20 @@ Now we need to decide if PsLDAP is the authoritative authentication mechanism, w
 
 The directory configurations on the client are managed through a javascript based configuration to identify the base DN groups to which the application will apply. In order to use the standard index, psldap_config.js must be modified to contain your domains. The initial configuration looks something like this:
 
->  ldapDomains[0] = {dn:"dc=some,dc=com", label:"Some .com", defaultDomain:0};  
->  ldapDomains[1] = {dn:"dc=another,dc=us", label:"Another Domain", defaultDomain:1};  
+>  ldapDomains[0] = {dn:"dc=some,dc=com", domURI:"/some/", label:"Some .com", defaultDomain:0};  
+>  ldapDomains[1] = {dn:"dc=another,dc=us", domURI:"", label:"Another Domain", defaultDomain:1};  
+>  var ps_siteConfig = {secureBase:"https://another.us",
+>  		     unsecureBase:"http://another.us",
+>  		     authURI:"ldapauth", updateURI:"ldapupdate",
+>  		     registerURI:"register", homeURI:"/psldap/",
+>  		     userKey:"uid", passKey: "userPassword" };
 
-To manage your own base DNs, either change the above records or copy the line beginning with ldapDomains[0] and change the '0' to the next highest number in the sequence in the copied line. Then change the string litteral after the dn: to your base DN, the literal after the label: to the label you want people to see, and ensure that only one of the ldapDomain items has a defaultDomain: setting of 1. The defaultDomain will appear as the default value in the dropdown on the index page and will be used as the base DN from the browser if no other DN has been selected.
+The ps_siteConfig object defined in psldap_config.js must be adjusted to match your apache configuration for your handlers and access controlled Locations. We recommend that each defined server have an Alias defined to map psldap_config.js to a domain specific file in a psldap configuration directory under /etc.
+
+To manage your own base DNs, either change the above records or copy the line beginning with ldapDomains[0] and change the '0' to the next highest number in the sequence in the copied line. Then change the string litteral after the dn: to your base DN, the literal after domURI: to the apache location configured for that domain, the literal after the label: to the label you want people to see, and ensure that only one of the ldapDomain items has a defaultDomain: setting of 1. The defaultDomain will appear as the default value in the dropdown on the index page and will be used as the base DN from the browser if no other DN has been selected. If access to all domains is provided for a user in a master domain configured as your server wide default on your homeURI:, you may set the domURI: on the domains as "" to use that default.
 
 Example:
->  ldapDomains[2] = {dn:"dc=mydomain,dc=com", label:"My Domain", defaultDomain:0};
+>  ldapDomains[2] = {dn:"dc=mydomain,dc=com", domURI:"/mydomain", label:"My Domain", defaultDomain:0};
 
 
 ### Additional Filtering on Authentication

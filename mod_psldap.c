@@ -4971,8 +4971,14 @@ static void write_dsml_request_fragment(psldap_status *ps,
 {
     int j;
     static const char * op_names[4] = {"replace", "add", "delete", NULL};
-
+    static const char * scope_values[4] = {"baseObject", "singleLevel", "wholeSubtree", NULL};
+    static const char * deref_values[5] = {"neverDerefAliases", "derefInSearching", "derefFindingBaseObj", "derefAlways", NULL};
+	  
     ps_rerror( ps->rr, APLOG_DEBUG, "Writing request fragment to stream");
+    /* TODO: search request element requires scope attibute... scope_values
+	     also derefAliases attribute - values are deref_values
+	     other optional values are sizeLimit, timeLimit, and typesOnly
+    */
     ap_rprintf(ps->rr, "%s\t<%s%s%s%s>\n", lPrefix, dsmlReqType,
 	       (NULL != ps->mod_dn) ? " dn=\"": "",
 	       (NULL != ps->mod_dn) ? escapeChar(ps->rr, ps->mod_dn,
@@ -5248,7 +5254,7 @@ static int compare_record_in_ldap(void *data, const char *key, const char *val)
     request_rec *r = ps->rr;
 
     if (NULL == key) {
-        if (NULL != val) strncpy((char*)val, "compareResponse", 15);
+        if (NULL != val) strncpy((char*)val, "compareResponse", 16);
         if ((NULL != ps->mod_dn) && (LDAP_SUCCESS == ps->mod_err)) {
 	    /*
 	    ps->mod_err = ldap_compare_s(ps->ldap, ps->mod_dn, ps->newrdn,
@@ -5863,9 +5869,8 @@ static int ldap_update_handler(request_rec *r)
 		    ap_rputs("<body>\n<xml id='errResponse'>\n", r);
 		} else {
 		    ps_rerror( r, APLOG_INFO, "Full response is XML");
-		    /* TODO: Use configured HTML base, not "/psldap/..." */
 		    ap_rvputs(r,
-			      "<?xml version=\"1.0\"?>\n<!DOCTYPE dsml SYSTEM \"/psldap/dsml.dtd\"",
+			      "<?xml version=\"1.0\"?>\n<!DOCTYPE dsml SYSTEM \"dsml.dtd\"",
 			      (NULL != ps.xmlTemplateUri) ? " [\n<!ENTITY batchresp SYSTEM \"" : "",
 			      (NULL != ps.xmlTemplateUri) ? ps.xmlTemplateUri : "",
 			      (NULL != ps.xmlTemplateUri) ? "\">\n]>\n" : ">",
